@@ -140,8 +140,8 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
 
       {ticketCount === 0 ? (
         <p className="text-sm text-muted">
-          Add a card to any column to get started. Use the arrows on a card to move it between
-          columns.
+          Add a card to any column to get started, then drag cards between columns as work moves
+          along.
         </p>
       ) : null}
     </div>

@@ -252,17 +252,29 @@ export default async function OrganizationSettingsPage({
                                 </ActionForm>
                               </div>
                             ) : (
-                              <p className="max-w-[28ch] text-end text-xs text-muted">
-                                {isSelf
-                                  ? 'You cannot change your own role or remove yourself.'
-                                  : 'Only an owner can act on an owner.'}
-                              </p>
+                              // Short and non-wrapping on purpose. The full
+                              // sentence here wrapped inside a narrow, end-aligned
+                              // column and stretched every row to several lines.
+                              // The reason lives in `title` for anyone who wants it.
+                              <span
+                                className="text-xs whitespace-nowrap text-muted"
+                                title={
+                                  isSelf
+                                    ? 'You cannot change your own role or remove yourself.'
+                                    : 'Only an owner can change or remove another owner.'
+                                }
+                              >
+                                {isSelf ? 'That is you' : 'Owners only'}
+                              </span>
                             )}
 
                             {lastOwner ? (
-                              <p className="max-w-[32ch] text-end text-xs text-muted">
-                                The only owner. An organization must always have at least one.
-                              </p>
+                              <span
+                                className="text-xs whitespace-nowrap text-muted"
+                                title="An organization must always have at least one owner."
+                              >
+                                Last owner
+                              </span>
                             ) : null}
                           </div>
                         </Table.Cell>

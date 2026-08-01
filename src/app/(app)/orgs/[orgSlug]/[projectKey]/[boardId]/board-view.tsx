@@ -1,49 +1,51 @@
 'use client';
 
 /**
- * SPEC 5 "Board UI" -- the interactive shell of the Kanban board, rebuilt on
- * HeroUI v3.
+ * The Kanban board.
  *
- * Move buttons, not drag-and-drop. Each card carries two tiny forms whose SUBMIT
- * BUTTONS hold the destination in `name`/`value` -- plain HTML expressing N
- * destinations with no hidden-input duplication. `prev` / `next` are resolved on
- * the SERVER at render time from the column ordering; the client only echoes an
- * id that `moveTicket` re-vets against `ticket.boardId` anyway.
+ * Cards are dragged between and within columns with @dnd-kit. The drop is
+ * applied to local state immediately and `placeTicket` is called in the
+ * background; when the Server Action's `revalidatePath` lands, fresh props
+ * overwrite the optimistic state. If the action fails, the board resnaps to the
+ * server's ordering and an error is shown, so a rejected move can never look
+ * like it succeeded.
  *
- * Those controls stay NATIVE `<button type="submit" name value>` elements
- * wearing HeroUI's button styles via `buttonVariants()`. That is deliberate: the
- * whole mechanism depends on the pressed button being the form's *submitter*, so
- * that `useFormStatus().data` contains its name/value pair. A component that
- * re-implements press handling could break that contract silently, and the
- * styles are the only thing this redesign needed from HeroUI here.
+ * Accessibility is not sacrificed by dropping the old arrow buttons: dnd-kit's
+ * KeyboardSensor makes every card draggable from the keyboard (Space to lift,
+ * arrows to move, Space to drop, Escape to cancel), and the announcements below
+ * describe each step to a screen reader.
  *
- * `useFormStatus()` is the only pending primitive (SPEC 7.11): no
- * `useTransition`, no `useOptimistic`. Its `data` field identifies which button
- * was pressed, so exactly the pressed control shows activity while all of them
- * disable -- which is also the double-submit guard.
- *
- * All user text is rendered as an escaped React child; React's raw-HTML escape
+ * All user text is rendered as an escaped React child. React's raw-HTML escape
  * hatch is banned project-wide and is not used here.
  */
 
+import { useEffect, useId, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useFormStatus } from 'react-dom';
 import {
-  IconChevronDown,
-  IconChevronLeft,
-  IconChevronRight,
-  IconChevronUp,
-  IconPlus,
-  Input,
-  ScrollShadow,
-  Spinner,
-  buttonVariants,
-} from '@heroui/react';
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCorners,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type Announcements,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
-import { Badge, FormError, SubmitButton } from '@/components/ui';
-import type { ActionResult } from '@/lib/result';
-import { createTicket, moveTicket, reorderTicket } from './actions';
+import { FormError } from '@/components/ui';
+import { createTicket, placeTicket } from './actions';
 
 /* -------------------------------------------------------------------------- */
 /* Props                                                                       */
@@ -71,223 +73,275 @@ type BoardViewProps = {
   columns: BoardColumnData[];
 };
 
-/* -------------------------------------------------------------------------- */
-/* Small shared pieces                                                         */
-/* -------------------------------------------------------------------------- */
-
-function firstError(...states: Array<ActionResult | null>): string | null {
-  for (const state of states) {
-    if (state && !state.ok) return state.error;
-  }
-  return null;
+function cx(...values: Array<string | false | null | undefined>): string {
+  return values.filter(Boolean).join(' ');
 }
 
-/** Compact icon button, sized down from HeroUI's `sm` so a card stays dense. */
-const ICON_BUTTON = buttonVariants({
-  variant: 'ghost',
-  size: 'sm',
-  isIconOnly: true,
-  className: 'size-7 md:size-7',
-});
-
-type IconSubmitProps = {
-  name: string;
-  value: string;
-  icon: ReactNode;
-  label: string;
-  disabled?: boolean;
-};
-
-/**
- * Must be rendered INSIDE the `<form>` it belongs to -- `useFormStatus` reads the
- * nearest ancestor form. `data.get(name)` is what makes "only the pressed button
- * shows activity" possible without any client state.
- */
-function IconSubmit({ name, value, icon, label, disabled = false }: IconSubmitProps) {
-  const { pending, data } = useFormStatus();
-  const isActive = pending && data?.get(name) === value;
-
-  return (
-    <button
-      type="submit"
-      name={name}
-      value={value}
-      className={ICON_BUTTON}
-      disabled={disabled || pending}
-      aria-label={label}
-      title={label}
-      aria-busy={isActive || undefined}
-    >
-      {isActive ? <Spinner size="sm" color="current" aria-hidden="true" /> : icon}
-    </button>
-  );
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  // Array.from, not indexing: a name may begin with an astral character and
+  // name[0] would slice a surrogate pair in half.
+  const first = Array.from(parts[0])[0] ?? '';
+  const last = parts.length > 1 ? (Array.from(parts[parts.length - 1])[0] ?? '') : '';
+  return (first + last).toLocaleUpperCase();
 }
 
 /* -------------------------------------------------------------------------- */
-/* Ticket card                                                                 */
+/* Card                                                                        */
 /* -------------------------------------------------------------------------- */
 
-type TicketCardProps = {
+type CardBodyProps = {
   ticket: BoardTicket;
-  boardHref: string;
   projectKey: string;
-  previousColumn: BoardColumnData | null;
-  nextColumn: BoardColumnData | null;
-  isFirst: boolean;
-  isLast: boolean;
+  boardHref: string;
+  dragging?: boolean;
 };
 
-function TicketCard({
-  ticket,
-  boardHref,
-  projectKey,
-  previousColumn,
-  nextColumn,
-  isFirst,
-  isLast,
-}: TicketCardProps) {
-  const [moveState, moveAction] = useActionState(moveTicket, null);
-  const [reorderState, reorderAction] = useActionState(reorderTicket, null);
-  const error = firstError(moveState, reorderState);
-
+function CardBody({ ticket, projectKey, boardHref, dragging = false }: CardBodyProps) {
   return (
-    <li className="flex flex-col gap-2 rounded-xl border border-border bg-surface-secondary p-3 transition-colors hover:border-border-secondary">
-      {/* The card body is an <a>; the move forms are SIBLINGS, never nested. */}
+    <div
+      className={cx(
+        'flex flex-col gap-2.5 rounded-lg border border-border bg-surface p-3',
+        'shadow-xs transition-colors',
+        dragging ? 'border-accent shadow-lg' : 'hover:border-border-secondary',
+      )}
+    >
       <Link
         href={`${boardHref}/${ticket.number}`}
-        className="rounded-sm text-sm leading-snug font-medium text-foreground no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        // Stop the pointer sensor claiming the click so the title still opens
+        // the ticket; the rest of the card is the drag surface.
+        onPointerDown={(event) => event.stopPropagation()}
+        className="text-sm leading-snug font-medium text-foreground no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       >
         {ticket.title}
       </Link>
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+      <div className="flex items-center gap-2 text-xs text-muted">
         <span className="font-mono tabular-nums">
           {projectKey}-{ticket.number}
         </span>
-        <span aria-hidden="true" className="opacity-50">
-          &middot;
-        </span>
-        <span className="min-w-0 truncate">{ticket.assigneeName ?? 'Unassigned'}</span>
+
         {ticket.commentCount > 0 ? (
-          <>
-            <span aria-hidden="true" className="opacity-50">
-              &middot;
-            </span>
-            <span className="tabular-nums">
-              {ticket.commentCount} {ticket.commentCount === 1 ? 'comment' : 'comments'}
-            </span>
-          </>
+          <span className="flex items-center gap-1 tabular-nums">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3.5">
+              <path
+                d="M14 9.5a2 2 0 0 1-2 2H5.5L2 14V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {ticket.commentCount}
+          </span>
         ) : null}
+
+        <span className="ms-auto">
+          {ticket.assigneeName ? (
+            <span
+              title={ticket.assigneeName}
+              aria-label={`Assigned to ${ticket.assigneeName}`}
+              className="grid size-6 place-items-center rounded-full bg-surface-secondary text-[0.625rem] font-medium text-muted"
+            >
+              {initials(ticket.assigneeName)}
+            </span>
+          ) : (
+            <span
+              aria-label="Unassigned"
+              className="grid size-6 place-items-center rounded-full border border-dashed border-border text-[0.625rem] text-muted"
+            >
+              &ndash;
+            </span>
+          )}
+        </span>
       </div>
+    </div>
+  );
+}
 
-      <div className="flex items-center justify-between gap-1">
-        <form action={moveAction} className="flex items-center gap-0.5">
-          <input type="hidden" name="ticketId" value={ticket.id} />
-          <IconSubmit
-            name="toColumnId"
-            value={previousColumn?.id ?? ''}
-            icon={<IconChevronLeft />}
-            label={
-              previousColumn
-                ? `Move "${ticket.title}" to ${previousColumn.name}`
-                : `"${ticket.title}" is already in the first column`
-            }
-            disabled={previousColumn === null}
-          />
-          <IconSubmit
-            name="toColumnId"
-            value={nextColumn?.id ?? ''}
-            icon={<IconChevronRight />}
-            label={
-              nextColumn
-                ? `Move "${ticket.title}" to ${nextColumn.name}`
-                : `"${ticket.title}" is already in the last column`
-            }
-            disabled={nextColumn === null}
-          />
-        </form>
+function SortableCard({ ticket, projectKey, boardHref }: CardBodyProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: ticket.id,
+    data: { type: 'ticket' },
+  });
 
-        <form action={reorderAction} className="flex items-center gap-0.5">
-          <input type="hidden" name="ticketId" value={ticket.id} />
-          <IconSubmit
-            name="direction"
-            value="up"
-            icon={<IconChevronUp />}
-            label={`Move "${ticket.title}" up`}
-            disabled={isFirst}
-          />
-          <IconSubmit
-            name="direction"
-            value="down"
-            icon={<IconChevronDown />}
-            label={`Move "${ticket.title}" down`}
-            disabled={isLast}
-          />
-        </form>
-      </div>
-
-      <FormError>{error}</FormError>
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cx('touch-none', isDragging && 'opacity-40')}
+      {...attributes}
+      {...listeners}
+    >
+      <CardBody ticket={ticket} projectKey={projectKey} boardHref={boardHref} />
     </li>
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/* Add-a-card form                                                             */
+/* Column                                                                      */
 /* -------------------------------------------------------------------------- */
 
-type AddTicketFormProps = {
-  boardId: string;
+type ColumnProps = {
   column: BoardColumnData;
-  autoFocus: boolean;
+  boardId: string;
+  boardHref: string;
+  projectKey: string;
+  isOver: boolean;
 };
 
-function AddTicketForm({ boardId, column, autoFocus }: AddTicketFormProps) {
-  const [state, action] = useActionState(createTicket, null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const inputId = `add-ticket-${column.id}`;
-
-  // Controlled so the typed title survives a failed submit. React 19 resets a
-  // `<form action={fn}>` once the action settles whether it succeeded or not,
-  // so `form.reset()` guarded by `state.ok` cannot deliver the SPEC 8.9
-  // promise on its own -- only holding the value in state can.
-  const [title, setTitle] = useState('');
-
-  useEffect(() => {
-    if (state?.ok) {
-      setTitle('');
-      inputRef.current?.focus();
-    }
-  }, [state]);
+function Column({ column, boardId, boardHref, projectKey, isOver }: ColumnProps) {
+  // Column-level droppable so an EMPTY column is still a valid drop target --
+  // SortableContext alone gives nothing to aim at when there are no items.
+  const { setNodeRef } = useDroppable({ id: column.id, data: { type: 'column' } });
+  const ticketIds = useMemo(() => column.tickets.map((t) => t.id), [column.tickets]);
 
   return (
-    <form action={action} className="flex flex-col gap-2">
-      <input type="hidden" name="boardId" value={boardId} />
-      <input type="hidden" name="columnId" value={column.id} />
+    <section
+      className={cx(
+        'flex w-72 shrink-0 flex-col rounded-xl border bg-surface-secondary/40 transition-colors',
+        isOver ? 'border-accent bg-surface-secondary/70' : 'border-border',
+      )}
+      aria-label={column.name}
+    >
+      <header className="flex items-center gap-2 px-3 py-2.5">
+        <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">{column.name}</h2>
+        <span className="rounded-full bg-surface-secondary px-1.5 text-xs text-muted tabular-nums">
+          {column.tickets.length}
+        </span>
+      </header>
 
-      <label className="visually-hidden" htmlFor={inputId}>
+      <div ref={setNodeRef} className="flex min-h-24 flex-1 flex-col px-2 pb-2">
+        <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
+          <ul className="flex flex-1 flex-col gap-2">
+            {column.tickets.map((ticket) => (
+              <SortableCard
+                key={ticket.id}
+                ticket={ticket}
+                projectKey={projectKey}
+                boardHref={boardHref}
+              />
+            ))}
+          </ul>
+        </SortableContext>
+
+        {column.tickets.length === 0 ? (
+          <p className="grid flex-1 place-items-center px-2 py-6 text-center text-xs text-muted">
+            Drop a card here
+          </p>
+        ) : null}
+
+        <AddCard boardId={boardId} column={column} />
+      </div>
+    </section>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Add card                                                                    */
+/* -------------------------------------------------------------------------- */
+
+function AddCard({ boardId, column }: { boardId: string; column: BoardColumnData }) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  // Controlled: React 19 resets a form bound to an action once it settles,
+  // regardless of the result, which would discard a rejected title.
+  const [title, setTitle] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fieldId = useId();
+
+  function submit() {
+    const value = title.trim();
+    if (!value) return;
+    const data = new FormData();
+    data.set('boardId', boardId);
+    data.set('columnId', column.id);
+    data.set('title', value);
+
+    startTransition(async () => {
+      const result = await createTicket(null, data);
+      if (result.ok) {
+        setTitle('');
+        setError(null);
+        inputRef.current?.focus();
+      } else {
+        setError(result.error);
+      }
+    });
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-2 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-start text-sm text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+      >
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-4">
+          <path
+            d="M8 3.5v9M3.5 8h9"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
+        Add a card
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <label className="sr-only" htmlFor={fieldId}>
         Add a card to {column.name}
       </label>
-      <Input
-        id={inputId}
+      <textarea
+        id={fieldId}
         ref={inputRef}
-        name="title"
-        placeholder="Add a card..."
+        autoFocus
+        rows={2}
         maxLength={200}
-        required
-        autoComplete="off"
-        autoFocus={autoFocus}
         value={title}
         onChange={(event) => setTitle(event.target.value)}
-        fullWidth
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            submit();
+          }
+          if (event.key === 'Escape') {
+            setOpen(false);
+            setTitle('');
+            setError(null);
+          }
+        }}
+        placeholder="What needs doing?"
+        className="w-full resize-none rounded-lg border border-border bg-surface p-2.5 text-sm text-foreground placeholder:text-muted focus-visible:border-accent focus-visible:outline-none"
       />
-
-      <SubmitButton variant="ghost" size="sm" fullWidth pendingLabel="Adding...">
-        <IconPlus />
-        Add card
-      </SubmitButton>
-
-      {state && !state.ok ? <FormError>{state.error}</FormError> : null}
-    </form>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={pending || title.trim().length === 0}
+          className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-foreground disabled:opacity-50"
+        >
+          {pending ? 'Adding…' : 'Add'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setTitle('');
+            setError(null);
+          }}
+          className="rounded-lg px-2 py-1.5 text-sm text-muted hover:text-foreground"
+        >
+          Cancel
+        </button>
+      </div>
+      <FormError>{error}</FormError>
+    </div>
   );
 }
 
@@ -296,68 +350,172 @@ function AddTicketForm({ boardId, column, autoFocus }: AddTicketFormProps) {
 /* -------------------------------------------------------------------------- */
 
 export function BoardView({ boardId, boardHref, projectKey, columns }: BoardViewProps) {
-  const boardHasTickets = columns.some((column) => column.tickets.length > 0);
+  const [local, setLocal] = useState(columns);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [overColumnId, setOverColumnId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+
+  // The server is the source of truth. When revalidation delivers new props,
+  // drop the optimistic copy -- including after a failed move, which is what
+  // makes a rejected drag snap back instead of lying.
+  useEffect(() => {
+    setLocal(columns);
+  }, [columns]);
+
+  const sensors = useSensors(
+    // A small distance so a click on the card title is not swallowed as a drag.
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const activeTicket = useMemo(() => {
+    if (!activeId) return null;
+    for (const column of local) {
+      const found = column.tickets.find((t) => t.id === activeId);
+      if (found) return found;
+    }
+    return null;
+  }, [activeId, local]);
+
+  function columnIdOf(id: string): string | null {
+    if (local.some((column) => column.id === id)) return id;
+    return local.find((column) => column.tickets.some((t) => t.id === id))?.id ?? null;
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveId(String(event.active.id));
+    setError(null);
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const { active, over } = event;
+    if (!over) {
+      setOverColumnId(null);
+      return;
+    }
+    const from = columnIdOf(String(active.id));
+    const to = columnIdOf(String(over.id));
+    setOverColumnId(to);
+    if (!from || !to || from === to) return;
+
+    // Move across columns during the drag so the card follows the cursor into
+    // its new column rather than snapping only on drop.
+    setLocal((current) => {
+      const source = current.find((c) => c.id === from);
+      const target = current.find((c) => c.id === to);
+      if (!source || !target) return current;
+      const moved = source.tickets.find((t) => t.id === active.id);
+      if (!moved) return current;
+
+      const overIndex = target.tickets.findIndex((t) => t.id === over.id);
+      const insertAt = overIndex === -1 ? target.tickets.length : overIndex;
+
+      return current.map((column) => {
+        if (column.id === from) {
+          return { ...column, tickets: column.tickets.filter((t) => t.id !== active.id) };
+        }
+        if (column.id === to) {
+          const next = column.tickets.slice();
+          next.splice(insertAt, 0, moved);
+          return { ...column, tickets: next };
+        }
+        return column;
+      });
+    });
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    setActiveId(null);
+    setOverColumnId(null);
+    if (!over) return;
+
+    const targetColumnId = columnIdOf(String(over.id));
+    if (!targetColumnId) return;
+
+    let toIndex = 0;
+    setLocal((current) => {
+      const target = current.find((c) => c.id === targetColumnId);
+      if (!target) return current;
+
+      const oldIndex = target.tickets.findIndex((t) => t.id === active.id);
+      const overIndex = target.tickets.findIndex((t) => t.id === over.id);
+      const newIndex = overIndex === -1 ? target.tickets.length - 1 : overIndex;
+
+      if (oldIndex === -1) return current;
+      toIndex = Math.max(0, newIndex);
+      if (oldIndex === newIndex) return current;
+
+      return current.map((column) =>
+        column.id === targetColumnId
+          ? { ...column, tickets: arrayMove(column.tickets, oldIndex, newIndex) }
+          : column,
+      );
+    });
+
+    startTransition(async () => {
+      const result = await placeTicket({
+        ticketId: String(active.id),
+        toColumnId: targetColumnId,
+        toIndex,
+      });
+      // On failure the effect above restores the server ordering on the next
+      // revalidation; surface why so the snap-back is not mysterious.
+      if (!result.ok) setError(result.error);
+    });
+  }
+
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => `Picked up card ${String(active.id)}.`,
+    onDragOver: ({ over }) => (over ? `Over ${String(over.id)}.` : 'No drop target.'),
+    onDragEnd: ({ over }) => (over ? `Dropped on ${String(over.id)}.` : 'Drop cancelled.'),
+    onDragCancel: () => 'Move cancelled, card returned to its original position.',
+  };
 
   return (
-    /*
-     * `orientation="horizontal"` is what gives ScrollShadow its `overflow-x`
-     * plus the edge fade that tells you there is more board off-screen. The
-     * negative margin lets focus rings on the outermost cards breathe without
-     * being clipped by that same overflow.
-     */
-    <ScrollShadow orientation="horizontal" className="-mx-1 px-1 py-1">
-      <div className="flex items-start gap-4">
-        {columns.map((column, columnIndex) => {
-          const previousColumn = columnIndex > 0 ? columns[columnIndex - 1] : null;
-          const nextColumn = columnIndex < columns.length - 1 ? columns[columnIndex + 1] : null;
-          const headingId = `column-${column.id}`;
+    <div className="flex flex-col gap-3">
+      <FormError>{error}</FormError>
 
-          return (
-            <section
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCorners}
+        accessibility={{ announcements }}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => {
+          setActiveId(null);
+          setOverColumnId(null);
+          setLocal(columns);
+        }}
+      >
+        <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
+          {local.map((column) => (
+            <Column
               key={column.id}
-              aria-labelledby={headingId}
-              className="flex w-72 shrink-0 flex-col gap-3 rounded-2xl border border-border bg-surface p-3 sm:w-80"
-            >
-              <div className="flex items-center gap-2 px-1">
-                <h2 id={headingId} className="text-sm font-medium text-foreground">
-                  {column.name}
-                </h2>
-                <Badge className="tabular-nums">{column.tickets.length}</Badge>
-                <span className="visually-hidden">
-                  {column.tickets.length === 1 ? 'ticket' : 'tickets'}
-                </span>
-              </div>
+              column={column}
+              boardId={boardId}
+              boardHref={boardHref}
+              projectKey={projectKey}
+              isOver={overColumnId === column.id}
+            />
+          ))}
+        </div>
 
-              {column.tickets.length > 0 ? (
-                <ol className="flex flex-col gap-2">
-                  {column.tickets.map((ticket, ticketIndex) => (
-                    <TicketCard
-                      key={ticket.id}
-                      ticket={ticket}
-                      boardHref={boardHref}
-                      projectKey={projectKey}
-                      previousColumn={previousColumn}
-                      nextColumn={nextColumn}
-                      isFirst={ticketIndex === 0}
-                      isLast={ticketIndex === column.tickets.length - 1}
-                    />
-                  ))}
-                </ol>
-              ) : (
-                <p className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-xs text-muted">
-                  {boardHasTickets ? 'Nothing in this column' : 'No cards yet'}
-                </p>
-              )}
-
-              <AddTicketForm
-                boardId={boardId}
-                column={column}
-                autoFocus={columnIndex === 0 && !boardHasTickets}
+        <DragOverlay dropAnimation={null}>
+          {activeTicket ? (
+            <div className="w-72 rotate-2 cursor-grabbing">
+              <CardBody
+                ticket={activeTicket}
+                projectKey={projectKey}
+                boardHref={boardHref}
+                dragging
               />
-            </section>
-          );
-        })}
-      </div>
-    </ScrollShadow>
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    </div>
   );
 }

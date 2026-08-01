@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { Role } from '@prisma/client';
-import { Breadcrumbs } from '@heroui/react/breadcrumbs';
 import { Card } from '@heroui/react/card';
 import { Description } from '@heroui/react/description';
 import { Disclosure } from '@heroui/react/disclosure';
@@ -8,11 +7,8 @@ import { prisma } from '@/lib/db';
 import {
   atLeast,
   loadPage,
-  orgPath,
-  orgSettingsPath,
   projectPath,
   requireOrgBySlug,
-  type OrgRef,
 } from '@/lib/authz';
 import {
   Badge,
@@ -34,32 +30,6 @@ function preview(text: string): string {
   return single.length > DESCRIPTION_PREVIEW
     ? `${single.slice(0, DESCRIPTION_PREVIEW)}...`
     : single;
-}
-
-const NAV_ITEM =
-  'rounded-lg px-3 py-1.5 text-sm font-medium outline-none transition-colors focus-visible:focus-ring';
-const NAV_ON = 'bg-surface text-foreground shadow-surface';
-const NAV_OFF = 'text-muted hover:text-foreground';
-
-/**
- * Route-driven section switcher. Deliberately `next/link` rather than HeroUI's
- * `Tabs`: these are two pages, not two panels, and the active one is decided by
- * the URL, not by client state.
- */
-function SectionNav({ org }: { org: OrgRef }) {
-  return (
-    <nav
-      aria-label="Organization sections"
-      className="flex w-fit items-center gap-1 rounded-xl bg-surface-secondary p-1"
-    >
-      <Link href={orgPath(org)} aria-current="page" className={`${NAV_ITEM} ${NAV_ON}`}>
-        Projects
-      </Link>
-      <Link href={orgSettingsPath(org)} className={`${NAV_ITEM} ${NAV_OFF}`}>
-        Members &amp; settings
-      </Link>
-    </nav>
-  );
 }
 
 export default async function OrganizationPage({
@@ -93,19 +63,13 @@ export default async function OrganizationPage({
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-5">
-        <Breadcrumbs>
-          <Breadcrumbs.Item href="/">Organizations</Breadcrumbs.Item>
-          <Breadcrumbs.Item>{ctx.org.name}</Breadcrumbs.Item>
-        </Breadcrumbs>
-
-        <PageHeader title={ctx.org.name}>
-          <Badge tone="accent">{ctx.role}</Badge>
-          <span className="font-mono text-xs text-muted">/orgs/{ctx.org.slug}</span>
-        </PageHeader>
-
-        <SectionNav org={ctx.org} />
-      </div>
+      {/* No section tabs here: the sidebar already carries "Members & settings"
+          for this organization, and duplicating navigation in two places just
+          makes it ambiguous which one is authoritative. */}
+      <PageHeader title={ctx.org.name}>
+        <Badge tone="accent">{ctx.role}</Badge>
+        <span className="font-mono text-xs text-muted">/orgs/{ctx.org.slug}</span>
+      </PageHeader>
 
       <section className="flex flex-col gap-4" aria-labelledby="projects-heading">
         <div className="flex items-baseline justify-between gap-3">

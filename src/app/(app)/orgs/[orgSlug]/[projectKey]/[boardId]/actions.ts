@@ -191,6 +191,104 @@ export async function moveTicket(
 }
 
 /* -------------------------------------------------------------------------- */
+/* placeTicket -- the drag-and-drop primitive                                  */
+/* -------------------------------------------------------------------------- */
+
+const placeTicketSchema = z.object({
+  ticketId: cuid,
+  toColumnId: cuid,
+  /** Destination index within the target column, clamped server-side. */
+  toIndex: z.coerce.number().int().min(0).max(10_000),
+});
+
+/**
+ * Move a ticket to an arbitrary (column, index). This is what a drop expresses,
+ * and neither `moveTicket` (appends to the end) nor `reorderTicket` (swaps with
+ * a neighbour) can say it.
+ *
+ * Takes plain arguments rather than FormData because it is invoked from a drag
+ * handler, not a form submit. That changes nothing about trust: the arguments
+ * are still zod-validated, the session is still re-derived here, and the target
+ * column is still re-vetted against the ticket's OWN board, so a forged
+ * `toColumnId` cannot move a ticket into another board or another tenant.
+ */
+export async function placeTicket(input: {
+  ticketId: string;
+  toColumnId: string;
+  toIndex: number;
+}): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = placeTicketSchema.safeParse(input);
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    // Walks ticket -> board -> project -> organization -> membership.
+    const ctx = await requireTicket(parsed.data.ticketId);
+    // `ctx.ticket.boardId` is from the authorized row, never the client.
+    const target = await requireColumnInBoard(ctx.ticket.boardId, parsed.data.toColumnId);
+    const fromColumnId = ctx.ticket.columnId;
+
+    await prisma.$transaction(async (tx) => {
+      const destination = await tx.ticket.findMany({
+        where: {
+          boardId: ctx.ticket.boardId,
+          columnId: target.id,
+          id: { not: ctx.ticket.id },
+        },
+        orderBy: TICKET_ORDER,
+        select: { id: true, position: true },
+      });
+
+      const index = Math.min(parsed.data.toIndex, destination.length);
+      const ordered = [
+        ...destination.slice(0, index),
+        { id: ctx.ticket.id, position: -1 },
+        ...destination.slice(index),
+      ];
+
+      const pending = new Map<string, { position: number; columnId?: string }>();
+      ordered.forEach((row, i) => {
+        if (row.id === ctx.ticket.id) {
+          pending.set(row.id, { position: i, columnId: target.id });
+        } else if (row.position !== i) {
+          pending.set(row.id, { position: i });
+        }
+      });
+
+      // Leaving a column leaves a hole; close it so positions stay dense.
+      if (fromColumnId !== target.id) {
+        const source = await tx.ticket.findMany({
+          where: {
+            boardId: ctx.ticket.boardId,
+            columnId: fromColumnId,
+            id: { not: ctx.ticket.id },
+          },
+          orderBy: TICKET_ORDER,
+          select: { id: true, position: true },
+        });
+        source.forEach((row, i) => {
+          if (row.position !== i) pending.set(row.id, { position: i });
+        });
+      }
+
+      // One globally id-sorted write pass across BOTH columns. Sorting each
+      // column separately would still let two opposite-direction drags take
+      // locks in opposite orders and deadlock; a single ascending-id order is
+      // the same for every concurrent transaction, so a cycle is impossible.
+      const updates = [...pending.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+      for (const [id, data] of updates) {
+        await tx.ticket.update({ where: { id }, data });
+      }
+    });
+
+    revalidatePath(boardPath(ctx.org, ctx.project, ctx.board));
+    revalidatePath(ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number));
+    return ok();
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* reorderTicket                                                               */
 /* -------------------------------------------------------------------------- */
 
