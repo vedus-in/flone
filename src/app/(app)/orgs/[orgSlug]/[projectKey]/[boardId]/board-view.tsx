@@ -1,49 +1,39 @@
 'use client';
 
 /**
- * The Kanban board.
+ * The Kanban board, built on the ReUI `Kanban` primitives.
  *
- * Cards are dragged between and within columns with @dnd-kit. The drop is
- * applied to local state immediately and `placeTicket` is called in the
- * background; when the Server Action's `revalidatePath` lands, fresh props
- * overwrite the optimistic state. If the action fails, the board resnaps to the
- * server's ordering and an error is shown, so a rejected move can never look
- * like it succeeded.
+ * The board's shape on the wire is an ORDERED array of columns, but `Kanban`
+ * models the board as `Record<columnId, items>`. Both are kept: `records` is the
+ * draggable state, `columns` supplies column order and names, so object key
+ * ordering is never load-bearing.
  *
- * Accessibility is not sacrificed by dropping the old arrow buttons: dnd-kit's
- * KeyboardSensor makes every card draggable from the keyboard (Space to lift,
- * arrows to move, Space to drop, Escape to cancel), and the announcements below
- * describe each step to a screen reader.
+ * `onValueChange` fires continuously during a drag to paint the live preview,
+ * so it must not persist anything. `onValueCommit` fires once per completed
+ * drag with the final board plus a `previousValue` snapshot, which is where the
+ * Server Action is called. A rejected move restores that snapshot and shows the
+ * reason, so a failed drag can never look like it succeeded.
  *
- * All user text is rendered as an escaped React child. React's raw-HTML escape
+ * Keyboard dragging comes from dnd-kit underneath: Space lifts a card, arrows
+ * move it, Space drops, Escape cancels -- so there is no need for the arrow
+ * buttons this board used to carry.
+ *
+ * All user text is rendered as an escaped React child; React's raw-HTML escape
  * hatch is banned project-wide and is not used here.
  */
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
-import {
-  DndContext,
-  DragOverlay,
-  KeyboardSensor,
-  PointerSensor,
-  closestCorners,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type Announcements,
-  type DragEndEvent,
-  type DragOverEvent,
-  type DragStartEvent,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 
+import {
+  Kanban,
+  KanbanBoard,
+  KanbanColumn,
+  KanbanColumnContent,
+  KanbanItem,
+  KanbanItemHandle,
+  KanbanOverlay,
+} from '@/components/reui/kanban';
 import { FormError } from '@/components/ui';
 import { createTicket, placeTicket } from './actions';
 
@@ -87,35 +77,40 @@ function initials(name: string): string {
   return (first + last).toLocaleUpperCase();
 }
 
+function toRecords(columns: BoardColumnData[]): Record<string, BoardTicket[]> {
+  return Object.fromEntries(columns.map((column) => [column.id, column.tickets]));
+}
+
 /* -------------------------------------------------------------------------- */
 /* Card                                                                        */
 /* -------------------------------------------------------------------------- */
 
-type CardBodyProps = {
+function TicketCard({
+  ticket,
+  projectKey,
+  boardHref,
+  overlay = false,
+}: {
   ticket: BoardTicket;
   projectKey: string;
   boardHref: string;
-  dragging?: boolean;
-};
-
-function CardBody({ ticket, projectKey, boardHref, dragging = false }: CardBodyProps) {
+  overlay?: boolean;
+}) {
   return (
     <div
       className={cx(
-        'no-native-drag flex flex-col gap-2.5 rounded-lg border border-border bg-surface p-3',
-        'shadow-xs transition-colors',
-        dragging ? 'border-accent shadow-lg' : 'hover:border-border-secondary',
+        'no-native-drag flex flex-col gap-2.5 rounded-lg border bg-surface p-3 transition-colors',
+        overlay
+          ? 'rotate-2 border-accent shadow-lg'
+          : 'border-border shadow-xs hover:border-border-secondary',
       )}
     >
       <Link
         href={`${boardHref}/${ticket.number}`}
-        // Stop the pointer sensor claiming the click so the title still opens
-        // the ticket; the rest of the card is the drag surface.
+        // Keep the title clickable: without this the drag sensor claims the
+        // press. `draggable={false}` + cancelling dragstart stops the BROWSER
+        // starting its own link-drag (its ghost image of the text) instead.
         onPointerDown={(event) => event.stopPropagation()}
-        // An anchor is natively draggable. Left alone, pressing the title and
-        // moving hands the gesture to the BROWSER -- you get its ghost image of
-        // the link text instead of the card. `draggable` covers Chromium and
-        // Firefox; `-webkit-user-drag` (via `.no-native-drag`) covers WebKit.
         draggable={false}
         onDragStart={(event) => event.preventDefault()}
         className="text-sm leading-snug font-medium text-foreground no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
@@ -166,86 +161,6 @@ function CardBody({ ticket, projectKey, boardHref, dragging = false }: CardBodyP
   );
 }
 
-function SortableCard({ ticket, projectKey, boardHref }: CardBodyProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: ticket.id,
-    data: { type: 'ticket' },
-  });
-
-  return (
-    <li
-      ref={setNodeRef}
-      style={{ transform: CSS.Translate.toString(transform), transition }}
-      // `touch-none` stops the browser scrolling instead of dragging on touch;
-      // `no-native-drag` stops it starting its own drag of the card's text.
-      className={cx('no-native-drag touch-none', isDragging && 'opacity-40')}
-      {...attributes}
-      {...listeners}
-    >
-      <CardBody ticket={ticket} projectKey={projectKey} boardHref={boardHref} />
-    </li>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Column                                                                      */
-/* -------------------------------------------------------------------------- */
-
-type ColumnProps = {
-  column: BoardColumnData;
-  boardId: string;
-  boardHref: string;
-  projectKey: string;
-  isOver: boolean;
-};
-
-function Column({ column, boardId, boardHref, projectKey, isOver }: ColumnProps) {
-  // Column-level droppable so an EMPTY column is still a valid drop target --
-  // SortableContext alone gives nothing to aim at when there are no items.
-  const { setNodeRef } = useDroppable({ id: column.id, data: { type: 'column' } });
-  const ticketIds = useMemo(() => column.tickets.map((t) => t.id), [column.tickets]);
-
-  return (
-    <section
-      className={cx(
-        'flex w-72 shrink-0 flex-col rounded-xl border bg-surface-secondary/40 transition-colors',
-        isOver ? 'border-accent bg-surface-secondary/70' : 'border-border',
-      )}
-      aria-label={column.name}
-    >
-      <header className="flex items-center gap-2 px-3 py-2.5">
-        <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">{column.name}</h2>
-        <span className="rounded-full bg-surface-secondary px-1.5 text-xs text-muted tabular-nums">
-          {column.tickets.length}
-        </span>
-      </header>
-
-      <div ref={setNodeRef} className="flex min-h-24 flex-1 flex-col px-2 pb-2">
-        <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
-          <ul className="flex flex-1 flex-col gap-2">
-            {column.tickets.map((ticket) => (
-              <SortableCard
-                key={ticket.id}
-                ticket={ticket}
-                projectKey={projectKey}
-                boardHref={boardHref}
-              />
-            ))}
-          </ul>
-        </SortableContext>
-
-        {column.tickets.length === 0 ? (
-          <p className="grid flex-1 place-items-center px-2 py-6 text-center text-xs text-muted">
-            Drop a card here
-          </p>
-        ) : null}
-
-        <AddCard boardId={boardId} column={column} />
-      </div>
-    </section>
-  );
-}
-
 /* -------------------------------------------------------------------------- */
 /* Add card                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -285,15 +200,10 @@ function AddCard({ boardId, column }: { boardId: string; column: BoardColumnData
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="mt-2 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-start text-sm text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        className="mt-1 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-start text-sm text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       >
         <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-4">
-          <path
-            d="M8 3.5v9M3.5 8h9"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
+          <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
         Add a card
       </button>
@@ -301,8 +211,8 @@ function AddCard({ boardId, column }: { boardId: string; column: BoardColumnData
   }
 
   return (
-    <div className="mt-2 flex flex-col gap-2">
-      <label className="sr-only" htmlFor={fieldId}>
+    <div className="mt-1 flex flex-col gap-2">
+      <label className="visually-hidden" htmlFor={fieldId}>
         Add a card to {column.name}
       </label>
       <textarea
@@ -358,180 +268,134 @@ function AddCard({ boardId, column }: { boardId: string; column: BoardColumnData
 /* -------------------------------------------------------------------------- */
 
 export function BoardView({ boardId, boardHref, projectKey, columns }: BoardViewProps) {
-  const [local, setLocal] = useState(columns);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [overColumnId, setOverColumnId] = useState<string | null>(null);
+  const [records, setRecords] = useState<Record<string, BoardTicket[]>>(() => toRecords(columns));
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
-  // The server is the source of truth. When revalidation delivers new props,
-  // drop the optimistic copy -- including after a failed move, which is what
-  // makes a rejected drag snap back instead of lying.
+  // The server is the source of truth. When revalidation delivers new props the
+  // optimistic copy is dropped -- which is also what makes a rejected move snap
+  // back rather than linger.
   useEffect(() => {
-    setLocal(columns);
+    setRecords(toRecords(columns));
   }, [columns]);
 
-  const sensors = useSensors(
-    // A small distance so a click on the card title is not swallowed as a drag.
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  const byId = useMemo(() => {
+    const map = new Map<string, BoardTicket>();
+    for (const list of Object.values(records)) {
+      for (const ticket of list) map.set(ticket.id, ticket);
+    }
+    return map;
+  }, [records]);
+
+  const total = useMemo(
+    () => Object.values(records).reduce((sum, list) => sum + list.length, 0),
+    [records],
   );
-
-  const activeTicket = useMemo(() => {
-    if (!activeId) return null;
-    for (const column of local) {
-      const found = column.tickets.find((t) => t.id === activeId);
-      if (found) return found;
-    }
-    return null;
-  }, [activeId, local]);
-
-  function columnIdOf(id: string): string | null {
-    if (local.some((column) => column.id === id)) return id;
-    return local.find((column) => column.tickets.some((t) => t.id === id))?.id ?? null;
-  }
-
-  function handleDragStart(event: DragStartEvent) {
-    setActiveId(String(event.active.id));
-    setError(null);
-  }
-
-  function handleDragOver(event: DragOverEvent) {
-    const { active, over } = event;
-    if (!over) {
-      setOverColumnId(null);
-      return;
-    }
-    const from = columnIdOf(String(active.id));
-    const to = columnIdOf(String(over.id));
-    setOverColumnId(to);
-    if (!from || !to || from === to) return;
-
-    // Move across columns during the drag so the card follows the cursor into
-    // its new column rather than snapping only on drop.
-    setLocal((current) => {
-      const source = current.find((c) => c.id === from);
-      const target = current.find((c) => c.id === to);
-      if (!source || !target) return current;
-      const moved = source.tickets.find((t) => t.id === active.id);
-      if (!moved) return current;
-
-      const overIndex = target.tickets.findIndex((t) => t.id === over.id);
-      const insertAt = overIndex === -1 ? target.tickets.length : overIndex;
-
-      return current.map((column) => {
-        if (column.id === from) {
-          return { ...column, tickets: column.tickets.filter((t) => t.id !== active.id) };
-        }
-        if (column.id === to) {
-          const next = column.tickets.slice();
-          next.splice(insertAt, 0, moved);
-          return { ...column, tickets: next };
-        }
-        return column;
-      });
-    });
-  }
-
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    setActiveId(null);
-    setOverColumnId(null);
-    if (!over) return;
-
-    const targetColumnId = columnIdOf(String(over.id));
-    if (!targetColumnId) return;
-
-    let toIndex = 0;
-    setLocal((current) => {
-      const target = current.find((c) => c.id === targetColumnId);
-      if (!target) return current;
-
-      const oldIndex = target.tickets.findIndex((t) => t.id === active.id);
-      const overIndex = target.tickets.findIndex((t) => t.id === over.id);
-      const newIndex = overIndex === -1 ? target.tickets.length - 1 : overIndex;
-
-      if (oldIndex === -1) return current;
-      toIndex = Math.max(0, newIndex);
-      if (oldIndex === newIndex) return current;
-
-      return current.map((column) =>
-        column.id === targetColumnId
-          ? { ...column, tickets: arrayMove(column.tickets, oldIndex, newIndex) }
-          : column,
-      );
-    });
-
-    startTransition(async () => {
-      const result = await placeTicket({
-        ticketId: String(active.id),
-        toColumnId: targetColumnId,
-        toIndex,
-      });
-      // On failure the effect above restores the server ordering on the next
-      // revalidation; surface why so the snap-back is not mysterious.
-      if (!result.ok) setError(result.error);
-    });
-  }
-
-  const announcements: Announcements = {
-    onDragStart: ({ active }) => `Picked up card ${String(active.id)}.`,
-    onDragOver: ({ over }) => (over ? `Over ${String(over.id)}.` : 'No drop target.'),
-    onDragEnd: ({ over }) => (over ? `Dropped on ${String(over.id)}.` : 'Drop cancelled.'),
-    onDragCancel: () => 'Move cancelled, card returned to its original position.',
-  };
 
   return (
     <div className="flex flex-col gap-3">
       <FormError>{error}</FormError>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCorners}
-        accessibility={{ announcements }}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
-        onDragCancel={() => {
-          setActiveId(null);
-          setOverColumnId(null);
-          setLocal(columns);
+      <Kanban
+        value={records}
+        onValueChange={setRecords}
+        getItemValue={(ticket) => ticket.id}
+        restoreOnCancel
+        onValueCommit={(next, meta) => {
+          // Columns are fixed for this board; only card moves are persisted.
+          if (meta.kind !== 'item') return;
+
+          const ticketId = String(meta.event.active.id);
+          startTransition(async () => {
+            const result = await placeTicket({
+              ticketId,
+              toColumnId: meta.overContainer,
+              toIndex: meta.overIndex,
+            });
+            if (!result.ok) {
+              // Roll back to exactly the arrangement before this drag rather
+              // than waiting for a revalidation that may never come.
+              setRecords(meta.previousValue);
+              setError(result.error);
+            } else {
+              setError(null);
+            }
+          });
         }}
       >
-        {/* While a drag is live, suppress selection across the WHOLE board: the
-            pointer regularly leaves the card it started on, and without this a
-            fast drag paints a selection across the columns it passes over. */}
-        <div
-          className={cx(
-            '-mx-4 flex gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6',
-            activeId && 'select-none',
-          )}
-        >
-          {local.map((column) => (
-            <Column
-              key={column.id}
-              column={column}
-              boardId={boardId}
-              boardHref={boardHref}
-              projectKey={projectKey}
-              isOver={overColumnId === column.id}
-            />
-          ))}
-        </div>
+        <KanbanBoard className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
+          {columns.map((column) => {
+            const tickets = records[column.id] ?? [];
+            return (
+              <KanbanColumn
+                key={column.id}
+                value={column.id}
+                className="flex w-72 shrink-0 flex-col rounded-xl border border-border bg-surface-secondary/40"
+              >
+                <header className="flex items-center gap-2 px-3 py-2.5">
+                  <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">
+                    {column.name}
+                  </h2>
+                  <span className="rounded-full bg-surface-secondary px-1.5 text-xs text-muted tabular-nums">
+                    {tickets.length}
+                  </span>
+                </header>
 
-        <DragOverlay dropAnimation={null}>
-          {activeTicket ? (
-            <div className="w-72 rotate-2 cursor-grabbing">
-              <CardBody
-                ticket={activeTicket}
-                projectKey={projectKey}
-                boardHref={boardHref}
-                dragging
-              />
-            </div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
+                <KanbanColumnContent
+                  value={column.id}
+                  className="flex min-h-24 flex-1 flex-col gap-2 px-2 pb-2"
+                >
+                  {tickets.map((ticket) => (
+                    <KanbanItem key={ticket.id} value={ticket.id}>
+                      <KanbanItemHandle className="no-native-drag cursor-grab active:cursor-grabbing">
+                        <TicketCard
+                          ticket={ticket}
+                          projectKey={projectKey}
+                          boardHref={boardHref}
+                        />
+                      </KanbanItemHandle>
+                    </KanbanItem>
+                  ))}
+
+                  {tickets.length === 0 ? (
+                    <p className="grid flex-1 place-items-center px-2 py-6 text-center text-xs text-muted">
+                      Drop a card here
+                    </p>
+                  ) : null}
+                </KanbanColumnContent>
+
+                <div className="px-2 pb-2">
+                  <AddCard boardId={boardId} column={column} />
+                </div>
+              </KanbanColumn>
+            );
+          })}
+        </KanbanBoard>
+
+        <KanbanOverlay>
+          {({ value }) => {
+            const ticket = byId.get(String(value));
+            if (!ticket) return null;
+            return (
+              <div className="w-72">
+                <TicketCard
+                  ticket={ticket}
+                  projectKey={projectKey}
+                  boardHref={boardHref}
+                  overlay
+                />
+              </div>
+            );
+          }}
+        </KanbanOverlay>
+      </Kanban>
+
+      {total === 0 ? (
+        <p className="text-sm text-muted">
+          Add a card to any column to get started, then drag cards between columns as work moves
+          along.
+        </p>
+      ) : null}
     </div>
   );
 }
