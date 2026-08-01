@@ -157,9 +157,11 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
 
   return (
     <div className="flex flex-col gap-6">
+      {/* The header already carries org > project, so this trail is redundant
+          on a phone where every row of chrome costs real estate. */}
       <nav
         aria-label="Breadcrumb"
-        className="flex flex-wrap items-center gap-1 text-sm text-muted"
+        className="hidden flex-wrap items-center gap-1 text-sm text-muted md:flex"
       >
         <Crumb href={orgPath(ctx.org)}>{ctx.org.name}</Crumb>
         <CrumbSeparator />

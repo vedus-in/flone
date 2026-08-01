@@ -1,25 +1,32 @@
 'use client';
 
 /**
- * Right-click menu for a card, so the common edits do not require opening the
- * ticket first.
+ * Card actions, so the common edits do not require opening the ticket.
  *
- * Built on Base UI's `ContextMenu` (already present as a ReUI dependency), which
- * handles positioning at the cursor, focus trapping, typeahead, submenu timing
- * and Escape for us. Only the styling is ours.
+ * Exposed two ways over ONE set of items:
+ *   - `TicketContextMenu` wraps the card for right-click (desktop).
+ *   - `TicketMenuButton` is an explicit trigger, which is what touch gets.
+ *
+ * Touch needs its own affordance because there is no right-click, and because
+ * long-press is already taken: the board's TouchSensor activates a drag after
+ * 250ms, so a long-press menu would fight the drag on every card. Base UI's
+ * ContextMenu has no prop to opt out of long-press, hence the button.
+ *
+ * Built on Base UI (already present as a ReUI dependency), which handles cursor
+ * positioning, focus, typeahead, submenu timing and Escape. `ContextMenu.Item`
+ * and friends ARE `Menu.Item` and friends -- the same components read from
+ * whichever root they are mounted under -- so the item list below is shared
+ * verbatim rather than duplicated.
  *
  * Every item calls a Server Action that re-derives the session and re-resolves
- * the ticket by walking up to its organization, so nothing here is trusted --
- * the menu only decides what to OFFER, never what is permitted.
- *
- * Shortcut hints are shown ONLY for behaviour that is actually wired up. The
- * single-letter hints in Linear open submenus; Base UI's own typeahead already
- * moves focus to a matching item, so labelling those would overpromise.
+ * the ticket by walking up to its organization. The menu decides what to OFFER,
+ * never what is permitted.
  */
 
 import { useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { ContextMenu } from '@base-ui/react/context-menu';
+import { Menu } from '@base-ui/react/menu';
 import { Priority } from '@prisma/client';
 
 import type { BoardColumnData, BoardTicket } from './board-view';
@@ -35,7 +42,7 @@ import {
 export type BoardMember = { id: string; name: string };
 export type SiblingBoard = { id: string; name: string };
 
-type TicketMenuProps = {
+type MenuData = {
   ticket: BoardTicket;
   columns: BoardColumnData[];
   members: BoardMember[];
@@ -43,7 +50,6 @@ type TicketMenuProps = {
   projectKey: string;
   boardHref: string;
   onError: (message: string | null) => void;
-  children: ReactNode;
 };
 
 function cx(...values: Array<string | false | null | undefined>): string {
@@ -55,13 +61,14 @@ function cx(...values: Array<string | false | null | undefined>): string {
 /* -------------------------------------------------------------------------- */
 
 const POPUP =
-  'z-50 min-w-56 origin-[var(--transform-origin)] rounded-xl border border-border bg-surface p-1 shadow-2xl outline-none';
+  'z-50 max-h-[min(24rem,70dvh)] min-w-56 origin-[var(--transform-origin)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-1 shadow-2xl outline-none';
 
+// `py-2` on touch: 44px-ish rows. `md:py-1.5` tightens it back up for a mouse.
 const ITEM =
-  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-foreground outline-none data-[highlighted]:bg-surface-secondary data-[disabled]:opacity-50';
+  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground outline-none data-[highlighted]:bg-surface-secondary data-[disabled]:opacity-50 md:py-1.5';
 
 const DANGER =
-  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-danger outline-none data-[highlighted]:bg-danger-soft';
+  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-danger outline-none data-[highlighted]:bg-danger-soft md:py-1.5';
 
 const LABEL = 'px-2.5 pt-1.5 pb-1 text-[0.6875rem] font-medium tracking-wider text-muted uppercase';
 
@@ -94,24 +101,25 @@ const I_OPEN = 'M9.5 2.5h4v4M13.5 2.5 8 8M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1
 const I_TRASH = 'M2.5 4h11M6 4V2.5h4V4M12 4v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4M6.5 7v4M9.5 7v4';
 const I_CHEVRON = 'M6 3.5 10.5 8 6 12.5';
 const I_CHECK = 'M3 8.5 6.5 12 13 4.5';
+const I_DOTS = 'M8 3.2h.01M8 8h.01M8 12.8h.01';
 
 function SubTrigger({ icon, children }: { icon: string; children: ReactNode }) {
   return (
-    <ContextMenu.SubmenuTrigger className={ITEM}>
+    <Menu.SubmenuTrigger className={ITEM}>
       <Icon d={icon} className="text-muted" />
       <span className="flex-1">{children}</span>
       <Icon d={I_CHEVRON} className="size-3 text-muted" />
-    </ContextMenu.SubmenuTrigger>
+    </Menu.SubmenuTrigger>
   );
 }
 
 function Submenu({ children }: { children: ReactNode }) {
   return (
-    <ContextMenu.Portal>
-      <ContextMenu.Positioner side="right" align="start" sideOffset={4} className="outline-none">
-        <ContextMenu.Popup className={POPUP}>{children}</ContextMenu.Popup>
-      </ContextMenu.Positioner>
-    </ContextMenu.Portal>
+    <Menu.Portal>
+      <Menu.Positioner side="right" align="start" sideOffset={4} className="z-50 outline-none">
+        <Menu.Popup className={POPUP}>{children}</Menu.Popup>
+      </Menu.Positioner>
+    </Menu.Portal>
   );
 }
 
@@ -142,8 +150,10 @@ function isoDay(days: number): string {
 }
 
 /* -------------------------------------------------------------------------- */
+/* The shared item list                                                        */
+/* -------------------------------------------------------------------------- */
 
-export function TicketContextMenu({
+function TicketMenuItems({
   ticket,
   columns,
   members,
@@ -151,8 +161,7 @@ export function TicketContextMenu({
   projectKey,
   boardHref,
   onError,
-  children,
-}: TicketMenuProps) {
+}: MenuData) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [copied, setCopied] = useState<string | null>(null);
@@ -179,229 +188,257 @@ export function TicketContextMenu({
   }
 
   return (
+    <>
+      <Menu.Group>
+        <Menu.GroupLabel className={LABEL}>{ticketKey}</Menu.GroupLabel>
+
+        <Menu.SubmenuRoot>
+          <SubTrigger icon={I_STATUS}>Status</SubTrigger>
+          <Submenu>
+            {columns.map((column) => (
+              <Menu.Item
+                key={column.id}
+                className={ITEM}
+                onClick={() =>
+                  run(() =>
+                    placeTicket({
+                      ticketId: ticket.id,
+                      toColumnId: column.id,
+                      // Append; a precise index is what dragging is for.
+                      toIndex: column.tickets.length,
+                    }),
+                  )
+                }
+              >
+                <Tick on={currentColumn?.id === column.id} />
+                {column.name}
+              </Menu.Item>
+            ))}
+          </Submenu>
+        </Menu.SubmenuRoot>
+
+        <Menu.SubmenuRoot>
+          <SubTrigger icon={I_PRIORITY}>Priority</SubTrigger>
+          <Submenu>
+            {PRIORITIES.map((option) => (
+              <Menu.Item
+                key={option.value}
+                className={ITEM}
+                onClick={() =>
+                  run(() => setTicketPriority({ ticketId: ticket.id, priority: option.value }))
+                }
+              >
+                <Tick on={ticket.priority === option.value} />
+                <span className={option.className}>{option.label}</span>
+              </Menu.Item>
+            ))}
+          </Submenu>
+        </Menu.SubmenuRoot>
+
+        <Menu.SubmenuRoot>
+          <SubTrigger icon={I_PERSON}>Assignee</SubTrigger>
+          <Submenu>
+            <Menu.Item
+              className={ITEM}
+              onClick={() =>
+                run(() => assignTicketFromBoard({ ticketId: ticket.id, assigneeId: '' }))
+              }
+            >
+              <Tick on={ticket.assigneeName === null} />
+              <span className="text-muted">Unassigned</span>
+            </Menu.Item>
+            {members.map((member) => (
+              <Menu.Item
+                key={member.id}
+                className={ITEM}
+                onClick={() =>
+                  run(() => assignTicketFromBoard({ ticketId: ticket.id, assigneeId: member.id }))
+                }
+              >
+                <Tick on={ticket.assigneeName === member.name} />
+                {member.name}
+              </Menu.Item>
+            ))}
+          </Submenu>
+        </Menu.SubmenuRoot>
+
+        <Menu.SubmenuRoot>
+          <SubTrigger icon={I_CALENDAR}>Due date</SubTrigger>
+          <Submenu>
+            {[
+              { label: 'Today', days: 0 },
+              { label: 'Tomorrow', days: 1 },
+              { label: 'Next week', days: 7 },
+            ].map((option) => (
+              <Menu.Item
+                key={option.label}
+                className={ITEM}
+                onClick={() =>
+                  run(() => setTicketDueDate({ ticketId: ticket.id, dueDate: isoDay(option.days) }))
+                }
+              >
+                <Tick on={false} />
+                {option.label}
+              </Menu.Item>
+            ))}
+            <Menu.Separator className="my-1 h-px bg-border" />
+            <Menu.Item
+              className={ITEM}
+              disabled={ticket.dueDateLabel === null}
+              onClick={() => run(() => setTicketDueDate({ ticketId: ticket.id, dueDate: null }))}
+            >
+              <Tick on={false} />
+              <span className="text-muted">Clear due date</span>
+            </Menu.Item>
+          </Submenu>
+        </Menu.SubmenuRoot>
+      </Menu.Group>
+
+      <Menu.Separator className="my-1 h-px bg-border" />
+
+      <Menu.SubmenuRoot>
+        <SubTrigger icon={I_COPY}>Copy</SubTrigger>
+        <Submenu>
+          <Menu.Item
+            className={ITEM}
+            closeOnClick={false}
+            onClick={() => void copy(`${window.location.origin}${ticketHref}`, 'link')}
+          >
+            <Tick on={copied === 'link'} />
+            Copy link
+          </Menu.Item>
+          <Menu.Item
+            className={ITEM}
+            closeOnClick={false}
+            onClick={() => void copy(ticketKey, 'id')}
+          >
+            <Tick on={copied === 'id'} />
+            Copy ID
+          </Menu.Item>
+          <Menu.Item
+            className={ITEM}
+            closeOnClick={false}
+            onClick={() => void copy(ticket.title, 'title')}
+          >
+            <Tick on={copied === 'title'} />
+            Copy title
+          </Menu.Item>
+        </Submenu>
+      </Menu.SubmenuRoot>
+
+      {boards.length > 1 ? (
+        <Menu.SubmenuRoot>
+          <SubTrigger icon={I_MOVE}>Move to board</SubTrigger>
+          <Submenu>
+            {boards.map((board) => (
+              <Menu.Item
+                key={board.id}
+                className={ITEM}
+                disabled={boardHref.endsWith(board.id)}
+                onClick={() =>
+                  run(() => moveTicketToBoard({ ticketId: ticket.id, toBoardId: board.id }))
+                }
+              >
+                <Tick on={boardHref.endsWith(board.id)} />
+                {board.name}
+              </Menu.Item>
+            ))}
+          </Submenu>
+        </Menu.SubmenuRoot>
+      ) : null}
+
+      <Menu.SubmenuRoot>
+        <SubTrigger icon={I_OPEN}>Open in</SubTrigger>
+        <Submenu>
+          <Menu.Item className={ITEM} onClick={() => router.push(ticketHref)}>
+            <Tick on={false} />
+            This tab
+          </Menu.Item>
+          <Menu.Item
+            className={ITEM}
+            onClick={() => window.open(ticketHref, '_blank', 'noopener,noreferrer')}
+          >
+            <Tick on={false} />
+            New tab
+          </Menu.Item>
+        </Submenu>
+      </Menu.SubmenuRoot>
+
+      <Menu.Separator className="my-1 h-px bg-border" />
+
+      <Menu.Item
+        className={DANGER}
+        onClick={() => run(() => deleteTicketFromBoard({ ticketId: ticket.id }))}
+      >
+        <Icon d={I_TRASH} />
+        <span className="flex-1">Delete</span>
+        <kbd className="hidden font-mono text-[0.6875rem] text-muted md:inline">Ctrl Del</kbd>
+      </Menu.Item>
+
+      <div className="mt-1 border-t border-border px-2.5 pt-2 pb-1 text-[0.6875rem] text-muted">
+        Updated {ticket.updatedAtLabel}
+        {ticket.dueDateLabel ? <> &middot; due {ticket.dueDateLabel}</> : null}
+      </div>
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Right-click (pointer devices)                                               */
+/* -------------------------------------------------------------------------- */
+
+export function TicketContextMenu({ children, ...data }: MenuData & { children: ReactNode }) {
+  return (
     <ContextMenu.Root>
       <ContextMenu.Trigger className="outline-none">{children}</ContextMenu.Trigger>
-
       <ContextMenu.Portal>
-        <ContextMenu.Positioner className="outline-none" side="bottom" align="start">
+        <ContextMenu.Positioner className="z-50 outline-none" side="bottom" align="start">
           <ContextMenu.Popup
             className={POPUP}
             onKeyDown={(event) => {
-              // The one shortcut actually bound. Ctrl/Cmd guards against a
-              // stray Delete press while merely browsing the menu.
+              // The one shortcut actually bound. Ctrl/Cmd guards against a stray
+              // Delete press while merely browsing the menu.
               if (event.key === 'Delete' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();
-                run(() => deleteTicketFromBoard({ ticketId: ticket.id }));
+                void deleteTicketFromBoard({ ticketId: data.ticket.id }).then((result) => {
+                  data.onError(result.ok ? null : result.error);
+                });
               }
             }}
           >
-            <ContextMenu.Group>
-              <ContextMenu.GroupLabel className={LABEL}>{ticketKey}</ContextMenu.GroupLabel>
-
-              {/* Status -> the board's own columns */}
-              <ContextMenu.SubmenuRoot>
-                <SubTrigger icon={I_STATUS}>Status</SubTrigger>
-                <Submenu>
-                  {columns.map((column) => (
-                    <ContextMenu.Item
-                      key={column.id}
-                      className={ITEM}
-                      onClick={() =>
-                        run(() =>
-                          placeTicket({
-                            ticketId: ticket.id,
-                            toColumnId: column.id,
-                            // Append; a precise index is what dragging is for.
-                            toIndex: column.tickets.length,
-                          }),
-                        )
-                      }
-                    >
-                      <Tick on={currentColumn?.id === column.id} />
-                      {column.name}
-                    </ContextMenu.Item>
-                  ))}
-                </Submenu>
-              </ContextMenu.SubmenuRoot>
-
-              {/* Priority */}
-              <ContextMenu.SubmenuRoot>
-                <SubTrigger icon={I_PRIORITY}>Priority</SubTrigger>
-                <Submenu>
-                  {PRIORITIES.map((option) => (
-                    <ContextMenu.Item
-                      key={option.value}
-                      className={ITEM}
-                      onClick={() =>
-                        run(() =>
-                          setTicketPriority({ ticketId: ticket.id, priority: option.value }),
-                        )
-                      }
-                    >
-                      <Tick on={ticket.priority === option.value} />
-                      <span className={option.className}>{option.label}</span>
-                    </ContextMenu.Item>
-                  ))}
-                </Submenu>
-              </ContextMenu.SubmenuRoot>
-
-              {/* Assignee -> members of THIS organization only */}
-              <ContextMenu.SubmenuRoot>
-                <SubTrigger icon={I_PERSON}>Assignee</SubTrigger>
-                <Submenu>
-                  <ContextMenu.Item
-                    className={ITEM}
-                    onClick={() =>
-                      run(() => assignTicketFromBoard({ ticketId: ticket.id, assigneeId: '' }))
-                    }
-                  >
-                    <Tick on={ticket.assigneeName === null} />
-                    <span className="text-muted">Unassigned</span>
-                  </ContextMenu.Item>
-                  {members.map((member) => (
-                    <ContextMenu.Item
-                      key={member.id}
-                      className={ITEM}
-                      onClick={() =>
-                        run(() =>
-                          assignTicketFromBoard({ ticketId: ticket.id, assigneeId: member.id }),
-                        )
-                      }
-                    >
-                      <Tick on={ticket.assigneeName === member.name} />
-                      {member.name}
-                    </ContextMenu.Item>
-                  ))}
-                </Submenu>
-              </ContextMenu.SubmenuRoot>
-
-              {/* Due date -> quick relative choices, no calendar needed */}
-              <ContextMenu.SubmenuRoot>
-                <SubTrigger icon={I_CALENDAR}>Due date</SubTrigger>
-                <Submenu>
-                  {[
-                    { label: 'Today', days: 0 },
-                    { label: 'Tomorrow', days: 1 },
-                    { label: 'Next week', days: 7 },
-                  ].map((option) => (
-                    <ContextMenu.Item
-                      key={option.label}
-                      className={ITEM}
-                      onClick={() =>
-                        run(() =>
-                          setTicketDueDate({ ticketId: ticket.id, dueDate: isoDay(option.days) }),
-                        )
-                      }
-                    >
-                      <Tick on={false} />
-                      {option.label}
-                    </ContextMenu.Item>
-                  ))}
-                  <ContextMenu.Separator className="my-1 h-px bg-border" />
-                  <ContextMenu.Item
-                    className={ITEM}
-                    disabled={ticket.dueDateLabel === null}
-                    onClick={() => run(() => setTicketDueDate({ ticketId: ticket.id, dueDate: null }))}
-                  >
-                    <Tick on={false} />
-                    <span className="text-muted">Clear due date</span>
-                  </ContextMenu.Item>
-                </Submenu>
-              </ContextMenu.SubmenuRoot>
-            </ContextMenu.Group>
-
-            <ContextMenu.Separator className="my-1 h-px bg-border" />
-
-            {/* Copy */}
-            <ContextMenu.SubmenuRoot>
-              <SubTrigger icon={I_COPY}>Copy</SubTrigger>
-              <Submenu>
-                <ContextMenu.Item
-                  className={ITEM}
-                  closeOnClick={false}
-                  onClick={() => void copy(`${window.location.origin}${ticketHref}`, 'link')}
-                >
-                  <Tick on={copied === 'link'} />
-                  Copy link
-                </ContextMenu.Item>
-                <ContextMenu.Item
-                  className={ITEM}
-                  closeOnClick={false}
-                  onClick={() => void copy(ticketKey, 'id')}
-                >
-                  <Tick on={copied === 'id'} />
-                  Copy ID
-                </ContextMenu.Item>
-                <ContextMenu.Item
-                  className={ITEM}
-                  closeOnClick={false}
-                  onClick={() => void copy(ticket.title, 'title')}
-                >
-                  <Tick on={copied === 'title'} />
-                  Copy title
-                </ContextMenu.Item>
-              </Submenu>
-            </ContextMenu.SubmenuRoot>
-
-            {/* Move -> a different board in the SAME project */}
-            {boards.length > 1 ? (
-              <ContextMenu.SubmenuRoot>
-                <SubTrigger icon={I_MOVE}>Move to board</SubTrigger>
-                <Submenu>
-                  {boards.map((board) => (
-                    <ContextMenu.Item
-                      key={board.id}
-                      className={ITEM}
-                      disabled={boardHref.endsWith(board.id)}
-                      onClick={() =>
-                        run(() => moveTicketToBoard({ ticketId: ticket.id, toBoardId: board.id }))
-                      }
-                    >
-                      <Tick on={boardHref.endsWith(board.id)} />
-                      {board.name}
-                    </ContextMenu.Item>
-                  ))}
-                </Submenu>
-              </ContextMenu.SubmenuRoot>
-            ) : null}
-
-            {/* Open in */}
-            <ContextMenu.SubmenuRoot>
-              <SubTrigger icon={I_OPEN}>Open in</SubTrigger>
-              <Submenu>
-                <ContextMenu.Item className={ITEM} onClick={() => router.push(ticketHref)}>
-                  <Tick on={false} />
-                  This tab
-                </ContextMenu.Item>
-                <ContextMenu.Item
-                  className={ITEM}
-                  onClick={() => window.open(ticketHref, '_blank', 'noopener,noreferrer')}
-                >
-                  <Tick on={false} />
-                  New tab
-                </ContextMenu.Item>
-              </Submenu>
-            </ContextMenu.SubmenuRoot>
-
-            <ContextMenu.Separator className="my-1 h-px bg-border" />
-
-            <ContextMenu.Item
-              className={DANGER}
-              onClick={() => run(() => deleteTicketFromBoard({ ticketId: ticket.id }))}
-            >
-              <Icon d={I_TRASH} />
-              <span className="flex-1">Delete</span>
-              <kbd className="font-mono text-[0.6875rem] text-muted">Ctrl Del</kbd>
-            </ContextMenu.Item>
-
-            {/* Metadata footer, in the spirit of Notion's "Last edited by". */}
-            <div className="mt-1 border-t border-border px-2.5 pt-2 pb-1 text-[0.6875rem] text-muted">
-              Updated {ticket.updatedAtLabel}
-              {ticket.dueDateLabel ? <> &middot; due {ticket.dueDateLabel}</> : null}
-            </div>
+            <TicketMenuItems {...data} />
           </ContextMenu.Popup>
         </ContextMenu.Positioner>
       </ContextMenu.Portal>
     </ContextMenu.Root>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Explicit trigger (touch, and handy with a mouse)                            */
+/* -------------------------------------------------------------------------- */
+
+export function TicketMenuButton(data: MenuData) {
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        aria-label={`Actions for ${data.projectKey}-${data.ticket.number}`}
+        // Keep the press off the drag sensor, or opening the menu would start a
+        // drag on the card underneath.
+        onPointerDown={(event) => event.stopPropagation()}
+        // -mt-1/-me-1 pull the larger touch target back so it does not push the
+        // title down: the hit area grows, the visual weight does not.
+        className="-mt-1 -me-1 grid size-9 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus data-[popup-open]:bg-surface-secondary data-[popup-open]:text-foreground md:mt-0 md:me-0 md:size-7"
+      >
+        <Icon d={I_DOTS} className="size-4" />
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="bottom" align="end" sideOffset={4} className="z-50 outline-none">
+          <Menu.Popup className={POPUP}>
+            <TicketMenuItems {...data} />
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }

@@ -22,7 +22,15 @@
  * hatch is banned project-wide and is not used here.
  */
 
-import { useEffect, useId, useMemo, useRef, useState, useTransition } from 'react';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from 'react';
 import Link from 'next/link';
 import type { Priority } from '@prisma/client';
 
@@ -39,6 +47,7 @@ import { FormError } from '@/components/ui';
 import { createTicket, placeTicket } from './actions';
 import {
   TicketContextMenu,
+  TicketMenuButton,
   type BoardMember,
   type SiblingBoard,
 } from './ticket-menu';
@@ -122,11 +131,14 @@ function TicketCard({
   projectKey,
   boardHref,
   overlay = false,
+  action,
 }: {
   ticket: BoardTicket;
   projectKey: string;
   boardHref: string;
   overlay?: boolean;
+  /** The `⋮` trigger. Omitted on the drag overlay, where it is inert. */
+  action?: ReactNode;
 }) {
   return (
     <div
@@ -137,18 +149,21 @@ function TicketCard({
           : 'border-border shadow-xs hover:border-border-secondary',
       )}
     >
-      <Link
-        href={`${boardHref}/${ticket.number}`}
-        // Keep the title clickable: without this the drag sensor claims the
-        // press. `draggable={false}` + cancelling dragstart stops the BROWSER
-        // starting its own link-drag (its ghost image of the text) instead.
-        onPointerDown={(event) => event.stopPropagation()}
-        draggable={false}
-        onDragStart={(event) => event.preventDefault()}
-        className="text-sm leading-snug font-medium text-foreground no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-      >
-        {ticket.title}
-      </Link>
+      <div className="flex items-start gap-1">
+        <Link
+          href={`${boardHref}/${ticket.number}`}
+          // Keep the title clickable: without this the drag sensor claims the
+          // press. `draggable={false}` + cancelling dragstart stops the BROWSER
+          // starting its own link-drag (its ghost image of the text) instead.
+          onPointerDown={(event) => event.stopPropagation()}
+          draggable={false}
+          onDragStart={(event) => event.preventDefault()}
+          className="min-w-0 flex-1 text-sm leading-snug font-medium text-foreground no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        >
+          {ticket.title}
+        </Link>
+        {action}
+      </div>
 
       <div className="flex items-center gap-2 text-xs text-muted">
         {PRIORITY_DOT[ticket.priority] ? (
@@ -348,6 +363,16 @@ export function BoardView({
     [records],
   );
 
+  /**
+   * Column order and names from props, ticket contents from live state, so the
+   * menu's "Status" ticks the column a card is actually in mid-drag rather than
+   * the one the server last rendered.
+   */
+  const liveColumns = useMemo(
+    () => columns.map((column) => ({ ...column, tickets: records[column.id] ?? [] })),
+    [columns, records],
+  );
+
   return (
     <div className="flex flex-col gap-3">
       <FormError>{error}</FormError>
@@ -379,14 +404,14 @@ export function BoardView({
           });
         }}
       >
-        <KanbanBoard className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
+        <KanbanBoard className="flex flex-col gap-3 pb-4 md:-mx-6 md:flex-row md:overflow-x-auto md:px-6">
           {columns.map((column) => {
             const tickets = records[column.id] ?? [];
             return (
               <KanbanColumn
                 key={column.id}
                 value={column.id}
-                className="flex w-72 shrink-0 flex-col rounded-xl border border-border bg-surface-secondary/40"
+                className="flex w-full flex-col rounded-xl border border-border bg-surface-secondary/40 md:w-72 md:shrink-0"
               >
                 <header className="flex items-center gap-2 px-3 py-2.5">
                   <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">
@@ -401,30 +426,34 @@ export function BoardView({
                   value={column.id}
                   className="flex min-h-24 flex-1 flex-col gap-2 px-2 pb-2"
                 >
-                  {tickets.map((ticket) => (
-                    <KanbanItem key={ticket.id} value={ticket.id}>
-                      <KanbanItemHandle className="no-native-drag cursor-grab active:cursor-grabbing">
-                        <TicketContextMenu
-                          ticket={ticket}
-                          columns={columns.map((c) => ({
-                            ...c,
-                            tickets: records[c.id] ?? [],
-                          }))}
-                          members={members}
-                          boards={boards}
-                          projectKey={projectKey}
-                          boardHref={boardHref}
-                          onError={setError}
-                        >
-                          <TicketCard
-                            ticket={ticket}
-                            projectKey={projectKey}
-                            boardHref={boardHref}
-                          />
-                        </TicketContextMenu>
-                      </KanbanItemHandle>
-                    </KanbanItem>
-                  ))}
+                  {tickets.map((ticket) => {
+                    const menuData = {
+                      ticket,
+                      columns: liveColumns,
+                      members,
+                      boards,
+                      projectKey,
+                      boardHref,
+                      onError: setError,
+                    };
+                    return (
+                      <KanbanItem key={ticket.id} value={ticket.id}>
+                        <KanbanItemHandle className="no-native-drag cursor-grab active:cursor-grabbing">
+                          <TicketContextMenu {...menuData}>
+                            <TicketCard
+                              ticket={ticket}
+                              projectKey={projectKey}
+                              boardHref={boardHref}
+                              // Touch has no right-click, and long-press is
+                              // already the drag gesture, so the button is the
+                              // only way in on a phone.
+                              action={<TicketMenuButton {...menuData} />}
+                            />
+                          </TicketContextMenu>
+                        </KanbanItemHandle>
+                      </KanbanItem>
+                    );
+                  })}
 
                   {tickets.length === 0 ? (
                     <p className="grid flex-1 place-items-center px-2 py-6 text-center text-xs text-muted">
