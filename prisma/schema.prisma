@@ -1,0 +1,160 @@
+// Kanban — canonical Prisma schema (SPEC §2). Do not deviate.
+//
+// Index set is final: no standalone index on Project.organizationId,
+// Ticket.boardId or Membership.userId — each is already the leading column of a
+// composite unique, so a second index is pure write cost. No index on
+// Ticket.createdById, Ticket.assigneeId or Comment.authorId — nothing in scope
+// filters by them.
+//
+// Referential actions are final: the tenant tree cascades
+// (Organization -> Membership/Project -> Board -> BoardColumn/Ticket -> Comment,
+// User -> Session). Ticket.createdById and Comment.authorId are Restrict so a
+// user cannot be hard-deleted while authored content exists.
+// Ticket.assigneeId is SetNull.
+//
+// `position` is never unique-constrained. It is a sort hint (SPEC §6.10).
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions        Session[]
+  memberships     Membership[]
+  createdTickets  Ticket[]     @relation("TicketCreatedBy")
+  assignedTickets Ticket[]     @relation("TicketAssignee")
+  comments        Comment[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  projects    Project[]
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           Role         @default(MEMBER)
+  createdAt      DateTime     @default(now())
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+model Project {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  key            String
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  boards Board[]
+
+  @@unique([organizationId, key])
+}
+
+model Board {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  columns BoardColumn[]
+  tickets Ticket[]
+
+  @@index([projectId])
+}
+
+model BoardColumn {
+  id        String   @id @default(cuid())
+  boardId   String
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  name      String
+  position  Int
+  createdAt DateTime @default(now())
+
+  tickets Ticket[]
+
+  @@index([boardId, position])
+}
+
+model Ticket {
+  id          String      @id @default(cuid())
+  boardId     String
+  board       Board       @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  columnId    String
+  column      BoardColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  number      Int
+  title       String
+  description String?     @db.Text
+  position    Int
+  createdById String
+  createdBy   User        @relation("TicketCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  assigneeId  String?
+  assignee    User?       @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  comments Comment[]
+
+  @@unique([boardId, number])
+  @@index([columnId, position])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ticketId, createdAt])
+}
