@@ -147,7 +147,11 @@ export function parseHash(encoded: string): ParsedHash | null {
   if (!isPowerOfTwo(n) || n < 2 ** 14 || n > 2 ** 17) return null;
   if (r < 1 || r > 16) return null;
   if (p < 1 || p > 4) return null;
-  if (128 * n * r > MAXMEM) return null;
+  // Must match the bound OpenSSL itself enforces, not a looser approximation:
+  // 128*r*(N+2) is the V buffer and 128*r*p is the B buffer. Accepting a
+  // parameter set that crypto.scrypt will then reject would make verification
+  // throw on every attempt, locking the account out of login permanently.
+  if (128 * r * (n + 2 + p) > MAXMEM) return null;
 
   const salt = Buffer.from(saltB64, 'base64');
   const hash = Buffer.from(hashB64, 'base64');
@@ -213,7 +217,16 @@ export async function verifyPassword(plain: string, encoded: string): Promise<bo
     return false;
   }
 
-  const candidate = await derive(normalized, parsed.salt, parsed.hash.length, optsFor(parsed));
+  // Belt and braces alongside the parseHash bound above: if scrypt still
+  // rejects the stored parameters for any reason, degrade to "wrong password"
+  // rather than letting the rejection surface as a 500 that locks the account
+  // out of login entirely.
+  let candidate: Buffer;
+  try {
+    candidate = await derive(normalized, parsed.salt, parsed.hash.length, optsFor(parsed));
+  } catch {
+    return false;
+  }
   return crypto.timingSafeEqual(candidate, parsed.hash);
 }
 

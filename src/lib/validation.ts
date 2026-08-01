@@ -143,7 +143,13 @@ export const projectKeySchema = z
   .toUpperCase()
   .regex(/^[A-Z][A-Z0-9]{1,9}$/, 'Use 2 to 10 characters: a letter followed by letters or digits.');
 
-export const ticketNumberSchema = z.coerce.number().int().positive();
+/**
+ * Bounded to INT4 because `Ticket.number` is a Postgres `Int`. Without the
+ * `.max()`, a crafted path segment like `/.../9999999999` parses fine here and
+ * only fails inside the query engine (Prisma P2033), turning what should be a
+ * 404 into a 500.
+ */
+export const ticketNumberSchema = z.coerce.number().int().positive().max(2147483647);
 
 export const roleSchema = z.nativeEnum(Role);
 

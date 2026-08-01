@@ -19,7 +19,7 @@
  */
 
 import Link from 'next/link';
-import { useActionState, useEffect, useRef } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 
 import { FormError, SubmitButton } from '@/components/ui';
@@ -205,21 +205,24 @@ type AddTicketFormProps = {
 
 function AddTicketForm({ boardId, column, autoFocus }: AddTicketFormProps) {
   const [state, action] = useActionState(createTicket, null);
-  const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = `add-ticket-${column.id}`;
 
-  // Clear and refocus only on success. On failure the typed title stays in the
-  // input, so a retry after a transient conflict costs no re-typing (SPEC 8.9).
+  // Controlled so the typed title survives a failed submit. React 19 resets a
+  // `<form action={fn}>` once the action settles whether it succeeded or not,
+  // so `form.reset()` guarded by `state.ok` cannot deliver the SPEC 8.9
+  // promise on its own -- only holding the value in state can.
+  const [title, setTitle] = useState('');
+
   useEffect(() => {
     if (state?.ok) {
-      formRef.current?.reset();
+      setTitle('');
       inputRef.current?.focus();
     }
   }, [state]);
 
   return (
-    <form ref={formRef} action={action} className="stack-sm">
+    <form action={action} className="stack-sm">
       <input type="hidden" name="boardId" value={boardId} />
       <input type="hidden" name="columnId" value={column.id} />
 
@@ -236,6 +239,8 @@ function AddTicketForm({ boardId, column, autoFocus }: AddTicketFormProps) {
         required
         autoComplete="off"
         autoFocus={autoFocus}
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
       />
 
       <div className="row">

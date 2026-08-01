@@ -20,7 +20,7 @@
  * passed down. They are politeness only -- every action re-checks the role.
  */
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 
 import { FormError, Prose, SubmitButton } from '@/components/ui';
 import type { ActionResult } from '@/lib/result';
@@ -299,13 +299,18 @@ type CommentThreadProps = {
 
 export function CommentThread({ ticketId, comments }: CommentThreadProps) {
   const [state, action] = useActionState(createComment, null);
-  const formRef = useRef<HTMLFormElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
-  // Clear and refocus only on success; on failure the typed text stays put.
+  // Controlled, deliberately. React 19 resets a `<form action={fn}>` after the
+  // action settles regardless of what it resolved to, so an uncontrolled
+  // textarea loses the whole draft on a failed submit -- exactly when the user
+  // most needs it back. Holding the value in state survives that reset; we
+  // clear it ourselves only once the server confirms the comment landed.
+  const [body, setBody] = useState('');
+
   useEffect(() => {
     if (state?.ok) {
-      formRef.current?.reset();
+      setBody('');
       bodyRef.current?.focus();
     }
   }, [state]);
@@ -322,7 +327,7 @@ export function CommentThread({ ticketId, comments }: CommentThreadProps) {
         <p className="muted">No comments yet.</p>
       )}
 
-      <form ref={formRef} action={action} className="stack-sm">
+      <form action={action} className="stack-sm">
         <input type="hidden" name="ticketId" value={ticketId} />
         <label className="label" htmlFor="new-comment">
           Add a comment
@@ -335,6 +340,8 @@ export function CommentThread({ ticketId, comments }: CommentThreadProps) {
           maxLength={5000}
           required
           placeholder="Write a comment..."
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
         />
         <div className="row">
           <SubmitButton pendingLabel="Posting...">Comment</SubmitButton>

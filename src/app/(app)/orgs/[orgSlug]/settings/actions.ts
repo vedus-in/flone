@@ -160,7 +160,28 @@ export async function changeMemberRole(
 
     try {
       await prisma.$transaction(async (tx) => {
-        if (target.role === Role.OWNER) {
+        // Serialize every owner-mutating transaction for this organization on
+        // the Organization row. `count` takes no row locks, so at Postgres'
+        // default READ COMMITTED two concurrent demotions/removals each read
+        // the other's pre-state, both see owners === 2, and both proceed --
+        // leaving the org with zero OWNERs and permanently unrecoverable.
+        await tx.$executeRaw`SELECT id FROM "Organization" WHERE id = ${ctx.org.id} FOR UPDATE`;
+
+        // Re-read under the lock: `target.role` above is a pre-lock snapshot.
+        const current = await tx.membership.findFirst({
+          where: { id: target.id, organizationId: ctx.org.id },
+          select: { role: true },
+        });
+        if (!current) throw new AuthzError('NOT_FOUND');
+
+        // Re-check too, or an ADMIN could demote someone promoted to OWNER
+        // between the snapshot and the lock.
+        if (current.role === Role.OWNER && ctx.role !== Role.OWNER) {
+          throw new AuthzError('FORBIDDEN');
+        }
+        if (current.role === nextRole) return;
+
+        if (current.role === Role.OWNER) {
           const owners = await tx.membership.count({
             where: { organizationId: ctx.org.id, role: Role.OWNER },
           });
@@ -218,7 +239,23 @@ export async function removeMember(
 
     try {
       await prisma.$transaction(async (tx) => {
-        if (target.role === Role.OWNER) {
+        // Same lock as changeMemberRole, and it must be the SAME row for both:
+        // that is what makes a concurrent "demote the other owner" and
+        // "remove the other owner" serialize instead of both succeeding.
+        await tx.$executeRaw`SELECT id FROM "Organization" WHERE id = ${ctx.org.id} FOR UPDATE`;
+
+        const current = await tx.membership.findFirst({
+          where: { id: target.id, organizationId: ctx.org.id },
+          select: { role: true },
+        });
+        // Already gone: a concurrent remove won the race. Nothing left to do.
+        if (!current) return;
+
+        if (current.role === Role.OWNER && ctx.role !== Role.OWNER) {
+          throw new AuthzError('FORBIDDEN');
+        }
+
+        if (current.role === Role.OWNER) {
           const owners = await tx.membership.count({
             where: { organizationId: ctx.org.id, role: Role.OWNER },
           });

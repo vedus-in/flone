@@ -236,10 +236,20 @@ export async function reorderTicket(
       reordered[index] = reordered[swapWith];
       reordered[swapWith] = moved;
 
-      for (let i = 0; i < reordered.length; i += 1) {
-        const row = reordered[i];
-        if (row.position === i) continue;
-        await tx.ticket.update({ where: { id: row.id }, data: { position: i } });
+      // Compute the full id -> position mapping first, then write it in a
+      // canonical order (ascending id). The mapping does not depend on the
+      // order the UPDATEs are issued in, but the row locks do: issuing them in
+      // `reordered` order means two concurrent reorders of the same column can
+      // take locks in opposite orders and deadlock, which surfaces to the user
+      // as a spurious "Something went wrong." Ascending id is the same order
+      // for every concurrent transaction, so a lock cycle is impossible.
+      const updates = reordered
+        .map((row, i) => ({ id: row.id, position: i, was: row.position }))
+        .filter((u) => u.was !== u.position)
+        .sort((a, b) => (a.id < b.id ? -1 : 1));
+
+      for (const u of updates) {
+        await tx.ticket.update({ where: { id: u.id }, data: { position: u.position } });
       }
     });
 

@@ -45,6 +45,42 @@ export function ActionForm({
 }: Props) {
   const [state, formAction] = useActionState<ActionResult | null, FormData>(action, null);
   const formRef = useRef<HTMLFormElement>(null);
+  const submitted = useRef<Array<[string, string]> | null>(null);
+
+  /**
+   * React 19 resets a `<form action={fn}>` as soon as the action settles, and it
+   * does not look at what the action resolved to -- so a rejected submit throws
+   * away everything the user typed. The children here are server-rendered and
+   * passed through untouched, so they cannot be made controlled from inside this
+   * component. Instead: snapshot what was actually submitted, and put it back if
+   * the action came back not-ok. The restore runs in an effect, after the commit
+   * that performed React's reset, so it lands last.
+   */
+  const submitAction = (formData: FormData) => {
+    const snapshot: Array<[string, string]> = [];
+    formData.forEach((value, key) => {
+      if (typeof value === 'string') snapshot.push([key, value]);
+    });
+    submitted.current = snapshot;
+    return formAction(formData);
+  };
+
+  useEffect(() => {
+    if (!state || state.ok) return;
+    const form = formRef.current;
+    const snapshot = submitted.current;
+    if (!form || !snapshot) return;
+    for (const [name, value] of snapshot) {
+      const field = form.elements.namedItem(name);
+      if (
+        (field instanceof HTMLInputElement && field.type !== 'hidden') ||
+        field instanceof HTMLTextAreaElement ||
+        field instanceof HTMLSelectElement
+      ) {
+        field.value = value;
+      }
+    }
+  }, [state]);
 
   useEffect(() => {
     if (!resetOnSuccess || !state || !state.ok) return;
@@ -61,7 +97,7 @@ export function ActionForm({
     state && !state.ok && state.fieldErrors ? Object.entries(state.fieldErrors) : [];
 
   return (
-    <form ref={formRef} action={formAction} className={className} aria-label={ariaLabel}>
+    <form ref={formRef} action={submitAction} className={className} aria-label={ariaLabel}>
       {children}
 
       {state && !state.ok ? (
