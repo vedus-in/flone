@@ -24,6 +24,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
+import type { Priority } from '@prisma/client';
 
 import {
   Kanban,
@@ -36,6 +37,11 @@ import {
 } from '@/components/reui/kanban';
 import { FormError } from '@/components/ui';
 import { createTicket, placeTicket } from './actions';
+import {
+  TicketContextMenu,
+  type BoardMember,
+  type SiblingBoard,
+} from './ticket-menu';
 
 /* -------------------------------------------------------------------------- */
 /* Props                                                                       */
@@ -47,6 +53,12 @@ export type BoardTicket = {
   title: string;
   assigneeName: string | null;
   commentCount: number;
+  priority: Priority;
+  /** Pre-formatted on the server so the client never re-derives a locale. */
+  dueDateLabel: string | null;
+  /** True when the due date is in the past and the card is still open. */
+  overdue: boolean;
+  updatedAtLabel: string;
 };
 
 export type BoardColumnData = {
@@ -61,6 +73,26 @@ type BoardViewProps = {
   boardHref: string;
   projectKey: string;
   columns: BoardColumnData[];
+  /** Assignee candidates: members of this organization only. */
+  members: BoardMember[];
+  /** Sibling boards in the same project, for "Move to board". */
+  boards: SiblingBoard[];
+};
+
+const PRIORITY_DOT: Record<Priority, string | null> = {
+  URGENT: 'bg-danger',
+  HIGH: 'bg-warning',
+  MEDIUM: 'bg-accent',
+  LOW: 'bg-muted',
+  NONE: null,
+};
+
+const PRIORITY_LABEL: Record<Priority, string> = {
+  URGENT: 'Urgent',
+  HIGH: 'High',
+  MEDIUM: 'Medium',
+  LOW: 'Low',
+  NONE: 'No priority',
 };
 
 function cx(...values: Array<string | false | null | undefined>): string {
@@ -119,9 +151,26 @@ function TicketCard({
       </Link>
 
       <div className="flex items-center gap-2 text-xs text-muted">
+        {PRIORITY_DOT[ticket.priority] ? (
+          <span
+            aria-label={PRIORITY_LABEL[ticket.priority]}
+            title={PRIORITY_LABEL[ticket.priority]}
+            className={cx('size-2 shrink-0 rounded-full', PRIORITY_DOT[ticket.priority])}
+          />
+        ) : null}
+
         <span className="font-mono tabular-nums">
           {projectKey}-{ticket.number}
         </span>
+
+        {ticket.dueDateLabel ? (
+          <span
+            className={cx('whitespace-nowrap', ticket.overdue && 'font-medium text-danger')}
+            title={ticket.overdue ? 'Overdue' : 'Due date'}
+          >
+            {ticket.dueDateLabel}
+          </span>
+        ) : null}
 
         {ticket.commentCount > 0 ? (
           <span className="flex items-center gap-1 tabular-nums">
@@ -267,7 +316,14 @@ function AddCard({ boardId, column }: { boardId: string; column: BoardColumnData
 /* Board                                                                       */
 /* -------------------------------------------------------------------------- */
 
-export function BoardView({ boardId, boardHref, projectKey, columns }: BoardViewProps) {
+export function BoardView({
+  boardId,
+  boardHref,
+  projectKey,
+  columns,
+  members,
+  boards,
+}: BoardViewProps) {
   const [records, setRecords] = useState<Record<string, BoardTicket[]>>(() => toRecords(columns));
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -348,11 +404,24 @@ export function BoardView({ boardId, boardHref, projectKey, columns }: BoardView
                   {tickets.map((ticket) => (
                     <KanbanItem key={ticket.id} value={ticket.id}>
                       <KanbanItemHandle className="no-native-drag cursor-grab active:cursor-grabbing">
-                        <TicketCard
+                        <TicketContextMenu
                           ticket={ticket}
+                          columns={columns.map((c) => ({
+                            ...c,
+                            tickets: records[c.id] ?? [],
+                          }))}
+                          members={members}
+                          boards={boards}
                           projectKey={projectKey}
                           boardHref={boardHref}
-                        />
+                          onError={setError}
+                        >
+                          <TicketCard
+                            ticket={ticket}
+                            projectKey={projectKey}
+                            boardHref={boardHref}
+                          />
+                        </TicketContextMenu>
                       </KanbanItemHandle>
                     </KanbanItem>
                   ))}

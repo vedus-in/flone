@@ -84,12 +84,50 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
           id: true,
           number: true,
           title: true,
+          priority: true,
+          dueDate: true,
+          updatedAt: true,
           assignee: { select: { id: true, name: true } },
           _count: { select: { comments: true } },
         },
       },
     },
   });
+
+  /**
+   * Assignee candidates for the card context menu.
+   *
+   * Rooted at `ctx.org.id`, which came from the upward walk -- so this only ever
+   * lists people who are members of THIS organization. `assignTicket` re-checks
+   * membership server-side regardless; this just avoids offering a name the
+   * action would then reject.
+   */
+  const memberRows = await prisma.membership.findMany({
+    where: { organizationId: ctx.org.id },
+    orderBy: [{ user: { name: 'asc' } }, { userId: 'asc' }],
+    select: { user: { select: { id: true, name: true } } },
+  });
+  const members = memberRows.map((row) => ({ id: row.user.id, name: row.user.name }));
+
+  /**
+   * Dates are formatted HERE, with a fixed locale and UTC, so the server-rendered
+   * markup and the client's first render agree. Deriving them in the browser
+   * would produce a hydration mismatch on any machine not on this locale.
+   */
+  const dayFormat = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  });
+  const stampFormat = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'UTC',
+  });
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
 
   const columns: BoardColumnData[] = columnRows.map((column) => ({
     id: column.id,
@@ -100,8 +138,19 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
       title: ticket.title,
       assigneeName: ticket.assignee?.name ?? null,
       commentCount: ticket._count.comments,
+      priority: ticket.priority,
+      dueDateLabel: ticket.dueDate ? dayFormat.format(ticket.dueDate) : null,
+      overdue: ticket.dueDate ? ticket.dueDate < startOfToday : false,
+      updatedAtLabel: stampFormat.format(ticket.updatedAt),
     })),
   }));
+
+  /** Sibling boards in this project, for the context menu's "Move to board". */
+  const boardRows = await prisma.board.findMany({
+    where: { projectId: ctx.project.id },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { id: true, name: true },
+  });
 
   const ticketCount = columns.reduce((total, column) => total + column.tickets.length, 0);
   const href = boardPath(ctx.org, ctx.project, ctx.board);
@@ -136,6 +185,8 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
         boardHref={href}
         projectKey={ctx.project.key}
         columns={columns}
+        members={members}
+        boards={boardRows}
       />
 
       {ticketCount === 0 ? (

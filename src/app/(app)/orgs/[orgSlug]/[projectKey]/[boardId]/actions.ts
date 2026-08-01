@@ -13,7 +13,7 @@
  *      never from a client-submitted string.
  */
 
-import { Prisma } from '@prisma/client';
+import { Prisma, Priority } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
@@ -353,5 +353,205 @@ export async function reorderTicket(
 
     revalidatePath(boardPath(ctx.org, ctx.project, ctx.board));
     return ok();
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Card context-menu actions                                                   */
+/*                                                                             */
+/* All take plain arguments rather than FormData because they are invoked from  */
+/* a menu, not a form submit. That changes nothing about trust: each one still  */
+/* re-derives the session, zod-validates its input, and resolves the ticket     */
+/* through `requireTicket`, which walks ticket -> board -> project ->           */
+/* organization -> membership in a single where clause.                        */
+/* -------------------------------------------------------------------------- */
+
+const setPrioritySchema = z.object({
+  ticketId: cuid,
+  priority: z.nativeEnum(Priority),
+});
+
+export async function setTicketPriority(input: {
+  ticketId: string;
+  priority: Priority;
+}): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = setPrioritySchema.safeParse(input);
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    const ctx = await requireTicket(parsed.data.ticketId);
+
+    await prisma.ticket.update({
+      where: { id: ctx.ticket.id },
+      data: { priority: parsed.data.priority },
+    });
+
+    revalidatePath(boardPath(ctx.org, ctx.project, ctx.board));
+    revalidatePath(ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number));
+    return ok();
+  });
+}
+
+const setDueDateSchema = z.object({
+  ticketId: cuid,
+  /** ISO date (YYYY-MM-DD), or null to clear. */
+  dueDate: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.null()]),
+});
+
+export async function setTicketDueDate(input: {
+  ticketId: string;
+  dueDate: string | null;
+}): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = setDueDateSchema.safeParse(input);
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    const ctx = await requireTicket(parsed.data.ticketId);
+
+    // Parsed as UTC midnight so the stored instant does not drift a day
+    // depending on where the server happens to be running.
+    const value =
+      parsed.data.dueDate === null ? null : new Date(`${parsed.data.dueDate}T00:00:00.000Z`);
+    if (value !== null && Number.isNaN(value.getTime())) return fail(INVALID_INPUT);
+
+    await prisma.ticket.update({
+      where: { id: ctx.ticket.id },
+      data: { dueDate: value },
+    });
+
+    revalidatePath(boardPath(ctx.org, ctx.project, ctx.board));
+    revalidatePath(ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number));
+    return ok();
+  });
+}
+
+const assignFromBoardSchema = z.object({
+  ticketId: cuid,
+  /** The empty string unassigns. */
+  assigneeId: z.union([cuid, z.literal('')]),
+});
+
+export async function assignTicketFromBoard(input: {
+  ticketId: string;
+  assigneeId: string;
+}): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = assignFromBoardSchema.safeParse(input);
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    const ctx = await requireTicket(parsed.data.ticketId);
+
+    // The assignee must be a member of THIS organization. Without this check a
+    // valid cuid for any user on the instance would be accepted, which both
+    // leaks that the account exists and lets a stranger be assigned work.
+    if (parsed.data.assigneeId !== '') {
+      const membership = await prisma.membership.findFirst({
+        where: { organizationId: ctx.org.id, userId: parsed.data.assigneeId },
+        select: { id: true },
+      });
+      if (!membership) return fail('That person is not a member of this organization.');
+    }
+
+    await prisma.ticket.update({
+      where: { id: ctx.ticket.id },
+      data: { assigneeId: parsed.data.assigneeId === '' ? null : parsed.data.assigneeId },
+    });
+
+    revalidatePath(boardPath(ctx.org, ctx.project, ctx.board));
+    revalidatePath(ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number));
+    return ok();
+  });
+}
+
+const deleteFromBoardSchema = z.object({ ticketId: cuid });
+
+export async function deleteTicketFromBoard(input: { ticketId: string }): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = deleteFromBoardSchema.safeParse(input);
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    const ctx = await requireTicket(parsed.data.ticketId);
+
+    // Comments cascade with the ticket per the schema.
+    await prisma.ticket.delete({ where: { id: ctx.ticket.id } });
+
+    revalidatePath(boardPath(ctx.org, ctx.project, ctx.board));
+    return ok();
+  });
+}
+
+const moveToBoardSchema = z.object({
+  ticketId: cuid,
+  toBoardId: cuid,
+});
+
+/**
+ * Move a ticket to a DIFFERENT board in the same project.
+ *
+ * The ticket's `number` is unique per board, so it has to be reallocated in the
+ * destination, and the ticket has to land in a real column of that board.
+ */
+export async function moveTicketToBoard(input: {
+  ticketId: string;
+  toBoardId: string;
+}): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = moveToBoardSchema.safeParse(input);
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    const ctx = await requireTicket(parsed.data.ticketId);
+    // Authorizes the destination independently -- it is a client-supplied id.
+    const destination = await requireBoard(parsed.data.toBoardId);
+
+    if (destination.board.id === ctx.ticket.boardId) return ok('Already on that board.');
+    // Both boards are membership-checked above, but they could still belong to
+    // different projects; keep a ticket inside its own project.
+    if (destination.project.id !== ctx.project.id) {
+      return fail('A ticket can only move between boards of the same project.');
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const firstColumn = await tx.boardColumn.findFirst({
+        where: { boardId: destination.board.id },
+        orderBy: [{ position: 'asc' }, { id: 'asc' }],
+        select: { id: true },
+      });
+      if (!firstColumn) throw new Error('destination board has no columns');
+
+      const [highestNumber, highestPosition] = await Promise.all([
+        tx.ticket.aggregate({
+          where: { boardId: destination.board.id },
+          _max: { number: true },
+        }),
+        tx.ticket.aggregate({
+          where: { boardId: destination.board.id, columnId: firstColumn.id },
+          _max: { position: true },
+        }),
+      ]);
+
+      await tx.ticket.update({
+        where: { id: ctx.ticket.id },
+        data: {
+          boardId: destination.board.id,
+          columnId: firstColumn.id,
+          number: (highestNumber._max.number ?? 0) + 1,
+          position: (highestPosition._max.position ?? 0) + 1,
+        },
+      });
+    });
+
+    revalidatePath(boardPath(ctx.org, ctx.project, ctx.board));
+    revalidatePath(boardPath(destination.org, destination.project, destination.board));
+    return ok('Moved to another board.');
   });
 }

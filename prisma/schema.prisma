@@ -152,6 +152,12 @@ model Ticket {
   createdBy   User        @relation("TicketCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   assigneeId  String?
   assignee    User?       @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  /// Set from the card context menu. NONE is the default so existing rows need
+  /// no backfill and the field never has to be nullable.
+  priority    Priority    @default(NONE)
+  /// Date only in intent; stored as a timestamp because Postgres via Prisma has
+  /// no plain date type here. Null means no due date.
+  dueDate     DateTime?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
@@ -159,6 +165,16 @@ model Ticket {
 
   @@unique([boardId, number])
   @@index([columnId, position])
+  @@index([boardId, priority])
+  @@index([boardId, dueDate])
+}
+
+enum Priority {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
 }
 
 model Comment {
