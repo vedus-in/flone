@@ -35,6 +35,10 @@ model User {
   email        String   @unique
   name         String
   passwordHash String
+  /// Site-wide administrator. Distinct from the per-organization Role: an
+  /// admin governs the instance (registration, other admins), NOT tenant data.
+  /// Being an admin grants NO access to any organization's boards or tickets.
+  isAdmin      Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -43,6 +47,17 @@ model User {
   createdTickets  Ticket[]     @relation("TicketCreatedBy")
   assignedTickets Ticket[]     @relation("TicketAssignee")
   comments        Comment[]
+
+  @@index([isAdmin])
+}
+
+/// Single-row table holding instance-wide settings. The id is pinned to
+/// "singleton" so there can only ever be one row.
+model AppSetting {
+  id                  String   @id @default("singleton")
+  registrationEnabled Boolean  @default(true)
+  updatedAt           DateTime @updatedAt
+  updatedById         String?
 }
 
 model Session {

@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { Card } from '@heroui/react/card';
 import { listUserOrgs, loadPage, orgPath } from '@/lib/authz';
-import { Badge, ButtonLink } from '@/components/ui';
+import { Badge, ButtonLink, PageHeader } from '@/components/ui';
 
 export const metadata: Metadata = { title: 'Organizations' };
 
@@ -24,28 +25,39 @@ export default async function HomePage() {
   if (only) redirect(orgPath(only));
 
   return (
-    <>
-      <div className="page-head">
-        <div className="stack-sm">
-          <h1>Your organizations</h1>
-          <p className="muted">Pick an organization to see its projects.</p>
-        </div>
-        <ButtonLink href="/orgs/new">New organization</ButtonLink>
-      </div>
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        title="Your organizations"
+        description="Each one is a separate workspace. Nothing is shared between them."
+        actions={<ButtonLink href="/orgs/new">New organization</ButtonLink>}
+      />
 
-      <div className="grid">
+      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {orgs.map((org) => (
-          <Link key={org.id} href={orgPath(org)} className="card card-link">
-            <div className="stack-sm">
-              <div className="row">
-                <h2>{org.name}</h2>
+          <li key={org.id}>
+            {/* The title's `::after` covers the card, so the whole tile is one
+                link -- one tab stop, one accessible name, no nested anchors. */}
+            <Card className="h-full gap-2 transition-colors hover:bg-surface-hover has-[a:focus-visible]:focus-ring">
+              <Card.Header className="flex-row items-start justify-between gap-3">
+                <Card.Title className="min-w-0 text-base">
+                  <Link
+                    href={orgPath(org)}
+                    className="rounded-sm outline-none after:absolute after:inset-0 after:content-['']"
+                  >
+                    {org.name}
+                  </Link>
+                </Card.Title>
                 <Badge tone="accent">{org.role}</Badge>
-              </div>
-              <p className="faint mono">/orgs/{org.slug}</p>
-            </div>
-          </Link>
+              </Card.Header>
+              <Card.Content>
+                <Card.Description className="truncate font-mono text-xs">
+                  /orgs/{org.slug}
+                </Card.Description>
+              </Card.Content>
+            </Card>
+          </li>
         ))}
-      </div>
-    </>
+      </ul>
+    </div>
   );
 }

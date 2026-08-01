@@ -187,6 +187,43 @@ export async function listUserOrgs(): Promise<Array<OrgRef & { role: Role }>> {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Site administration                                                         */
+/*                                                                             */
+/* `User.isAdmin` is INSTANCE-level and is deliberately NOT tenant access. A    */
+/* site admin governs registration and other admins. It grants NO ability to    */
+/* read or write any organization's projects, boards, tickets or comments, and  */
+/* nothing below weakens the org scoping above: these helpers only ever answer  */
+/* "is the CALLER an admin?", never "may the caller see this resource?".        */
+/*                                                                             */
+/* `isAdmin` is read fresh from the User row rather than carried on the session */
+/* record, so revoking an admin takes effect on the next request instead of     */
+/* whenever their 30-day session happens to expire. The id comes from the       */
+/* session, never from client input.                                           */
+/* -------------------------------------------------------------------------- */
+
+/** Throws UNAUTHENTICATED without a session, FORBIDDEN for a non-admin. */
+export async function requireAdmin(): Promise<SessionUser> {
+  const user = await requireUser();
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { isAdmin: true },
+  });
+  if (!row?.isAdmin) throw new AuthzError('FORBIDDEN');
+  return user;
+}
+
+/** Non-throwing variant, for deciding whether to render the admin nav entry. */
+export async function isCurrentUserAdmin(): Promise<boolean> {
+  const session = await readSession();
+  if (!session) return false;
+  const row = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { isAdmin: true },
+  });
+  return row?.isAdmin === true;
+}
+
+/* -------------------------------------------------------------------------- */
 /* URL-tuple loaders (pages / layouts)                                         */
 /*                                                                             */
 /* Every ancestor segment of the URL is a CONSTRAINT in the SAME query, so a    */

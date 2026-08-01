@@ -1,5 +1,9 @@
 import Link from 'next/link';
 import { Role } from '@prisma/client';
+import { Breadcrumbs } from '@heroui/react/breadcrumbs';
+import { Card } from '@heroui/react/card';
+import { Description } from '@heroui/react/description';
+import { Disclosure } from '@heroui/react/disclosure';
 import { prisma } from '@/lib/db';
 import {
   atLeast,
@@ -8,14 +12,17 @@ import {
   orgSettingsPath,
   projectPath,
   requireOrgBySlug,
+  type OrgRef,
 } from '@/lib/authz';
 import {
   Badge,
   EmptyState,
-  Field,
   Input,
+  Label,
+  PageHeader,
   SubmitButton,
   Textarea,
+  TextField,
 } from '@/components/ui';
 import { ActionForm } from '../../action-form';
 import { createProject } from './actions';
@@ -27,6 +34,32 @@ function preview(text: string): string {
   return single.length > DESCRIPTION_PREVIEW
     ? `${single.slice(0, DESCRIPTION_PREVIEW)}...`
     : single;
+}
+
+const NAV_ITEM =
+  'rounded-lg px-3 py-1.5 text-sm font-medium outline-none transition-colors focus-visible:focus-ring';
+const NAV_ON = 'bg-surface text-foreground shadow-surface';
+const NAV_OFF = 'text-muted hover:text-foreground';
+
+/**
+ * Route-driven section switcher. Deliberately `next/link` rather than HeroUI's
+ * `Tabs`: these are two pages, not two panels, and the active one is decided by
+ * the URL, not by client state.
+ */
+function SectionNav({ org }: { org: OrgRef }) {
+  return (
+    <nav
+      aria-label="Organization sections"
+      className="flex w-fit items-center gap-1 rounded-xl bg-surface-secondary p-1"
+    >
+      <Link href={orgPath(org)} aria-current="page" className={`${NAV_ITEM} ${NAV_ON}`}>
+        Projects
+      </Link>
+      <Link href={orgSettingsPath(org)} className={`${NAV_ITEM} ${NAV_OFF}`}>
+        Members &amp; settings
+      </Link>
+    </nav>
+  );
 }
 
 export default async function OrganizationPage({
@@ -59,112 +92,137 @@ export default async function OrganizationPage({
   const empty = projects.length === 0;
 
   return (
-    <>
-      <nav className="breadcrumb" aria-label="Breadcrumb">
-        <Link href="/">Organizations</Link>
-        <span className="sep">/</span>
-        <span aria-current="page">{ctx.org.name}</span>
-      </nav>
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-5">
+        <Breadcrumbs>
+          <Breadcrumbs.Item href="/">Organizations</Breadcrumbs.Item>
+          <Breadcrumbs.Item>{ctx.org.name}</Breadcrumbs.Item>
+        </Breadcrumbs>
 
-      <div className="page-head">
-        <div className="stack-sm">
-          <h1>{ctx.org.name}</h1>
-          <p className="faint mono">/orgs/{ctx.org.slug}</p>
-        </div>
-        <Badge tone="accent">{ctx.role}</Badge>
+        <PageHeader title={ctx.org.name}>
+          <Badge tone="accent">{ctx.role}</Badge>
+          <span className="font-mono text-xs text-muted">/orgs/{ctx.org.slug}</span>
+        </PageHeader>
+
+        <SectionNav org={ctx.org} />
       </div>
 
-      <nav className="tabs" aria-label="Organization sections">
-        <Link className="tab" aria-current="page" href={orgPath(ctx.org)}>
-          Projects
-        </Link>
-        <Link className="tab" href={orgSettingsPath(ctx.org)}>
-          Members &amp; settings
-        </Link>
-      </nav>
+      <section className="flex flex-col gap-4" aria-labelledby="projects-heading">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="projects-heading" className="text-sm font-medium text-foreground">
+            Projects
+          </h2>
+          {!empty ? (
+            <span className="text-xs text-muted">
+              {projects.length} {projects.length === 1 ? 'project' : 'projects'}
+            </span>
+          ) : null}
+        </div>
 
-      <div className="stack">
         {empty ? (
           <EmptyState
             title="No projects yet"
             description={
               canManage
-                ? 'A project groups boards for one piece of work. Create the first one below.'
+                ? 'A project groups the boards for one piece of work. Create the first one below.'
                 : 'Ask an owner or admin to create one.'
             }
           />
         ) : (
-          <div className="grid">
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((project) => (
-              <Link
-                key={project.id}
-                href={projectPath(ctx.org, project)}
-                className="card card-link"
-              >
-                <div className="stack-sm">
-                  <div className="row">
+              <li key={project.id}>
+                {/* The title's `::after` covers the card, so the whole tile is
+                    one link -- one tab stop, one accessible name. */}
+                <Card className="h-full gap-2 transition-colors hover:bg-surface-hover has-[a:focus-visible]:focus-ring">
+                  <Card.Header className="flex-row items-center justify-between gap-3">
                     <Badge>{project.key}</Badge>
-                    <h2>{project.name}</h2>
-                  </div>
-                  {project.description ? (
-                    <p className="muted">{preview(project.description)}</p>
-                  ) : null}
-                  <p className="faint">
-                    {project._count.boards} {project._count.boards === 1 ? 'board' : 'boards'}
-                  </p>
-                </div>
-              </Link>
+                    <span className="text-xs text-muted">
+                      {project._count.boards}{' '}
+                      {project._count.boards === 1 ? 'board' : 'boards'}
+                    </span>
+                  </Card.Header>
+                  <Card.Content>
+                    <Card.Title className="text-base">
+                      <Link
+                        href={projectPath(ctx.org, project)}
+                        className="rounded-sm outline-none after:absolute after:inset-0 after:content-['']"
+                      >
+                        {project.name}
+                      </Link>
+                    </Card.Title>
+                    {project.description ? (
+                      <Card.Description className="line-clamp-2">
+                        {preview(project.description)}
+                      </Card.Description>
+                    ) : null}
+                  </Card.Content>
+                </Card>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
+      </section>
 
-        {/* Empty states never dangle an action the viewer's role cannot perform.
-            The action re-checks the role regardless (SPEC 5). */}
-        {canManage ? (
-          <details className="card" open={empty}>
-            <summary>New project</summary>
-            <ActionForm action={createProject} className="stack" aria-label="New project">
-              <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+      {/* Empty states never dangle an action the viewer's role cannot perform.
+          The action re-checks the role regardless (SPEC 5). */}
+      {canManage ? (
+        <section aria-labelledby="new-project-heading">
+          <Card className="gap-0 p-0">
+            <Disclosure defaultExpanded={empty}>
+              <Disclosure.Heading level={2} id="new-project-heading">
+                <Disclosure.Trigger className="flex w-full items-center justify-between gap-3 rounded-2xl px-5 py-4 text-sm font-medium text-foreground">
+                  New project
+                  <Disclosure.Indicator />
+                </Disclosure.Trigger>
+              </Disclosure.Heading>
+              <Disclosure.Content>
+                <div className="px-5 pb-5">
+                  <ActionForm
+                    action={createProject}
+                    className="flex flex-col gap-5"
+                    aria-label="New project"
+                  >
+                    <input type="hidden" name="orgSlug" value={ctx.org.slug} />
 
-              <Field htmlFor="project-name" label="Name">
-                <Input
-                  id="project-name"
-                  name="name"
-                  required
-                  maxLength={80}
-                  autoFocus={empty}
-                  placeholder="Website Redesign"
-                  autoComplete="off"
-                />
-              </Field>
+                    <div className="grid gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                      <TextField isRequired maxLength={80} autoComplete="off" fullWidth>
+                        <Label>Name</Label>
+                        <Input
+                          name="name"
+                          autoFocus={empty}
+                          placeholder="Website Redesign"
+                        />
+                      </TextField>
 
-              <Field
-                htmlFor="project-key"
-                label="Key"
-                hint="Optional. 2 to 10 characters, a letter followed by letters or digits. We derive one from the name if you leave this blank."
-              >
-                <Input
-                  id="project-key"
-                  name="key"
-                  maxLength={10}
-                  pattern="[A-Za-z][A-Za-z0-9]{1,9}"
-                  placeholder="WEB"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </Field>
+                      <TextField
+                        maxLength={10}
+                        pattern="[A-Za-z][A-Za-z0-9]{1,9}"
+                        autoComplete="off"
+                        fullWidth
+                      >
+                        <Label>Key</Label>
+                        <Input name="key" placeholder="WEB" spellCheck={false} />
+                        <Description>Optional. Derived from the name if blank.</Description>
+                      </TextField>
+                    </div>
 
-              <Field htmlFor="project-description" label="Description" hint="Optional.">
-                <Textarea id="project-description" name="description" maxLength={2000} />
-              </Field>
+                    <TextField maxLength={2000} fullWidth>
+                      <Label>Description</Label>
+                      <Textarea name="description" rows={3} />
+                      <Description>Optional.</Description>
+                    </TextField>
 
-              <div className="row">
-                <SubmitButton pendingLabel="Creating...">Create project</SubmitButton>
-              </div>
-            </ActionForm>
-          </details>
-        ) : null}
-      </div>
-    </>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <SubmitButton pendingLabel="Creating...">Create project</SubmitButton>
+                    </div>
+                  </ActionForm>
+                </div>
+              </Disclosure.Content>
+            </Disclosure>
+          </Card>
+        </section>
+      ) : null}
+    </div>
   );
 }

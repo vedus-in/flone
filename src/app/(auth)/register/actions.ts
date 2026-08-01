@@ -11,6 +11,7 @@ import { hashPassword } from '@/lib/password';
 import { LIMITS, clientIp, consume, registerIpKey } from '@/lib/rate-limit';
 import { ERRORS, type ActionResult } from '@/lib/result';
 import { createSession, rotatePresentedSession, setSessionCookie } from '@/lib/session';
+import { isRegistrationOpen } from '@/lib/settings';
 import { emailSchema, passwordSchema, userNameSchema } from '@/lib/validation';
 
 /**
@@ -21,6 +22,11 @@ import { emailSchema, passwordSchema, userNameSchema } from '@/lib/validation';
  * (SPEC 7.3). A user can end up with zero orgs anyway -- removed from their only
  * one, or the org deleted -- so that path has to exist regardless, and having it
  * exercised on every signup is better than having two.
+ *
+ * THIS ACTION IS THE ENFORCEMENT POINT FOR THE REGISTRATION GATE. `/register`
+ * also calls `isRegistrationOpen()` so a closed instance does not draw a form
+ * that cannot work, but that is cosmetic: a Server Action is a directly
+ * addressable POST endpoint and is reachable whatever the page rendered.
  *
  * ACCEPTED RISK (SPEC 4.4 / 8.2): registration reveals whether an email is
  * already registered. Hiding it requires the "we sent you an email" pattern and
@@ -33,6 +39,7 @@ import { emailSchema, passwordSchema, userNameSchema } from '@/lib/validation';
 
 const EMAIL_TAKEN = 'An account with that email already exists.';
 const CHECK_FIELDS = 'Please check the highlighted fields.';
+const REGISTRATION_CLOSED = 'Registration is currently closed.';
 
 /**
  * Closed literals. zod's own messages are never surfaced, so no schema internal
@@ -88,6 +95,15 @@ function emailTaken(): ActionResult {
 }
 
 async function attemptRegister(formData: FormData): Promise<ActionResult> {
+  // FIRST, before the rate limiter and long before any scrypt work: a closed
+  // instance must cost a single cheap read and nothing else. `isRegistrationOpen`
+  // carries the bootstrap exception -- with zero users it returns true whatever
+  // the flag says, so a disabled flag on an empty database cannot lock everyone
+  // out permanently.
+  if (!(await isRegistrationOpen())) {
+    return { ok: false, error: REGISTRATION_CLOSED };
+  }
+
   // Consumed before any hashing (SPEC 4.3).
   const ip = await clientIp();
   if (!consume(registerIpKey(ip), LIMITS.REGISTER_IP.limit, LIMITS.REGISTER_IP.windowMs)) {
@@ -120,9 +136,24 @@ async function attemptRegister(formData: FormData): Promise<ActionResult> {
 
   let userId: string;
   try {
-    const created = await prisma.user.create({
-      data: { name, email, passwordHash },
-      select: { id: true },
+    // The count and the insert must agree, so both happen in ONE transaction:
+    // the very first account on an instance is its first site administrator, and
+    // nothing else can hand out `isAdmin` (SPEC -- site administration).
+    //
+    // ACCEPTED RISK: under READ COMMITTED two simultaneous first registrations
+    // can both observe an empty table and both become admins. That is harmless
+    // -- an admin governs registration and other admins, never tenant data --
+    // and it is strictly safer than the alternative failure mode, an instance
+    // with users and no admin at all.
+    //
+    // `isAdmin` is INSTANCE-level and grants NO access to any organization's
+    // projects, boards, tickets or comments.
+    const created = await prisma.$transaction(async (tx) => {
+      const userCount = await tx.user.count();
+      return tx.user.create({
+        data: { name, email, passwordHash, isAdmin: userCount === 0 },
+        select: { id: true },
+      });
     });
     userId = created.id;
   } catch (e) {

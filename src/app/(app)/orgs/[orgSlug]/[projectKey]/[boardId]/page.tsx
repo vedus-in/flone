@@ -1,13 +1,9 @@
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import {
-  boardPath,
-  loadPage,
-  orgPath,
-  projectPath,
-  requireBoardInPath,
-} from '@/lib/authz';
+import { Badge, PageHeader } from '@/components/ui';
+import { boardPath, loadPage, orgPath, projectPath, requireBoardInPath } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { COLUMN_ORDER, TICKET_ORDER } from '@/lib/validation';
 import { BoardView, type BoardColumnData } from './board-view';
@@ -23,6 +19,10 @@ import { BoardView, type BoardColumnData } from './board-view';
  * The column/ticket read below is rooted at `ctx.board.id`, an id that only
  * exists because the membership predicate above already matched. It is never
  * built from a client-supplied board id.
+ *
+ * This stays a Server Component: every HeroUI module carries its own
+ * `'use client'`, so the only client code shipped from this route is
+ * `board-view.tsx`, which genuinely needs hooks.
  */
 
 type BoardParams = {
@@ -30,6 +30,36 @@ type BoardParams = {
   projectKey: string;
   boardId: string;
 };
+
+/**
+ * Breadcrumb trail. Plain `next/link` anchors rather than a widget: these are
+ * navigation, they must keep client-side routing, and the separator is inert
+ * decoration.
+ */
+function CrumbSeparator() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3 shrink-0 opacity-50">
+      <path
+        d="M6 3.5 10.5 8 6 12.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function Crumb({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="rounded-sm px-0.5 font-medium no-underline hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+    >
+      {children}
+    </Link>
+  );
+}
 
 export default async function BoardPage({ params }: { params: Promise<BoardParams> }) {
   // Next 15: params is a Promise. A query must never be built from an undefined
@@ -77,28 +107,29 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
   const href = boardPath(ctx.org, ctx.project, ctx.board);
 
   return (
-    <div className="stack">
-      <nav className="breadcrumb" aria-label="Breadcrumb">
-        <Link href={orgPath(ctx.org)}>{ctx.org.name}</Link>
-        <span className="sep" aria-hidden="true">
-          /
+    <div className="flex flex-col gap-6">
+      <nav
+        aria-label="Breadcrumb"
+        className="flex flex-wrap items-center gap-1 text-sm text-muted"
+      >
+        <Crumb href={orgPath(ctx.org)}>{ctx.org.name}</Crumb>
+        <CrumbSeparator />
+        <Crumb href={projectPath(ctx.org, ctx.project)}>{ctx.project.name}</Crumb>
+        <CrumbSeparator />
+        <span aria-current="page" className="px-0.5 font-medium text-foreground">
+          {ctx.board.name}
         </span>
-        <Link href={projectPath(ctx.org, ctx.project)}>{ctx.project.name}</Link>
-        <span className="sep" aria-hidden="true">
-          /
-        </span>
-        <span aria-current="page">{ctx.board.name}</span>
       </nav>
 
-      <div className="page-head">
-        <div className="stack-sm">
-          <h1>{ctx.board.name}</h1>
-          <p className="faint">
-            <span className="mono">{ctx.project.key}</span> &middot; {ticketCount}{' '}
-            {ticketCount === 1 ? 'ticket' : 'tickets'}
-          </p>
-        </div>
-      </div>
+      <PageHeader title={ctx.board.name}>
+        <Badge className="font-mono">{ctx.project.key}</Badge>
+        <span className="text-sm text-muted tabular-nums">
+          {ticketCount} {ticketCount === 1 ? 'ticket' : 'tickets'}
+        </span>
+        <span className="text-sm text-muted">
+          &middot; {columns.length} {columns.length === 1 ? 'column' : 'columns'}
+        </span>
+      </PageHeader>
 
       <BoardView
         boardId={ctx.board.id}
@@ -108,7 +139,10 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
       />
 
       {ticketCount === 0 ? (
-        <p className="faint">Use the arrows on a card to move it between columns.</p>
+        <p className="text-sm text-muted">
+          Add a card to any column to get started. Use the arrows on a card to move it between
+          columns.
+        </p>
       ) : null}
     </div>
   );

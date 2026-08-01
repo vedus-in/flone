@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import { Card } from '@heroui/react/card';
+import { Description } from '@heroui/react/description';
+import { Disclosure } from '@heroui/react/disclosure';
 import { listUserOrgs, loadPage } from '@/lib/authz';
-import { Field, Input, SubmitButton } from '@/components/ui';
+import { ButtonLink, Input, Label, SubmitButton, TextField } from '@/components/ui';
 import { ActionForm } from '../../action-form';
 import { createOrganization } from './actions';
 
@@ -17,66 +19,72 @@ export default async function NewOrganizationPage() {
   const firstRun = orgs.length === 0;
 
   return (
-    <div className="container container-narrow">
-      <div className="stack">
-        <div className="stack-sm">
-          <h1>{firstRun ? "Let's set up your workspace" : 'New organization'}</h1>
-          <p className="muted">
-            {firstRun
-              ? 'An organization holds your projects, boards and teammates. You can create more later.'
-              : 'Organizations are separate workspaces. Nothing is shared between them.'}
-          </p>
-        </div>
+    <div className="mx-auto flex w-full max-w-lg flex-col gap-6">
+      <header className="flex flex-col gap-2">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          {firstRun ? "Let's set up your workspace" : 'New organization'}
+        </h1>
+        <p className="text-sm text-muted">
+          {firstRun
+            ? 'An organization holds your projects, boards and teammates. You can create more later.'
+            : 'Organizations are separate workspaces. Nothing is shared between them.'}
+        </p>
+      </header>
 
-        <div className="card">
-          <ActionForm action={createOrganization} className="stack" aria-label="New organization">
-            <Field
-              htmlFor="org-name"
-              label="Name"
-              hint="We will turn this into a URL, for example /orgs/acme."
-            >
-              <Input
-                id="org-name"
-                name="name"
-                required
-                minLength={2}
-                maxLength={60}
-                autoFocus
-                autoComplete="organization"
-                placeholder="Acme"
-              />
-            </Field>
+      <Card className="p-6">
+        <ActionForm
+          action={createOrganization}
+          className="flex flex-col gap-5"
+          aria-label="New organization"
+        >
+          {/* Per HeroUI v3: value-ish props belong on TextField, `name` on the Input. */}
+          <TextField
+            isRequired
+            minLength={2}
+            maxLength={60}
+            autoComplete="organization"
+            fullWidth
+          >
+            <Label>Name</Label>
+            <Input name="name" autoFocus placeholder="Acme" />
+            <Description>We turn this into a URL, for example /orgs/acme.</Description>
+          </TextField>
 
-            <details>
-              <summary>Advanced: choose a URL</summary>
-              <Field
-                htmlFor="org-slug"
-                label="URL"
-                hint="Leave blank to generate one. 2 to 40 lowercase letters, numbers or dashes."
-              >
-                <Input
-                  id="org-slug"
-                  name="slug"
+          <Disclosure>
+            <Disclosure.Heading level={2}>
+              <Disclosure.Trigger className="flex w-full items-center justify-between gap-2 rounded-lg text-sm font-medium text-muted transition-colors hover:text-foreground">
+                Choose the URL yourself
+                <Disclosure.Indicator />
+              </Disclosure.Trigger>
+            </Disclosure.Heading>
+            <Disclosure.Content>
+              <Disclosure.Body>
+                <TextField
                   maxLength={40}
                   pattern="[a-z0-9][a-z0-9-]{0,38}[a-z0-9]"
-                  placeholder="acme"
                   autoComplete="off"
-                  spellCheck={false}
-                />
-              </Field>
-            </details>
+                  fullWidth
+                >
+                  <Label>URL</Label>
+                  <Input name="slug" placeholder="acme" spellCheck={false} />
+                  <Description>
+                    Leave blank to generate one. 2 to 40 lowercase letters, numbers or dashes.
+                  </Description>
+                </TextField>
+              </Disclosure.Body>
+            </Disclosure.Content>
+          </Disclosure>
 
-            <div className="row">
-              <SubmitButton pendingLabel="Creating...">Create organization</SubmitButton>
-              {!firstRun ? (
-                <Link href="/" className="btn btn-ghost">
-                  Cancel
-                </Link>
-              ) : null}
-            </div>
-          </ActionForm>
-        </div>
-      </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <SubmitButton pendingLabel="Creating...">Create organization</SubmitButton>
+            {!firstRun ? (
+              <ButtonLink href="/" variant="ghost">
+                Cancel
+              </ButtonLink>
+            ) : null}
+          </div>
+        </ActionForm>
+      </Card>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, ButtonLink, EmptyState } from '@/components/ui';
+import { Button, ButtonLink } from '@/components/ui';
 
 /**
  * The app-wide error boundary.
@@ -14,6 +14,10 @@ import { Button, ButtonLink, EmptyState } from '@/components/ui';
  *
  * Note this boundary does NOT catch errors thrown by the root layout itself;
  * that is by design and requires a `global-error.tsx`, which is out of scope.
+ *
+ * `reset()` re-renders the segment that threw, so "Try again" is a real retry
+ * and not a page reload. HeroUI's `Button` is a react-aria button: it exposes
+ * `onPress`, not `onClick`.
  */
 export default function AppError({
   error,
@@ -23,20 +27,53 @@ export default function AppError({
   reset: () => void;
 }) {
   return (
-    <main className="auth-shell">
-      <div className="container container-narrow">
-        <EmptyState
-          title="Something went wrong"
-          description="This page couldn't be loaded. The problem has been logged — trying again usually works."
+    <main className="flex min-h-dvh items-center justify-center px-6 py-16">
+      <div className="flex w-full max-w-md flex-col items-center gap-7 text-center">
+        <span
+          aria-hidden="true"
+          className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-danger-soft text-danger-soft-foreground"
         >
-          <span className="row">
-            <Button variant="primary" onClick={reset}>
-              Try again
-            </Button>
-            <ButtonLink href="/">Back to your boards</ButtonLink>
-          </span>
-          {error.digest ? <span className="faint mono">Reference {error.digest}</span> : null}
-        </EmptyState>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            className="size-5"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7.5v5.25" />
+            <path d="M12 16.5h.01" />
+          </svg>
+        </span>
+
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted">
+            Unexpected error
+          </p>
+          <h1 className="text-balance text-2xl font-semibold tracking-tight text-foreground">
+            Something went wrong
+          </h1>
+          <p className="max-w-[44ch] text-pretty text-sm leading-relaxed text-muted">
+            This page couldn’t be loaded. The problem has been logged — trying again usually works.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button variant="primary" onPress={reset}>
+            Try again
+          </Button>
+          <ButtonLink href="/">Back to your boards</ButtonLink>
+        </div>
+
+        {error.digest ? (
+          <p className="text-xs text-muted">
+            Reference{' '}
+            <code className="rounded-md border border-border bg-surface-secondary px-1.5 py-0.5 font-mono break-all text-foreground">
+              {error.digest}
+            </code>
+          </p>
+        ) : null}
       </div>
     </main>
   );

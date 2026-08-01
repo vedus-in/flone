@@ -1,13 +1,21 @@
 'use client';
 
 /**
- * SPEC 5 "Board UI" -- the interactive shell of the Kanban board.
+ * SPEC 5 "Board UI" -- the interactive shell of the Kanban board, rebuilt on
+ * HeroUI v3.
  *
  * Move buttons, not drag-and-drop. Each card carries two tiny forms whose SUBMIT
  * BUTTONS hold the destination in `name`/`value` -- plain HTML expressing N
  * destinations with no hidden-input duplication. `prev` / `next` are resolved on
  * the SERVER at render time from the column ordering; the client only echoes an
  * id that `moveTicket` re-vets against `ticket.boardId` anyway.
+ *
+ * Those controls stay NATIVE `<button type="submit" name value>` elements
+ * wearing HeroUI's button styles via `buttonVariants()`. That is deliberate: the
+ * whole mechanism depends on the pressed button being the form's *submitter*, so
+ * that `useFormStatus().data` contains its name/value pair. A component that
+ * re-implements press handling could break that contract silently, and the
+ * styles are the only thing this redesign needed from HeroUI here.
  *
  * `useFormStatus()` is the only pending primitive (SPEC 7.11): no
  * `useTransition`, no `useOptimistic`. Its `data` field identifies which button
@@ -19,10 +27,21 @@
  */
 
 import Link from 'next/link';
-import { useActionState, useEffect, useRef, useState } from 'react';
+import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
+import {
+  IconChevronDown,
+  IconChevronLeft,
+  IconChevronRight,
+  IconChevronUp,
+  IconPlus,
+  Input,
+  ScrollShadow,
+  Spinner,
+  buttonVariants,
+} from '@heroui/react';
 
-import { FormError, SubmitButton } from '@/components/ui';
+import { Badge, FormError, SubmitButton } from '@/components/ui';
 import type { ActionResult } from '@/lib/result';
 import { createTicket, moveTicket, reorderTicket } from './actions';
 
@@ -63,10 +82,18 @@ function firstError(...states: Array<ActionResult | null>): string | null {
   return null;
 }
 
+/** Compact icon button, sized down from HeroUI's `sm` so a card stays dense. */
+const ICON_BUTTON = buttonVariants({
+  variant: 'ghost',
+  size: 'sm',
+  isIconOnly: true,
+  className: 'size-7 md:size-7',
+});
+
 type IconSubmitProps = {
   name: string;
   value: string;
-  symbol: string;
+  icon: ReactNode;
   label: string;
   disabled?: boolean;
 };
@@ -76,7 +103,7 @@ type IconSubmitProps = {
  * nearest ancestor form. `data.get(name)` is what makes "only the pressed button
  * shows activity" possible without any client state.
  */
-function IconSubmit({ name, value, symbol, label, disabled = false }: IconSubmitProps) {
+function IconSubmit({ name, value, icon, label, disabled = false }: IconSubmitProps) {
   const { pending, data } = useFormStatus();
   const isActive = pending && data?.get(name) === value;
 
@@ -85,13 +112,13 @@ function IconSubmit({ name, value, symbol, label, disabled = false }: IconSubmit
       type="submit"
       name={name}
       value={value}
-      className="btn btn-ghost btn-sm btn-icon"
+      className={ICON_BUTTON}
       disabled={disabled || pending}
       aria-label={label}
       title={label}
       aria-busy={isActive || undefined}
     >
-      <span aria-hidden="true">{isActive ? '···' : symbol}</span>
+      {isActive ? <Spinner size="sm" color="current" aria-hidden="true" /> : icon}
     </button>
   );
 }
@@ -124,31 +151,42 @@ function TicketCard({
   const error = firstError(moveState, reorderState);
 
   return (
-    <li className="ticket">
+    <li className="flex flex-col gap-2 rounded-xl border border-border bg-surface-secondary p-3 transition-colors hover:border-border-secondary">
       {/* The card body is an <a>; the move forms are SIBLINGS, never nested. */}
-      <Link href={`${boardHref}/${ticket.number}`} className="ticket-title">
+      <Link
+        href={`${boardHref}/${ticket.number}`}
+        className="rounded-sm text-sm leading-snug font-medium text-foreground no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+      >
         {ticket.title}
       </Link>
 
-      <div className="ticket-meta">
-        <span className="mono">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+        <span className="font-mono tabular-nums">
           {projectKey}-{ticket.number}
         </span>
-        <span>{ticket.assigneeName ?? 'Unassigned'}</span>
+        <span aria-hidden="true" className="opacity-50">
+          &middot;
+        </span>
+        <span className="min-w-0 truncate">{ticket.assigneeName ?? 'Unassigned'}</span>
         {ticket.commentCount > 0 ? (
-          <span>
-            {ticket.commentCount} {ticket.commentCount === 1 ? 'comment' : 'comments'}
-          </span>
+          <>
+            <span aria-hidden="true" className="opacity-50">
+              &middot;
+            </span>
+            <span className="tabular-nums">
+              {ticket.commentCount} {ticket.commentCount === 1 ? 'comment' : 'comments'}
+            </span>
+          </>
         ) : null}
       </div>
 
-      <div className="ticket-actions">
-        <form action={moveAction} className="row">
+      <div className="flex items-center justify-between gap-1">
+        <form action={moveAction} className="flex items-center gap-0.5">
           <input type="hidden" name="ticketId" value={ticket.id} />
           <IconSubmit
             name="toColumnId"
             value={previousColumn?.id ?? ''}
-            symbol="←"
+            icon={<IconChevronLeft />}
             label={
               previousColumn
                 ? `Move "${ticket.title}" to ${previousColumn.name}`
@@ -159,7 +197,7 @@ function TicketCard({
           <IconSubmit
             name="toColumnId"
             value={nextColumn?.id ?? ''}
-            symbol="→"
+            icon={<IconChevronRight />}
             label={
               nextColumn
                 ? `Move "${ticket.title}" to ${nextColumn.name}`
@@ -169,19 +207,19 @@ function TicketCard({
           />
         </form>
 
-        <form action={reorderAction} className="row">
+        <form action={reorderAction} className="flex items-center gap-0.5">
           <input type="hidden" name="ticketId" value={ticket.id} />
           <IconSubmit
             name="direction"
             value="up"
-            symbol="↑"
+            icon={<IconChevronUp />}
             label={`Move "${ticket.title}" up`}
             disabled={isFirst}
           />
           <IconSubmit
             name="direction"
             value="down"
-            symbol="↓"
+            icon={<IconChevronDown />}
             label={`Move "${ticket.title}" down`}
             disabled={isLast}
           />
@@ -222,17 +260,16 @@ function AddTicketForm({ boardId, column, autoFocus }: AddTicketFormProps) {
   }, [state]);
 
   return (
-    <form action={action} className="stack-sm">
+    <form action={action} className="flex flex-col gap-2">
       <input type="hidden" name="boardId" value={boardId} />
       <input type="hidden" name="columnId" value={column.id} />
 
       <label className="visually-hidden" htmlFor={inputId}>
         Add a card to {column.name}
       </label>
-      <input
+      <Input
         id={inputId}
         ref={inputRef}
-        className="input"
         name="title"
         placeholder="Add a card..."
         maxLength={200}
@@ -240,14 +277,14 @@ function AddTicketForm({ boardId, column, autoFocus }: AddTicketFormProps) {
         autoComplete="off"
         autoFocus={autoFocus}
         value={title}
-        onChange={(e) => setTitle(e.target.value)}
+        onChange={(event) => setTitle(event.target.value)}
+        fullWidth
       />
 
-      <div className="row">
-        <SubmitButton variant="secondary" size="sm" pendingLabel="Adding...">
-          Add
-        </SubmitButton>
-      </div>
+      <SubmitButton variant="ghost" size="sm" fullWidth pendingLabel="Adding...">
+        <IconPlus />
+        Add card
+      </SubmitButton>
 
       {state && !state.ok ? <FormError>{state.error}</FormError> : null}
     </form>
@@ -262,53 +299,65 @@ export function BoardView({ boardId, boardHref, projectKey, columns }: BoardView
   const boardHasTickets = columns.some((column) => column.tickets.length > 0);
 
   return (
-    <div className="board">
-      {columns.map((column, columnIndex) => {
-        const previousColumn = columnIndex > 0 ? columns[columnIndex - 1] : null;
-        const nextColumn = columnIndex < columns.length - 1 ? columns[columnIndex + 1] : null;
-        const headingId = `column-${column.id}`;
+    /*
+     * `orientation="horizontal"` is what gives ScrollShadow its `overflow-x`
+     * plus the edge fade that tells you there is more board off-screen. The
+     * negative margin lets focus rings on the outermost cards breathe without
+     * being clipped by that same overflow.
+     */
+    <ScrollShadow orientation="horizontal" className="-mx-1 px-1 py-1">
+      <div className="flex items-start gap-4">
+        {columns.map((column, columnIndex) => {
+          const previousColumn = columnIndex > 0 ? columns[columnIndex - 1] : null;
+          const nextColumn = columnIndex < columns.length - 1 ? columns[columnIndex + 1] : null;
+          const headingId = `column-${column.id}`;
 
-        return (
-          <section key={column.id} className="column" aria-labelledby={headingId}>
-            <div className="column-head">
-              <h2 className="column-title" id={headingId}>
-                {column.name}
-              </h2>
-              <span className="spacer" />
-              <span className="badge" aria-label={`${column.tickets.length} tickets`}>
-                {column.tickets.length}
-              </span>
-            </div>
+          return (
+            <section
+              key={column.id}
+              aria-labelledby={headingId}
+              className="flex w-72 shrink-0 flex-col gap-3 rounded-2xl border border-border bg-surface p-3 sm:w-80"
+            >
+              <div className="flex items-center gap-2 px-1">
+                <h2 id={headingId} className="text-sm font-medium text-foreground">
+                  {column.name}
+                </h2>
+                <Badge className="tabular-nums">{column.tickets.length}</Badge>
+                <span className="visually-hidden">
+                  {column.tickets.length === 1 ? 'ticket' : 'tickets'}
+                </span>
+              </div>
 
-            {column.tickets.length > 0 ? (
-              <ol className="column-list">
-                {column.tickets.map((ticket, ticketIndex) => (
-                  <TicketCard
-                    key={ticket.id}
-                    ticket={ticket}
-                    boardHref={boardHref}
-                    projectKey={projectKey}
-                    previousColumn={previousColumn}
-                    nextColumn={nextColumn}
-                    isFirst={ticketIndex === 0}
-                    isLast={ticketIndex === column.tickets.length - 1}
-                  />
-                ))}
-              </ol>
-            ) : boardHasTickets ? null : columnIndex === 0 ? (
-              <p className="placeholder">Nothing here yet</p>
-            ) : (
-              <p className="faint">Empty</p>
-            )}
+              {column.tickets.length > 0 ? (
+                <ol className="flex flex-col gap-2">
+                  {column.tickets.map((ticket, ticketIndex) => (
+                    <TicketCard
+                      key={ticket.id}
+                      ticket={ticket}
+                      boardHref={boardHref}
+                      projectKey={projectKey}
+                      previousColumn={previousColumn}
+                      nextColumn={nextColumn}
+                      isFirst={ticketIndex === 0}
+                      isLast={ticketIndex === column.tickets.length - 1}
+                    />
+                  ))}
+                </ol>
+              ) : (
+                <p className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-xs text-muted">
+                  {boardHasTickets ? 'Nothing in this column' : 'No cards yet'}
+                </p>
+              )}
 
-            <AddTicketForm
-              boardId={boardId}
-              column={column}
-              autoFocus={columnIndex === 0 && !boardHasTickets}
-            />
-          </section>
-        );
-      })}
-    </div>
+              <AddTicketForm
+                boardId={boardId}
+                column={column}
+                autoFocus={columnIndex === 0 && !boardHasTickets}
+              />
+            </section>
+          );
+        })}
+      </div>
+    </ScrollShadow>
   );
 }

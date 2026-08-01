@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { Badge, Card, Prose } from '@/components/ui';
+import { Badge, ButtonLink, Card, PageHeader, Prose, Separator } from '@/components/ui';
 import {
   atLeast,
   boardPath,
@@ -31,6 +32,10 @@ import {
  *
  * The follow-up read below repeats the membership predicate rather than trusting
  * the id alone, so it is safe on its own terms.
+ *
+ * Presentation only: this page stays a Server Component. Every HeroUI module
+ * ships its own `'use client'`, and the one genuinely interactive part of the
+ * route lives in `comments.tsx`.
  */
 
 type TicketParams = {
@@ -57,6 +62,48 @@ function formatDateTime(value: Date): string {
 /** A one-second window absorbs the write-time skew between the two columns. */
 function wasEdited(createdAt: Date, updatedAt: Date): boolean {
   return updatedAt.getTime() - createdAt.getTime() > 1000;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Local presentation helpers                                                  */
+/* -------------------------------------------------------------------------- */
+
+function CrumbSeparator() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3 shrink-0 opacity-50">
+      <path
+        d="M6 3.5 10.5 8 6 12.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function Crumb({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="rounded-sm px-0.5 font-medium no-underline hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+    >
+      {children}
+    </Link>
+  );
+}
+
+function SectionHeading({ children }: { children: ReactNode }) {
+  return <h2 className="text-sm leading-6 font-medium text-foreground">{children}</h2>;
+}
+
+function Fact({ term, children }: { term: string; children: ReactNode }) {
+  return (
+    <>
+      <dt className="text-muted">{term}</dt>
+      <dd className="min-w-0 text-foreground">{children}</dd>
+    </>
+  );
 }
 
 export default async function TicketPage({ params }: { params: Promise<TicketParams> }) {
@@ -131,114 +178,127 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
   const label = `${ctx.project.key}-${ctx.ticket.number}`;
 
   return (
-    <div className="stack">
-      <nav className="breadcrumb" aria-label="Breadcrumb">
-        <Link href={orgPath(ctx.org)}>{ctx.org.name}</Link>
-        <span className="sep" aria-hidden="true">
-          /
-        </span>
-        <Link href={projectPath(ctx.org, ctx.project)}>{ctx.project.name}</Link>
-        <span className="sep" aria-hidden="true">
-          /
-        </span>
-        <Link href={boardPath(ctx.org, ctx.project, ctx.board)}>{ctx.board.name}</Link>
-        <span className="sep" aria-hidden="true">
-          /
-        </span>
-        <span aria-current="page" className="mono">
+    <div className="flex flex-col gap-6">
+      <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-sm text-muted">
+        <Crumb href={orgPath(ctx.org)}>{ctx.org.name}</Crumb>
+        <CrumbSeparator />
+        <Crumb href={projectPath(ctx.org, ctx.project)}>{ctx.project.name}</Crumb>
+        <CrumbSeparator />
+        <Crumb href={boardPath(ctx.org, ctx.project, ctx.board)}>{ctx.board.name}</Crumb>
+        <CrumbSeparator />
+        <span aria-current="page" className="px-0.5 font-mono font-medium text-foreground">
           {label}
         </span>
       </nav>
 
-      <div className="page-head">
-        <div className="stack-sm">
-          <div className="row">
-            <Badge className="mono">{label}</Badge>
-            <Badge tone="accent">{detail.column.name}</Badge>
-          </div>
-          <h1>{ctx.ticket.title}</h1>
+      <PageHeader
+        title={ctx.ticket.title}
+        actions={
+          <ButtonLink
+            href={boardPath(ctx.org, ctx.project, ctx.board)}
+            variant="secondary"
+            size="sm"
+          >
+            Back to board
+          </ButtonLink>
+        }
+      >
+        <Badge className="font-mono">{label}</Badge>
+        <Badge tone="accent">{detail.column.name}</Badge>
+        <span className="text-sm text-muted">
+          Opened by {detail.createdBy.name} on{' '}
+          <time dateTime={detail.createdAt.toISOString()}>{formatDateTime(detail.createdAt)}</time>
+        </span>
+      </PageHeader>
+
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="flex min-w-0 flex-col gap-6">
+          <Card>
+            <Card.Header>
+              <SectionHeading>Description</SectionHeading>
+            </Card.Header>
+            <Card.Content className="gap-4">
+              {ctx.ticket.description ? (
+                <Prose>{ctx.ticket.description}</Prose>
+              ) : (
+                <p className="text-sm text-muted">No description yet.</p>
+              )}
+
+              <Separator />
+
+              <TicketEditForm
+                ticketId={ctx.ticket.id}
+                title={ctx.ticket.title}
+                description={ctx.ticket.description ?? ''}
+              />
+            </Card.Content>
+          </Card>
+
+          <Card>
+            <Card.Header>
+              <SectionHeading>Comments</SectionHeading>
+              <Card.Description>
+                {comments.length === 0
+                  ? 'Nothing here yet'
+                  : `${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}`}
+              </Card.Description>
+            </Card.Header>
+            <Card.Content className="gap-4">
+              <CommentThread
+                ticketId={ctx.ticket.id}
+                comments={comments}
+                currentUserName={ctx.user.name}
+              />
+            </Card.Content>
+          </Card>
         </div>
+
+        <aside className="flex min-w-0 flex-col gap-4">
+          <Card>
+            <Card.Header>
+              <SectionHeading>Details</SectionHeading>
+            </Card.Header>
+            <Card.Content className="gap-4">
+              <TicketMoveForm
+                ticketId={ctx.ticket.id}
+                columnId={detail.column.id}
+                columns={columns}
+              />
+
+              <TicketAssignForm
+                ticketId={ctx.ticket.id}
+                assigneeId={detail.assignee?.id ?? null}
+                members={members}
+              />
+
+              <Separator />
+
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 text-sm">
+                <Fact term="Assignee">{detail.assignee?.name ?? 'Unassigned'}</Fact>
+                <Fact term="Reporter">{detail.createdBy.name}</Fact>
+                <Fact term="Created">
+                  <time dateTime={detail.createdAt.toISOString()}>
+                    {formatDateTime(detail.createdAt)}
+                  </time>
+                </Fact>
+                <Fact term="Updated">
+                  <time dateTime={detail.updatedAt.toISOString()}>
+                    {formatDateTime(detail.updatedAt)}
+                  </time>
+                </Fact>
+              </dl>
+            </Card.Content>
+          </Card>
+
+          {canDeleteTicket ? (
+            <Card>
+              <Card.Content>
+                <TicketDeleteForm ticketId={ctx.ticket.id} />
+              </Card.Content>
+            </Card>
+          ) : null}
+        </aside>
       </div>
-
-      <Card>
-        <div className="stack">
-          <h2>Description</h2>
-          {ctx.ticket.description ? (
-            <Prose>{ctx.ticket.description}</Prose>
-          ) : (
-            <p className="muted">No description.</p>
-          )}
-
-          <hr className="divider" />
-
-          <div className="row">
-            <div className="stack-sm">
-              <span className="label">Assignee</span>
-              <span>{detail.assignee?.name ?? 'Unassigned'}</span>
-            </div>
-            <div className="stack-sm">
-              <span className="label">Reporter</span>
-              <span>{detail.createdBy.name}</span>
-            </div>
-            <div className="stack-sm">
-              <span className="label">Created</span>
-              <time dateTime={detail.createdAt.toISOString()}>
-                {formatDateTime(detail.createdAt)}
-              </time>
-            </div>
-            <div className="stack-sm">
-              <span className="label">Updated</span>
-              <time dateTime={detail.updatedAt.toISOString()}>
-                {formatDateTime(detail.updatedAt)}
-              </time>
-            </div>
-          </div>
-
-          <details>
-            <summary>Edit ticket</summary>
-            <TicketEditForm
-              ticketId={ctx.ticket.id}
-              title={ctx.ticket.title}
-              description={ctx.ticket.description ?? ''}
-            />
-          </details>
-        </div>
-      </Card>
-
-      <div className="grid">
-        <Card tight>
-          <TicketMoveForm
-            ticketId={ctx.ticket.id}
-            columnId={detail.column.id}
-            columns={columns}
-          />
-        </Card>
-        <Card tight>
-          <TicketAssignForm
-            ticketId={ctx.ticket.id}
-            assigneeId={detail.assignee?.id ?? null}
-            members={members}
-          />
-        </Card>
-      </div>
-
-      <Card>
-        <div className="stack">
-          <h2>
-            Comments{' '}
-            <span className="faint">
-              ({comments.length})
-            </span>
-          </h2>
-          <CommentThread ticketId={ctx.ticket.id} comments={comments} />
-        </div>
-      </Card>
-
-      {canDeleteTicket ? (
-        <Card className="danger-zone" tight>
-          <TicketDeleteForm ticketId={ctx.ticket.id} />
-        </Card>
-      ) : null}
     </div>
   );
 }

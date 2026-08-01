@@ -12,17 +12,32 @@
  * also the double-submit guard.
  *
  * Every piece of user text below is rendered as an escaped React child, and
- * multi-line text goes through `.prose` (`white-space: pre-wrap`). There is no
- * markdown renderer, no autolinker and no use of React's raw-HTML escape hatch:
- * the app never constructs HTML from user input.
+ * multi-line text goes through `Prose` (`.pre-wrap`). There is no markdown
+ * renderer, no autolinker and no use of React's raw-HTML escape hatch: the app
+ * never constructs HTML from user input.
  *
  * Permission flags (`canManage`, `canDelete`) are computed on the SERVER and
  * passed down. They are politeness only -- every action re-checks the role.
+ *
+ * The two selects here stay NATIVE `<select>` elements wearing HeroUI's field
+ * styles. "Unassigned" submits the empty string, which is the exact value
+ * `assignTicket`'s schema accepts to clear the assignee; a listbox keyed by a
+ * blank id would be a wire-format change, and this file may not change wire
+ * formats.
  */
 
-import { useActionState, useEffect, useRef, useState } from 'react';
+import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Avatar } from '@heroui/react';
 
-import { FormError, Prose, SubmitButton } from '@/components/ui';
+import {
+  Field,
+  FormError,
+  Input,
+  Prose,
+  Separator,
+  SubmitButton,
+  Textarea,
+} from '@/components/ui';
 import type { ActionResult } from '@/lib/result';
 import { moveTicket } from '../actions';
 import {
@@ -53,12 +68,107 @@ export type CommentItem = {
   canManage: boolean;
 };
 
+function cx(...values: Array<string | false | null | undefined>): string {
+  return values.filter(Boolean).join(' ');
+}
+
 function resultError(state: ActionResult | null): string | null {
   return state && !state.ok ? state.error : null;
 }
 
 function resultMessage(state: ActionResult | null): string | null {
   return state && state.ok && state.message ? state.message : null;
+}
+
+const NO_FIELD_ERRORS: Record<string, string> = {};
+
+function fieldErrorsOf(state: ActionResult | null): Record<string, string> {
+  return state && !state.ok && state.fieldErrors ? state.fieldErrors : NO_FIELD_ERRORS;
+}
+
+/**
+ * `Array.from` rather than indexing: a name may begin with an astral character,
+ * and `name[0]` would slice a surrogate pair in half.
+ */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  const first = Array.from(parts[0])[0] ?? '';
+  const last = parts.length > 1 ? (Array.from(parts[parts.length - 1])[0] ?? '') : '';
+  return (first + last).toLocaleUpperCase();
+}
+
+/** Native `<select>` wearing HeroUI's field styles, sized to match a `sm` button. */
+const SELECT_CLASS = 'input h-9 w-full min-w-0 py-0 md:h-8';
+
+/* -------------------------------------------------------------------------- */
+/* Disclosure                                                                  */
+/* -------------------------------------------------------------------------- */
+
+type CollapsibleProps = {
+  summary: ReactNode;
+  children: ReactNode;
+  tone?: 'default' | 'danger';
+  className?: string;
+};
+
+/**
+ * A `<details>`, not a scripted disclosure: it is the accessible default, it
+ * works before hydration, and the forms inside stay mounted when it closes so a
+ * half-written edit is never thrown away.
+ */
+function Collapsible({ summary, children, tone = 'default', className }: CollapsibleProps) {
+  return (
+    <details className={cx('group', className)}>
+      <summary
+        className={cx(
+          'flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md text-xs font-medium transition-colors',
+          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+          '[&::-webkit-details-marker]:hidden',
+          tone === 'danger' ? 'text-danger' : 'text-muted hover:text-foreground',
+        )}
+      >
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+          className="size-3 shrink-0 transition-transform group-open:rotate-90"
+        >
+          <path
+            d="M6 3.5 10.5 8 6 12.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        {summary}
+      </summary>
+      <div className="pt-3">{children}</div>
+    </details>
+  );
+}
+
+function StatusNote({ children }: { children: string | null }) {
+  if (!children) return null;
+  return (
+    <span role="status" className="text-xs text-muted">
+      {children}
+    </span>
+  );
+}
+
+/**
+ * Purely decorative: the author's full name is rendered as real text right
+ * beside it, so the initials are hidden from assistive technology rather than
+ * announced twice.
+ */
+function Initials({ name, className }: { name: string; className?: string }) {
+  return (
+    <Avatar size="sm" color="default" aria-hidden="true" className={cx('mt-0.5', className)}>
+      <Avatar.Fallback className="text-xs">{initials(name)}</Avatar.Fallback>
+    </Avatar>
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -73,47 +183,52 @@ type TicketEditFormProps = {
 
 export function TicketEditForm({ ticketId, title, description }: TicketEditFormProps) {
   const [state, action] = useActionState(updateTicket, null);
+  const errors = fieldErrorsOf(state);
 
   return (
-    <form action={action} className="stack">
-      <input type="hidden" name="ticketId" value={ticketId} />
+    <Collapsible summary="Edit title and description">
+      <form action={action} className="flex flex-col gap-4">
+        <input type="hidden" name="ticketId" value={ticketId} />
 
-      <div className="field">
-        <label className="label" htmlFor="ticket-title">
-          Title
-        </label>
-        <input
-          id="ticket-title"
-          className="input"
-          name="title"
-          defaultValue={title}
-          maxLength={200}
-          required
-          autoComplete="off"
-        />
-      </div>
+        <Field htmlFor="ticket-title" label="Title" error={errors.title}>
+          <Input
+            id="ticket-title"
+            name="title"
+            defaultValue={title}
+            maxLength={200}
+            required
+            autoComplete="off"
+            fullWidth
+          />
+        </Field>
 
-      <div className="field">
-        <label className="label" htmlFor="ticket-description">
-          Description
-        </label>
-        <textarea
-          id="ticket-description"
-          className="textarea"
-          name="description"
-          defaultValue={description}
-          maxLength={10000}
-          placeholder="What needs to happen?"
-        />
-      </div>
+        <Field
+          htmlFor="ticket-description"
+          label="Description"
+          hint="Plain text. Line breaks are kept."
+          error={errors.description}
+        >
+          <Textarea
+            id="ticket-description"
+            name="description"
+            defaultValue={description}
+            maxLength={10000}
+            rows={8}
+            placeholder="What needs to happen?"
+            fullWidth
+          />
+        </Field>
 
-      <div className="row">
-        <SubmitButton pendingLabel="Saving...">Save changes</SubmitButton>
-        {resultMessage(state) ? <span className="faint">{resultMessage(state)}</span> : null}
-      </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <SubmitButton size="sm" pendingLabel="Saving...">
+            Save changes
+          </SubmitButton>
+          <StatusNote>{resultMessage(state)}</StatusNote>
+        </div>
 
-      <FormError>{resultError(state)}</FormError>
-    </form>
+        <FormError>{resultError(state)}</FormError>
+      </form>
+    </Collapsible>
   );
 }
 
@@ -131,27 +246,28 @@ export function TicketMoveForm({ ticketId, columnId, columns }: TicketMoveFormPr
   const [state, action] = useActionState(moveTicket, null);
 
   return (
-    <form action={action} className="stack-sm">
+    <form action={action} className="flex flex-col gap-2">
       <input type="hidden" name="ticketId" value={ticketId} />
 
-      <div className="field">
-        <label className="label" htmlFor="ticket-column">
-          Column
-        </label>
-        <select id="ticket-column" className="select" name="toColumnId" defaultValue={columnId}>
-          {columns.map((column) => (
-            <option key={column.id} value={column.id}>
-              {column.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="row">
-        <SubmitButton variant="secondary" size="sm" pendingLabel="Moving...">
-          Move
-        </SubmitButton>
-      </div>
+      <Field htmlFor="ticket-column" label="Column">
+        <div className="flex items-center gap-2">
+          <select
+            id="ticket-column"
+            className={SELECT_CLASS}
+            name="toColumnId"
+            defaultValue={columnId}
+          >
+            {columns.map((column) => (
+              <option key={column.id} value={column.id}>
+                {column.name}
+              </option>
+            ))}
+          </select>
+          <SubmitButton variant="secondary" size="sm" pendingLabel="Moving...">
+            Move
+          </SubmitButton>
+        </div>
+      </Field>
 
       <FormError>{resultError(state)}</FormError>
     </form>
@@ -172,33 +288,31 @@ export function TicketAssignForm({ ticketId, assigneeId, members }: TicketAssign
   const [state, action] = useActionState(assignTicket, null);
 
   return (
-    <form action={action} className="stack-sm">
+    <form action={action} className="flex flex-col gap-2">
       <input type="hidden" name="ticketId" value={ticketId} />
 
-      <div className="field">
-        <label className="label" htmlFor="ticket-assignee">
-          Assignee
-        </label>
-        <select
-          id="ticket-assignee"
-          className="select"
-          name="assigneeId"
-          defaultValue={assigneeId ?? ''}
-        >
-          <option value="">Unassigned</option>
-          {members.map((member) => (
-            <option key={member.id} value={member.id}>
-              {member.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      <Field htmlFor="ticket-assignee" label="Assignee">
+        <div className="flex items-center gap-2">
+          <select
+            id="ticket-assignee"
+            className={SELECT_CLASS}
+            name="assigneeId"
+            defaultValue={assigneeId ?? ''}
+          >
+            <option value="">Unassigned</option>
+            {members.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+          <SubmitButton variant="secondary" size="sm" pendingLabel="Saving...">
+            Save
+          </SubmitButton>
+        </div>
+      </Field>
 
-      <div className="row">
-        <SubmitButton variant="secondary" size="sm" pendingLabel="Saving...">
-          Save
-        </SubmitButton>
-      </div>
+      <StatusNote>{resultMessage(state)}</StatusNote>
 
       <FormError>{resultError(state)}</FormError>
     </form>
@@ -213,21 +327,20 @@ export function TicketDeleteForm({ ticketId }: { ticketId: string }) {
   const [state, action] = useActionState(deleteTicket, null);
 
   return (
-    <details>
-      <summary>Delete this ticket</summary>
-      <form action={action} className="stack-sm">
+    <Collapsible summary="Delete this ticket" tone="danger">
+      <form action={action} className="flex flex-col gap-3">
         <input type="hidden" name="ticketId" value={ticketId} />
-        <p className="muted">
+        <p className="text-sm text-muted">
           This permanently deletes the ticket and all of its comments. This cannot be undone.
         </p>
-        <div className="row">
-          <SubmitButton variant="danger" pendingLabel="Deleting...">
+        <div className="flex">
+          <SubmitButton variant="danger" size="sm" pendingLabel="Deleting...">
             Yes, delete this ticket
           </SubmitButton>
         </div>
         <FormError>{resultError(state)}</FormError>
       </form>
-    </details>
+    </Collapsible>
   );
 }
 
@@ -242,52 +355,59 @@ function CommentRow({ comment }: { comment: CommentItem }) {
   const bodyId = `comment-body-${comment.id}`;
 
   return (
-    <li className="comment">
-      <div className="comment-head">
-        <span className="comment-author">{comment.authorName}</span>
-        <time className="faint" dateTime={comment.createdAtIso}>
-          {comment.createdAtLabel}
-        </time>
-        {comment.edited ? <span className="faint">edited</span> : null}
+    <li className="flex gap-3">
+      <Initials name={comment.authorName} />
+
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-sm font-medium text-foreground">{comment.authorName}</span>
+          <time className="text-xs text-muted" dateTime={comment.createdAtIso}>
+            {comment.createdAtLabel}
+          </time>
+          {comment.edited ? <span className="text-xs text-muted">edited</span> : null}
+        </div>
+
+        <Prose>{comment.body}</Prose>
+
+        {comment.canManage ? (
+          <Collapsible summary="Edit or delete" className="pt-0.5">
+            <div className="flex flex-col gap-4">
+              <form action={updateAction} className="flex flex-col gap-2">
+                <input type="hidden" name="commentId" value={comment.id} />
+                <label className="visually-hidden" htmlFor={bodyId}>
+                  Edit comment
+                </label>
+                <Textarea
+                  id={bodyId}
+                  name="body"
+                  defaultValue={comment.body}
+                  maxLength={5000}
+                  rows={4}
+                  required
+                  fullWidth
+                />
+                <div className="flex flex-wrap items-center gap-3">
+                  <SubmitButton variant="secondary" size="sm" pendingLabel="Saving...">
+                    Save comment
+                  </SubmitButton>
+                  <StatusNote>{resultMessage(updateState)}</StatusNote>
+                </div>
+                <FormError>{resultError(updateState)}</FormError>
+              </form>
+
+              <form action={deleteAction} className="flex flex-col gap-2">
+                <input type="hidden" name="commentId" value={comment.id} />
+                <div className="flex">
+                  <SubmitButton variant="danger-soft" size="sm" pendingLabel="Deleting...">
+                    Delete comment
+                  </SubmitButton>
+                </div>
+                <FormError>{resultError(deleteState)}</FormError>
+              </form>
+            </div>
+          </Collapsible>
+        ) : null}
       </div>
-
-      <Prose>{comment.body}</Prose>
-
-      {comment.canManage ? (
-        <details>
-          <summary>Edit or delete</summary>
-          <div className="stack">
-            <form action={updateAction} className="stack-sm">
-              <input type="hidden" name="commentId" value={comment.id} />
-              <label className="visually-hidden" htmlFor={bodyId}>
-                Edit comment
-              </label>
-              <textarea
-                id={bodyId}
-                className="textarea"
-                name="body"
-                defaultValue={comment.body}
-                maxLength={5000}
-                required
-              />
-              <div className="row">
-                <SubmitButton variant="secondary" size="sm" pendingLabel="Saving...">
-                  Save comment
-                </SubmitButton>
-              </div>
-              <FormError>{resultError(updateState)}</FormError>
-            </form>
-
-            <form action={deleteAction}>
-              <input type="hidden" name="commentId" value={comment.id} />
-              <SubmitButton variant="danger" size="sm" pendingLabel="Deleting...">
-                Delete comment
-              </SubmitButton>
-              <FormError>{resultError(deleteState)}</FormError>
-            </form>
-          </div>
-        </details>
-      ) : null}
     </li>
   );
 }
@@ -295,9 +415,11 @@ function CommentRow({ comment }: { comment: CommentItem }) {
 type CommentThreadProps = {
   ticketId: string;
   comments: CommentItem[];
+  /** The signed-in member's name, for the composer's avatar. Display only. */
+  currentUserName: string;
 };
 
-export function CommentThread({ ticketId, comments }: CommentThreadProps) {
+export function CommentThread({ ticketId, comments, currentUserName }: CommentThreadProps) {
   const [state, action] = useActionState(createComment, null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
@@ -316,37 +438,46 @@ export function CommentThread({ ticketId, comments }: CommentThreadProps) {
   }, [state]);
 
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-6">
       {comments.length > 0 ? (
-        <ul className="column-list">
+        <ol className="flex flex-col gap-6">
           {comments.map((comment) => (
             <CommentRow key={comment.id} comment={comment} />
           ))}
-        </ul>
+        </ol>
       ) : (
-        <p className="muted">No comments yet.</p>
+        <p className="text-sm text-muted">No comments yet. Start the conversation below.</p>
       )}
 
-      <form action={action} className="stack-sm">
-        <input type="hidden" name="ticketId" value={ticketId} />
-        <label className="label" htmlFor="new-comment">
-          Add a comment
-        </label>
-        <textarea
-          id="new-comment"
-          ref={bodyRef}
-          className="textarea"
-          name="body"
-          maxLength={5000}
-          required
-          placeholder="Write a comment..."
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-        />
-        <div className="row">
-          <SubmitButton pendingLabel="Posting...">Comment</SubmitButton>
+      <Separator />
+
+      <form action={action} className="flex gap-3">
+        <Initials name={currentUserName} className="max-sm:hidden" />
+
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <input type="hidden" name="ticketId" value={ticketId} />
+          <label className="visually-hidden" htmlFor="new-comment">
+            Add a comment
+          </label>
+          <Textarea
+            id="new-comment"
+            ref={bodyRef}
+            name="body"
+            maxLength={5000}
+            rows={3}
+            required
+            placeholder="Write a comment..."
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            fullWidth
+          />
+          <div className="flex justify-end">
+            <SubmitButton size="sm" pendingLabel="Posting...">
+              Comment
+            </SubmitButton>
+          </div>
+          <FormError>{resultError(state)}</FormError>
         </div>
-        <FormError>{resultError(state)}</FormError>
       </form>
     </div>
   );

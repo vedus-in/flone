@@ -1,7 +1,8 @@
 'use client';
 
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
+import { Button, Spinner, type ButtonProps } from '@heroui/react';
 
 /**
  * The ONLY pending primitive in the project (SPEC 7.11): no `useTransition`, no
@@ -10,21 +11,18 @@ import { useFormStatus } from 'react-dom';
  * `useFormStatus` must be read from a component rendered INSIDE the `<form>` --
  * that is why this is its own component rather than a hook call in the page.
  *
- * Disabling while pending is also the double-submit guard.
+ * The pending state is also the double-submit guard. HeroUI forwards `isPending`
+ * to react-aria's Button, which (a) rewrites `type="submit"` to `type="button"`
+ * for the duration, so a second click cannot submit, (b) sets
+ * `pointer-events: none`, and (c) announces the state to screen readers -- all
+ * while keeping the control focusable, which a plain `disabled` would not.
  */
-type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type'> & {
+type Props = Omit<ButtonProps, 'type' | 'children' | 'isPending'> & {
   children: ReactNode;
   /** Replaces the label while the form is submitting. */
   pendingLabel?: ReactNode;
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
-  size?: 'md' | 'sm';
-};
-
-const VARIANT_CLASS: Record<NonNullable<Props['variant']>, string> = {
-  primary: 'btn btn-primary',
-  secondary: 'btn',
-  ghost: 'btn btn-ghost',
-  danger: 'btn btn-danger',
+  /** Alias for HeroUI's `isDisabled`, so plain-HTML call sites keep working. */
+  disabled?: boolean;
 };
 
 export function SubmitButton({
@@ -32,26 +30,30 @@ export function SubmitButton({
   pendingLabel = 'Saving...',
   variant = 'primary',
   size = 'md',
-  className,
   disabled,
+  isDisabled,
   ...rest
 }: Props) {
   const { pending } = useFormStatus();
 
-  const classes = [VARIANT_CLASS[variant], size === 'sm' ? 'btn-sm' : '', className]
-    .filter(Boolean)
-    .join(' ');
-
   return (
-    <button
+    <Button
       {...rest}
       type="submit"
-      className={classes}
-      disabled={pending || disabled}
-      aria-busy={pending || undefined}
+      variant={variant}
+      size={size}
+      isDisabled={isDisabled ?? disabled}
+      isPending={pending}
     >
-      {pending ? pendingLabel : children}
-    </button>
+      {pending ? (
+        <>
+          <Spinner size="sm" color="current" aria-hidden="true" />
+          {pendingLabel}
+        </>
+      ) : (
+        children
+      )}
+    </Button>
   );
 }
 

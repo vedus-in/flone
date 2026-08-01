@@ -15,7 +15,10 @@ import type { ActionResult } from '@/lib/result';
  *
  * It renders no state of its own beyond the returned `ActionResult`: the children
  * are server-rendered and passed through untouched, so nothing but the wrapper
- * itself reaches the client bundle.
+ * itself reaches the client bundle. For the same reason the result banners below
+ * are hand-rolled rather than imported from `@/components/ui` -- pulling that
+ * module in would drag every primitive it re-exports into this bundle for the
+ * sake of two `<p>` elements.
  *
  * (SPEC 5 sketches a shared `src/components/inline-form.tsx` for this role. That
  * file does not exist in the foundation, and creating it would collide with the
@@ -30,6 +33,10 @@ export type FormAction = (
 type Props = {
   action: FormAction;
   children: ReactNode;
+  /**
+   * Full control of the form's layout. Defaults to the vertical rhythm nearly
+   * every form on these pages wants; inline forms pass their own row layout.
+   */
   className?: string;
   /** Clear the fields and refocus the first one when the action returns `ok`. */
   resetOnSuccess?: boolean;
@@ -97,24 +104,39 @@ export function ActionForm({
     state && !state.ok && state.fieldErrors ? Object.entries(state.fieldErrors) : [];
 
   return (
-    <form ref={formRef} action={submitAction} className={className} aria-label={ariaLabel}>
+    <form
+      ref={formRef}
+      action={submitAction}
+      className={className ?? 'flex flex-col gap-4'}
+      aria-label={ariaLabel}
+    >
       {children}
 
       {state && !state.ok ? (
-        <div className="stack-sm">
-          <p className="error" role="alert">
+        <div className="flex flex-col gap-1.5">
+          <p
+            role="alert"
+            className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+          >
             {state.error}
           </p>
-          {fieldErrors.map(([field, message]) => (
-            <p className="error" key={field}>
-              {message}
-            </p>
-          ))}
+          {fieldErrors.length > 0 ? (
+            <ul className="flex flex-col gap-1 ps-1">
+              {fieldErrors.map(([field, message]) => (
+                <li key={field} className="text-xs text-danger">
+                  {message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
 
       {state && state.ok && state.message ? (
-        <p className="hint" role="status">
+        <p
+          role="status"
+          className="rounded-lg bg-success-soft px-3 py-2 text-sm text-success-soft-foreground"
+        >
           {state.message}
         </p>
       ) : null}
