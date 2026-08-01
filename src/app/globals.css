@@ -47,6 +47,25 @@
   overflow-wrap: anywhere;
 }
 
+/*
+ * Drag surfaces (Kanban cards).
+ *
+ * Two different browser behaviours fight a pointer-based drag library and both
+ * have to be switched off, or pressing a card and moving starts a NATIVE drag
+ * -- the browser's own ghost image of the link text -- instead of dnd-kit's:
+ *
+ *   `-webkit-user-drag` : anchors and images are natively draggable by default.
+ *                         `draggable={false}` covers Firefox and Chromium; this
+ *                         is what Safari/WebKit actually honours.
+ *   `user-select`       : without it the press-and-move selects the card's text
+ *                         and drags the selection along with it.
+ */
+@utility no-native-drag {
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* Text for screen readers only: labels on icon-only controls, form legends. */
 @utility visually-hidden {
   position: absolute;

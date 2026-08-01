@@ -102,7 +102,7 @@ function CardBody({ ticket, projectKey, boardHref, dragging = false }: CardBodyP
   return (
     <div
       className={cx(
-        'flex flex-col gap-2.5 rounded-lg border border-border bg-surface p-3',
+        'no-native-drag flex flex-col gap-2.5 rounded-lg border border-border bg-surface p-3',
         'shadow-xs transition-colors',
         dragging ? 'border-accent shadow-lg' : 'hover:border-border-secondary',
       )}
@@ -112,6 +112,12 @@ function CardBody({ ticket, projectKey, boardHref, dragging = false }: CardBodyP
         // Stop the pointer sensor claiming the click so the title still opens
         // the ticket; the rest of the card is the drag surface.
         onPointerDown={(event) => event.stopPropagation()}
+        // An anchor is natively draggable. Left alone, pressing the title and
+        // moving hands the gesture to the BROWSER -- you get its ghost image of
+        // the link text instead of the card. `draggable` covers Chromium and
+        // Firefox; `-webkit-user-drag` (via `.no-native-drag`) covers WebKit.
+        draggable={false}
+        onDragStart={(event) => event.preventDefault()}
         className="text-sm leading-snug font-medium text-foreground no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       >
         {ticket.title}
@@ -170,7 +176,9 @@ function SortableCard({ ticket, projectKey, boardHref }: CardBodyProps) {
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cx('touch-none', isDragging && 'opacity-40')}
+      // `touch-none` stops the browser scrolling instead of dragging on touch;
+      // `no-native-drag` stops it starting its own drag of the card's text.
+      className={cx('no-native-drag touch-none', isDragging && 'opacity-40')}
       {...attributes}
       {...listeners}
     >
@@ -490,7 +498,15 @@ export function BoardView({ boardId, boardHref, projectKey, columns }: BoardView
           setLocal(columns);
         }}
       >
-        <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
+        {/* While a drag is live, suppress selection across the WHOLE board: the
+            pointer regularly leaves the card it started on, and without this a
+            fast drag paints a selection across the columns it passes over. */}
+        <div
+          className={cx(
+            '-mx-4 flex gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6',
+            activeId && 'select-none',
+          )}
+        >
           {local.map((column) => (
             <Column
               key={column.id}
