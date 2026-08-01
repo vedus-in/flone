@@ -83,7 +83,9 @@ Register an account at `/register`, and you will be sent straight to the organiz
 
 One service running the Next.js app, plus one Postgres database in the same project. `railway.json` in the repo root already pins the builder, build command, start command, restart policy, and health check, so the dashboard needs no build configuration.
 
-**Commit your migrations first.** The start command runs `prisma migrate deploy`, which only *applies* migrations that already exist in `prisma/migrations/` — it never creates them. Run `bun run db:migrate` locally and commit the generated folder before your first deploy, or the container will start against an empty database and every request will fail.
+**Commit your migrations first.** The pre-deploy command runs `prisma migrate deploy`, which only *applies* migrations that already exist in `prisma/migrations/` — it never creates them. Run `bun run db:migrate` locally and commit the generated folder before your first deploy, or the container will start against an empty database and every request will fail.
+
+`prisma` is a runtime dependency rather than a dev dependency on purpose: dev dependencies are pruned before the release step runs, and `prisma migrate deploy` needs the CLI to be present at that point.
 
 1. Create a Railway project and point it at this repository (or run `railway init` and `railway up` from the repo root).
 2. In that project, add a database: **New → Database → Add PostgreSQL**.
@@ -94,8 +96,8 @@ One service running the Next.js app, plus one Postgres database in the same proj
    ```
 
    If you renamed the database service, replace `Postgres` with its name.
-4. Deploy. Railway will run `bun install && bun run build`, then start the container with `bunx prisma migrate deploy && bun run start`.
-5. Under **Settings → Networking**, generate a public domain. Railway injects `PORT`, which `next start` picks up automatically.
+4. Deploy. Railpack detects `bun.lock` and installs with Bun, then runs `bun run build`. Before the new version takes traffic, the pre-deploy command runs `bunx prisma migrate deploy`; the container then starts with `bun run start`.
+5. Under **Settings → Networking**, generate a public domain. Railway injects `PORT` — `next start` listens on it, so the domain's **target port must match that injected value (8080), not 3000**. A mismatch here surfaces as a 502 from the Railway edge even though the container is healthy.
 
 The health check hits `/login`, which renders without a session and without a database round-trip, so a slow or unavailable database does not cause a restart loop while the app itself is healthy. The restart policy is `ON_FAILURE` with 10 retries.
 
