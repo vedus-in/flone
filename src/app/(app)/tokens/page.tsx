@@ -1,10 +1,9 @@
 import { headers } from 'next/headers';
-import { Card } from '@heroui/react/card';
-import { Table } from '@heroui/react/table';
 
+import { Table } from '@/components/application/table/table';
 import { loadPage, requireUser } from '@/lib/authz';
 import { prisma } from '@/lib/db';
-import { Badge, PageHeader, SubmitButton } from '@/components/ui';
+import { Badge, Card, PageHeader, SubmitButton } from '@/components/ui';
 import { ActionForm } from '../action-form';
 import { createMcpToken, revokeSession } from './actions';
 
@@ -68,7 +67,7 @@ export default async function TokensPage() {
             </div>
           </ActionForm>
 
-          <p className="max-w-prose text-xs text-muted">
+          <p className="max-w-prose text-xs text-tertiary">
             It expires 30 days after its last use, and stays alive as long as it keeps being
             used. Revoke it below at any time.
           </p>
@@ -76,22 +75,22 @@ export default async function TokensPage() {
       </section>
 
       <section className="flex flex-col gap-4" aria-labelledby="connect-heading">
-        <h2 id="connect-heading" className="text-sm font-medium text-foreground">
+        <h2 id="connect-heading" className="text-sm font-medium text-primary">
           Connect a client
         </h2>
 
         <Card className="gap-4 p-6">
-          <p className="text-sm text-muted">
+          <p className="text-sm text-tertiary">
             One command in Claude Code, with the token you just copied:
           </p>
-          <pre className="overflow-x-auto rounded-lg bg-surface-secondary p-4 text-xs">
+          <pre className="overflow-x-auto rounded-lg bg-secondary p-4 text-xs">
             <code>{`claude mcp add --transport http kanban ${endpoint} \\\n  --header "Authorization: Bearer <your-token>"`}</code>
           </pre>
 
-          <p className="text-sm text-muted">
+          <p className="text-sm text-tertiary">
             Or, for any client that reads a config file:
           </p>
-          <pre className="overflow-x-auto rounded-lg bg-surface-secondary p-4 text-xs">
+          <pre className="overflow-x-auto rounded-lg bg-secondary p-4 text-xs">
             <code>{`{
   "mcpServers": {
     "kanban": {
@@ -106,62 +105,60 @@ export default async function TokensPage() {
       </section>
 
       <section className="flex flex-col gap-4" aria-labelledby="sessions-heading">
-        <h2 id="sessions-heading" className="text-sm font-medium text-foreground">
+        <h2 id="sessions-heading" className="text-sm font-medium text-primary">
           Active sessions and tokens
         </h2>
 
-        <Table variant="secondary">
-          <Table.ScrollContainer>
-            <Table.Content aria-label="Your active sessions and tokens">
-              <Table.Header>
-                <Table.Column isRowHeader className="w-full">
-                  Created
-                </Table.Column>
-                <Table.Column className="whitespace-nowrap">Expires</Table.Column>
-                <Table.Column className="whitespace-nowrap text-end">Revoke</Table.Column>
-              </Table.Header>
+        <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
+          <Table size="sm" aria-label="Your active sessions and tokens">
+            <Table.Header>
+              <Table.Head isRowHeader className="w-full">
+                Created
+              </Table.Head>
+              <Table.Head className="whitespace-nowrap">Expires</Table.Head>
+              <Table.Head className="whitespace-nowrap text-end">Revoke</Table.Head>
+            </Table.Header>
 
-              <Table.Body>
-                {sessions.map((session) => {
-                  const isCurrent = session.id === user.sessionId;
-                  return (
-                    <Table.Row key={session.id} id={session.id}>
-                      <Table.Cell>
-                        <div className="flex flex-wrap items-center gap-2 py-1">
-                          <span className="text-foreground tabular-nums">
-                            {STAMP.format(session.createdAt)}
-                          </span>
-                          {isCurrent ? <Badge tone="accent">This browser</Badge> : null}
-                        </div>
-                      </Table.Cell>
-                      <Table.Cell className="whitespace-nowrap align-middle text-muted tabular-nums">
-                        {STAMP.format(session.expiresAt)}
-                      </Table.Cell>
-                      <Table.Cell className="align-middle">
-                        <ActionForm
-                          action={revokeSession}
-                          className="flex justify-end"
-                          aria-label={`Revoke the session created ${STAMP.format(session.createdAt)}`}
+            <Table.Body>
+              {sessions.map((session) => {
+                const isCurrent = session.id === user.sessionId;
+                return (
+                  <Table.Row key={session.id} id={session.id}>
+                    <Table.Cell>
+                      <div className="flex flex-wrap items-center gap-2 py-1">
+                        <span className="text-primary tabular-nums">
+                          {STAMP.format(session.createdAt)}
+                        </span>
+                        {isCurrent ? <Badge tone="accent">This browser</Badge> : null}
+                      </div>
+                    </Table.Cell>
+                    <Table.Cell className="whitespace-nowrap align-middle text-tertiary tabular-nums">
+                      {STAMP.format(session.expiresAt)}
+                    </Table.Cell>
+                    <Table.Cell className="align-middle">
+                      <ActionForm
+                        action={revokeSession}
+                        className="flex justify-end"
+                        aria-label={`Revoke the session created ${STAMP.format(session.createdAt)}`}
+                      >
+                        <input type="hidden" name="sessionId" value={session.id} />
+                        <SubmitButton
+                          color="secondary-destructive"
+                          size="sm"
+                          pendingLabel="Revoking..."
                         >
-                          <input type="hidden" name="sessionId" value={session.id} />
-                          <SubmitButton
-                            variant="danger-soft"
-                            size="sm"
-                            pendingLabel="Revoking..."
-                          >
-                            {isCurrent ? 'Sign out' : 'Revoke'}
-                          </SubmitButton>
-                        </ActionForm>
-                      </Table.Cell>
-                    </Table.Row>
-                  );
-                })}
-              </Table.Body>
-            </Table.Content>
-          </Table.ScrollContainer>
-        </Table>
+                          {isCurrent ? 'Sign out' : 'Revoke'}
+                        </SubmitButton>
+                      </ActionForm>
+                    </Table.Cell>
+                  </Table.Row>
+                );
+              })}
+            </Table.Body>
+          </Table>
+        </div>
 
-        <p className="max-w-prose text-xs text-muted">
+        <p className="max-w-prose text-xs text-tertiary">
           A token is indistinguishable from a browser sign-in here, so revoke anything you do not
           recognise — the newest row is the one you just created.
         </p>

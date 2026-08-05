@@ -29,13 +29,14 @@ import { signIn } from './actions';
  * `defaultValue`, is left uncontrolled -- so the same reset clears it -- and is
  * never echoed back (SPEC 4.7).
  *
- * These are plain `Input`s inside `Field`, NOT HeroUI's `TextField` wrapper.
- * `TextField` installs react-aria's form plumbing, which restores its own
- * initial value on the `reset` event; with a controlled value that fires
- * `onChange('')` and would defeat the workaround above.
+ * These are plain `Input`s inside `Field` -- `@/components/ui` exports Untitled
+ * UI's `InputBase`, NOT its `TextField`-backed `Input`. `TextField` installs
+ * react-aria's form plumbing, which restores its own initial value on the
+ * `reset` event; with a controlled value that fires `onChange('')` and would
+ * defeat the workaround above.
  */
 const LINK =
-  'rounded-sm font-medium text-link underline-offset-4 outline-none hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
+  'rounded-sm font-medium text-brand-secondary underline-offset-4 outline-none hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
 export function LoginForm() {
   const [state, formAction] = useActionState<ActionResult | null, FormData>(signIn, null);
@@ -46,12 +47,7 @@ export function LoginForm() {
   return (
     <Card className="gap-6 p-6 sm:p-7">
       <Card.Header className="gap-1.5">
-        <Card.Title
-          className="text-lg leading-6 tracking-tight"
-          render={(props) => <h1 {...props} />}
-        >
-          Sign in
-        </Card.Title>
+        <h1 className="text-lg leading-6 font-semibold text-primary">Sign in</h1>
         <Card.Description>Welcome back. Sign in to get to your boards.</Card.Description>
       </Card.Header>
 
@@ -69,7 +65,6 @@ export function LoginForm() {
               autoFocus
               required
               maxLength={254}
-              fullWidth
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               aria-invalid={error ? true : undefined}
@@ -84,18 +79,17 @@ export function LoginForm() {
               autoComplete="current-password"
               required
               maxLength={200}
-              fullWidth
               aria-invalid={error ? true : undefined}
             />
           </Field>
 
-          <SubmitButton fullWidth pendingLabel="Signing in...">
+          <SubmitButton className="w-full" pendingLabel="Signing in...">
             Sign in
           </SubmitButton>
         </form>
       </Card.Content>
 
-      <Card.Footer className="justify-center gap-1.5 border-t border-border pt-6 text-sm text-muted">
+      <Card.Footer className="justify-center gap-1.5 border-t border-secondary pt-6 text-sm text-tertiary">
         <span>New here?</span>
         <Link href="/register" className={LINK}>
           Create an account

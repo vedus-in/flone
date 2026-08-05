@@ -19,7 +19,7 @@
  * Permission flags (`canManage`, `canDelete`) are computed on the SERVER and
  * passed down. They are politeness only -- every action re-checks the role.
  *
- * The two selects here stay NATIVE `<select>` elements wearing HeroUI's field
+ * The two selects here stay NATIVE `<select>` elements wearing Untitled UI's field
  * styles. "Unassigned" submits the empty string, which is the exact value
  * `assignTicket`'s schema accepts to clear the assignee; a listbox keyed by a
  * blank id would be a wire-format change, and this file may not change wire
@@ -27,7 +27,7 @@
  */
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Avatar } from '@heroui/react';
+import { Avatar } from '@/components/base/avatar/avatar';
 
 import {
   Field,
@@ -98,8 +98,9 @@ function initials(name: string): string {
   return (first + last).toLocaleUpperCase();
 }
 
-/** Native `<select>` wearing HeroUI's field styles, sized to match a `sm` button. */
-const SELECT_CLASS = 'input h-9 w-full min-w-0 py-0 md:h-8';
+/** Native `<select>` wearing Untitled UI's field styles, sized to match a `sm` button. */
+const SELECT_CLASS =
+  'h-9 w-full min-w-0 rounded-lg border border-primary bg-primary px-3 py-0 text-sm text-primary shadow-xs outline-focus-ring transition-colors hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-offset-2 md:h-8';
 
 /* -------------------------------------------------------------------------- */
 /* Disclosure                                                                  */
@@ -123,9 +124,9 @@ function Collapsible({ summary, children, tone = 'default', className }: Collaps
       <summary
         className={cx(
           'flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md text-xs font-medium transition-colors',
-          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
           '[&::-webkit-details-marker]:hidden',
-          tone === 'danger' ? 'text-danger' : 'text-muted hover:text-foreground',
+          tone === 'danger' ? 'text-error-primary' : 'text-tertiary hover:text-primary',
         )}
       >
         <svg
@@ -152,7 +153,7 @@ function Collapsible({ summary, children, tone = 'default', className }: Collaps
 function StatusNote({ children }: { children: string | null }) {
   if (!children) return null;
   return (
-    <span role="status" className="text-xs text-muted">
+    <span role="status" className="text-xs text-tertiary">
       {children}
     </span>
   );
@@ -165,9 +166,11 @@ function StatusNote({ children }: { children: string | null }) {
  */
 function Initials({ name, className }: { name: string; className?: string }) {
   return (
-    <Avatar size="sm" color="default" aria-hidden="true" className={cx('mt-0.5', className)}>
-      <Avatar.Fallback className="text-xs">{initials(name)}</Avatar.Fallback>
-    </Avatar>
+    // Untitled UI's `Avatar` takes a fixed prop list and does not spread the
+    // rest, so `aria-hidden` goes on a wrapper rather than the component.
+    <span aria-hidden="true" className={cx('mt-0.5 shrink-0', className)}>
+      <Avatar size="xs" initials={initials(name)} contentClassName="text-xs" />
+    </span>
   );
 }
 
@@ -198,7 +201,6 @@ export function TicketEditForm({ ticketId, title, description }: TicketEditFormP
             maxLength={200}
             required
             autoComplete="off"
-            fullWidth
           />
         </Field>
 
@@ -215,7 +217,6 @@ export function TicketEditForm({ ticketId, title, description }: TicketEditFormP
             maxLength={10000}
             rows={8}
             placeholder="What needs to happen?"
-            fullWidth
           />
         </Field>
 
@@ -263,7 +264,7 @@ export function TicketMoveForm({ ticketId, columnId, columns }: TicketMoveFormPr
               </option>
             ))}
           </select>
-          <SubmitButton variant="secondary" size="sm" pendingLabel="Moving...">
+          <SubmitButton color="secondary" size="sm" pendingLabel="Moving...">
             Move
           </SubmitButton>
         </div>
@@ -306,7 +307,7 @@ export function TicketAssignForm({ ticketId, assigneeId, members }: TicketAssign
               </option>
             ))}
           </select>
-          <SubmitButton variant="secondary" size="sm" pendingLabel="Saving...">
+          <SubmitButton color="secondary" size="sm" pendingLabel="Saving...">
             Save
           </SubmitButton>
         </div>
@@ -330,11 +331,11 @@ export function TicketDeleteForm({ ticketId }: { ticketId: string }) {
     <Collapsible summary="Delete this ticket" tone="danger">
       <form action={action} className="flex flex-col gap-3">
         <input type="hidden" name="ticketId" value={ticketId} />
-        <p className="text-sm text-muted">
+        <p className="text-sm text-tertiary">
           This permanently deletes the ticket and all of its comments. This cannot be undone.
         </p>
         <div className="flex">
-          <SubmitButton variant="danger" size="sm" pendingLabel="Deleting...">
+          <SubmitButton color="primary-destructive" size="sm" pendingLabel="Deleting...">
             Yes, delete this ticket
           </SubmitButton>
         </div>
@@ -360,11 +361,11 @@ function CommentRow({ comment }: { comment: CommentItem }) {
 
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-sm font-medium text-foreground">{comment.authorName}</span>
-          <time className="text-xs text-muted" dateTime={comment.createdAtIso}>
+          <span className="text-sm font-medium text-primary">{comment.authorName}</span>
+          <time className="text-xs text-tertiary" dateTime={comment.createdAtIso}>
             {comment.createdAtLabel}
           </time>
-          {comment.edited ? <span className="text-xs text-muted">edited</span> : null}
+          {comment.edited ? <span className="text-xs text-tertiary">edited</span> : null}
         </div>
 
         <Prose>{comment.body}</Prose>
@@ -384,10 +385,9 @@ function CommentRow({ comment }: { comment: CommentItem }) {
                   maxLength={5000}
                   rows={4}
                   required
-                  fullWidth
                 />
                 <div className="flex flex-wrap items-center gap-3">
-                  <SubmitButton variant="secondary" size="sm" pendingLabel="Saving...">
+                  <SubmitButton color="secondary" size="sm" pendingLabel="Saving...">
                     Save comment
                   </SubmitButton>
                   <StatusNote>{resultMessage(updateState)}</StatusNote>
@@ -398,7 +398,7 @@ function CommentRow({ comment }: { comment: CommentItem }) {
               <form action={deleteAction} className="flex flex-col gap-2">
                 <input type="hidden" name="commentId" value={comment.id} />
                 <div className="flex">
-                  <SubmitButton variant="danger-soft" size="sm" pendingLabel="Deleting...">
+                  <SubmitButton color="secondary-destructive" size="sm" pendingLabel="Deleting...">
                     Delete comment
                   </SubmitButton>
                 </div>
@@ -446,7 +446,7 @@ export function CommentThread({ ticketId, comments, currentUserName }: CommentTh
           ))}
         </ol>
       ) : (
-        <p className="text-sm text-muted">No comments yet. Start the conversation below.</p>
+        <p className="text-sm text-tertiary">No comments yet. Start the conversation below.</p>
       )}
 
       <Separator />
@@ -469,7 +469,6 @@ export function CommentThread({ ticketId, comments, currentUserName }: CommentTh
             placeholder="Write a comment..."
             value={body}
             onChange={(event) => setBody(event.target.value)}
-            fullWidth
           />
           <div className="flex justify-end">
             <SubmitButton size="sm" pendingLabel="Posting...">

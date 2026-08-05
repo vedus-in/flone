@@ -38,26 +38,21 @@ export default async function RegisterPage() {
   return (
     <Card className="gap-6 p-6 sm:p-7">
       <Card.Header className="gap-1.5">
-        <Card.Title
-          className="text-lg leading-6 tracking-tight"
-          render={(props) => <h1 {...props} />}
-        >
-          Registration is closed
-        </Card.Title>
+        <h1 className="text-lg leading-6 font-semibold text-primary">Registration is closed</h1>
         <Card.Description>
           This Kanban instance is not accepting new accounts right now.
         </Card.Description>
       </Card.Header>
 
       <Card.Content>
-        <p className="text-sm text-muted">
+        <p className="text-sm text-tertiary">
           A site administrator can reopen registration at any time. If you already have an
           account, you can still sign in.
         </p>
       </Card.Content>
 
       <Card.Footer>
-        <ButtonLink href="/login" variant="primary" fullWidth>
+        <ButtonLink href="/login" color="primary" className="w-full">
           Go to sign in
         </ButtonLink>
       </Card.Footer>

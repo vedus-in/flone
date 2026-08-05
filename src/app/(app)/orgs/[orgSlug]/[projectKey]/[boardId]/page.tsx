@@ -20,7 +20,7 @@ import { BoardView, type BoardColumnData } from './board-view';
  * exists because the membership predicate above already matched. It is never
  * built from a client-supplied board id.
  *
- * This stays a Server Component: every HeroUI module carries its own
+ * This stays a Server Component: every Untitled UI module carries its own
  * `'use client'`, so the only client code shipped from this route is
  * `board-view.tsx`, which genuinely needs hooks.
  */
@@ -54,7 +54,7 @@ function Crumb({ href, children }: { href: string; children: ReactNode }) {
   return (
     <Link
       href={href}
-      className="rounded-sm px-0.5 font-medium no-underline hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+      className="rounded-sm px-0.5 font-medium no-underline hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
     >
       {children}
     </Link>
@@ -168,23 +168,23 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
           on a phone where every row of chrome costs real estate. */}
       <nav
         aria-label="Breadcrumb"
-        className="hidden flex-wrap items-center gap-1 text-sm text-muted md:flex"
+        className="hidden flex-wrap items-center gap-1 text-sm text-tertiary md:flex"
       >
         <Crumb href={orgPath(ctx.org)}>{ctx.org.name}</Crumb>
         <CrumbSeparator />
         <Crumb href={projectPath(ctx.org, ctx.project)}>{ctx.project.name}</Crumb>
         <CrumbSeparator />
-        <span aria-current="page" className="px-0.5 font-medium text-foreground">
+        <span aria-current="page" className="px-0.5 font-medium text-primary">
           {ctx.board.name}
         </span>
       </nav>
 
       <PageHeader title={ctx.board.name}>
         <Badge className="font-mono">{ctx.project.key}</Badge>
-        <span className="text-sm text-muted tabular-nums">
+        <span className="text-sm text-tertiary tabular-nums">
           {ticketCount} {ticketCount === 1 ? 'ticket' : 'tickets'}
         </span>
-        <span className="text-sm text-muted">
+        <span className="text-sm text-tertiary">
           &middot; {columns.length} {columns.length === 1 ? 'column' : 'columns'}
         </span>
       </PageHeader>

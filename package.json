@@ -19,14 +19,16 @@
     "@dnd-kit/modifiers": "^9.0.0",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
-    "@heroui/react": "^3.2.3",
-    "@heroui/styles": "^3.2.3",
     "@prisma/client": "^6.19.3",
+    "@untitledui/file-icons": "^0.0.9",
+    "@untitledui/icons": "^0.0.22",
     "next": "^15.5.22",
     "prisma": "^6.19.3",
     "react": "^19.2.0",
+    "react-aria-components": "^1.20.0",
     "react-dom": "^19.2.0",
     "server-only": "^0.0.1",
+    "tailwind-merge": "^3.6.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -34,6 +36,8 @@
     "@types/node": "^22.20.1",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "tailwindcss-animate": "^1.0.7",
+    "tailwindcss-react-aria-components": "^2.2.0",
     "typescript": "^5.9.3"
   }
 }

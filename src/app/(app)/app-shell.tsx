@@ -24,7 +24,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Dropdown } from '@heroui/react/dropdown';
+import { Button as AriaButton } from 'react-aria-components';
+import { Dropdown } from '@/components/base/dropdown/dropdown';
 
 import { signOut } from './actions';
 
@@ -68,7 +69,7 @@ function initials(name: string): string {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Icons — inline SVG. HeroUI's icon module is client-only with no public       */
+/* Icons — inline SVG. These predate the design system and are sized to this    */
 /* subpath export, so it cannot be reached from the server tree; these are      */
 /* small enough to carry here.                                                  */
 /* -------------------------------------------------------------------------- */
@@ -125,7 +126,7 @@ function Section({
           type="button"
           onClick={() => setOpen((value) => !value)}
           aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center gap-1 rounded px-2 py-1 text-start text-xs font-medium text-muted transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus"
+          className="flex min-w-0 flex-1 items-center gap-1 rounded px-2 py-1 text-start text-xs font-medium text-tertiary transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
         >
           <span className="truncate">{title}</span>
           <Icon
@@ -162,11 +163,11 @@ function NavRow({
       aria-current={active ? 'page' : undefined}
       className={cx(
         'flex h-7 items-center gap-2 rounded-md pe-2 text-[0.8125rem] no-underline transition-colors',
-        'outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus',
+        'outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
         indented ? 'ps-1.5' : 'ps-2',
         active
-          ? 'bg-surface-secondary font-medium text-foreground'
-          : 'text-muted hover:bg-surface-secondary hover:text-foreground',
+          ? 'bg-secondary font-medium text-primary'
+          : 'text-tertiary hover:bg-secondary hover:text-primary',
       )}
     >
       {icon ? <Icon d={icon} className="size-3.5 opacity-80" /> : null}
@@ -191,7 +192,7 @@ function SectionAction({
       onClick={onNavigate}
       aria-label={label}
       title={label}
-      className="grid size-5 shrink-0 place-items-center rounded text-muted transition-colors hover:bg-surface-secondary hover:text-foreground"
+      className="grid size-5 shrink-0 place-items-center rounded text-tertiary transition-colors hover:bg-secondary hover:text-primary"
     >
       <Icon d={I_PLUS} className="size-3.5" />
     </Link>
@@ -248,30 +249,27 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
           <Link
             href="/orgs/new"
             onClick={closeDrawer}
-            className="flex h-8 items-center gap-2 rounded-md px-2 text-[0.8125rem] text-muted no-underline hover:bg-surface-secondary hover:text-foreground"
+            className="flex h-8 items-center gap-2 rounded-md px-2 text-[0.8125rem] text-tertiary no-underline hover:bg-secondary hover:text-primary"
           >
             <Icon d={I_PLUS} className="size-3.5" />
             New organization
           </Link>
         ) : (
-          <Dropdown>
-            <Dropdown.Trigger>
-              <button
-                type="button"
-                className="flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-start transition-colors hover:bg-surface-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus"
+          <Dropdown.Root>
+              <AriaButton
+                className="flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-start transition-colors hover:bg-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
               >
                 <span
                   aria-hidden="true"
-                  className="grid size-5 shrink-0 place-items-center rounded bg-accent text-[0.625rem] font-semibold text-accent-foreground"
+                  className="grid size-5 shrink-0 place-items-center rounded bg-brand-solid text-[0.625rem] font-semibold text-white"
                 >
                   {initials(activeOrg?.name ?? 'K')}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium text-foreground">
+                <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium text-primary">
                   {activeOrg?.name ?? 'Kanban'}
                 </span>
-                <Icon d={I_CARET} className="size-3 text-muted" />
-              </button>
-            </Dropdown.Trigger>
+                <Icon d={I_CARET} className="size-3 text-tertiary" />
+              </AriaButton>
             <Dropdown.Popover placement="bottom start" className="min-w-64">
               <Dropdown.Menu aria-label="Switch organization">
                 <Dropdown.Section>
@@ -284,7 +282,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                     >
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate text-sm">{org.name}</span>
-                        <span className="truncate text-xs text-muted">
+                        <span className="truncate text-xs text-tertiary">
                           {org.projects.length}{' '}
                           {org.projects.length === 1 ? 'project' : 'projects'}
                         </span>
@@ -297,7 +295,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                 </Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown.Popover>
-          </Dropdown>
+            </Dropdown.Root>
         )}
       </div>
 
@@ -339,7 +337,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
               }
             >
               {activeOrg.projects.length === 0 ? (
-                <li className="px-2 py-1 text-[0.8125rem] text-muted">No projects yet</li>
+                <li className="px-2 py-1 text-[0.8125rem] text-tertiary">No projects yet</li>
               ) : (
                 activeOrg.projects.map((project) => {
                   const isOpen = expanded.has(project.id);
@@ -349,7 +347,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                       <div
                         className={cx(
                           'flex h-7 items-center gap-0.5 rounded-md pe-2 ps-0.5 transition-colors',
-                          isActive ? 'bg-surface-secondary' : 'hover:bg-surface-secondary',
+                          isActive ? 'bg-secondary' : 'hover:bg-secondary',
                         )}
                       >
                         <button
@@ -357,7 +355,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                           onClick={() => toggleProject(project.id)}
                           aria-expanded={isOpen}
                           aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${project.name}`}
-                          className="grid size-5 shrink-0 place-items-center rounded text-muted transition-colors hover:text-foreground"
+                          className="grid size-5 shrink-0 place-items-center rounded text-tertiary transition-colors hover:text-primary"
                         >
                           <Icon
                             d={I_CHEVRON}
@@ -369,14 +367,14 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                           onClick={closeDrawer}
                           aria-current={isActive ? 'page' : undefined}
                           className={cx(
-                            'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus',
-                            isActive ? 'font-medium text-foreground' : 'text-muted',
+                            'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+                            isActive ? 'font-medium text-primary' : 'text-tertiary',
                           )}
                         >
                           <Icon d={I_CUBE} className="size-3.5 opacity-80" />
                           <span className="truncate">{project.name}</span>
                         </Link>
-                        <span className="shrink-0 font-mono text-[0.625rem] text-muted">
+                        <span className="shrink-0 font-mono text-[0.625rem] text-tertiary">
                           {project.key}
                         </span>
                       </div>
@@ -384,9 +382,9 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                       {/* The rule is the indent guide: it ties a board back to
                           the project it hangs off, which plain padding does not. */}
                       {isOpen ? (
-                        <ul className="ms-3.5 flex flex-col gap-px border-s border-border ps-1">
+                        <ul className="ms-3.5 flex flex-col gap-px border-s border-secondary ps-1">
                           {project.boards.length === 0 ? (
-                            <li className="ps-2 py-1 text-xs text-muted">No boards</li>
+                            <li className="ps-2 py-1 text-xs text-tertiary">No boards</li>
                           ) : (
                             project.boards.map((board) => (
                               <li key={board.id}>
@@ -417,31 +415,26 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
 
       {/* Account */}
       <div className="p-2">
-        <Dropdown>
-          <Dropdown.Trigger>
-            <button
-              type="button"
-              className="flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-start transition-colors hover:bg-surface-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus"
-            >
+        <Dropdown.Root>
+          <AriaButton className="flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-start transition-colors hover:bg-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring">
               <span
                 aria-hidden="true"
-                className="grid size-5 shrink-0 place-items-center rounded-full bg-surface-secondary text-[0.625rem] font-medium text-foreground"
+                className="grid size-5 shrink-0 place-items-center rounded-full bg-secondary text-[0.625rem] font-medium text-primary"
               >
                 {initials(userName)}
               </span>
-              <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-muted">
+              <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-tertiary">
                 {userName}
               </span>
-              <Icon d={I_SWITCH} className="size-3 text-muted" />
-            </button>
-          </Dropdown.Trigger>
+              <Icon d={I_SWITCH} className="size-3 text-tertiary" />
+          </AriaButton>
           <Dropdown.Popover placement="top start" className="min-w-56">
             <Dropdown.Menu aria-label="Account">
               <Dropdown.Section>
                 <Dropdown.Item id="account" textValue={userEmail} isDisabled>
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate text-sm">{userName}</span>
-                    <span className="truncate text-xs text-muted">{userEmail}</span>
+                    <span className="truncate text-xs text-tertiary">{userEmail}</span>
                   </span>
                 </Dropdown.Item>
               </Dropdown.Section>
@@ -456,7 +449,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
               <Dropdown.Item
                 id="sign-out"
                 textValue="Sign out"
-                variant="danger"
+                className="text-error-primary"
                 onAction={() => {
                   // Server Actions are invoked over POST however they are
                   // called, so sign-out keeps its POST-only semantics here: the
@@ -470,14 +463,14 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
               </Dropdown.Item>
             </Dropdown.Menu>
           </Dropdown.Popover>
-        </Dropdown>
+        </Dropdown.Root>
       </div>
     </div>
   );
 
   return (
     <div className="flex min-h-dvh">
-      <aside className="hidden w-56 shrink-0 border-e border-border bg-surface lg:block">
+      <aside className="hidden w-56 shrink-0 border-e border-secondary bg-primary lg:block">
         <div className="sticky top-0 h-dvh">{sidebar}</div>
       </aside>
 
@@ -489,19 +482,19 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
             onClick={closeDrawer}
             className="absolute inset-0 size-full bg-black/60"
           />
-          <div className="absolute inset-y-0 start-0 w-64 border-e border-border bg-surface shadow-2xl">
+          <div className="absolute inset-y-0 start-0 w-64 border-e border-secondary bg-primary shadow-2xl">
             {sidebar}
           </div>
         </div>
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6">
+        <header className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-secondary bg-primary/80 px-4 backdrop-blur-md sm:px-6">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
             aria-label="Open navigation"
-            className="-ms-1 grid size-8 place-items-center rounded-md text-muted transition-colors hover:bg-surface-secondary hover:text-foreground lg:hidden"
+            className="-ms-1 grid size-8 place-items-center rounded-md text-tertiary transition-colors hover:bg-secondary hover:text-primary lg:hidden"
           >
             <Icon d={I_MENU} />
           </button>
@@ -510,17 +503,17 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
             {activeOrg ? (
               <Link
                 href={activeOrg.href}
-                className="truncate text-muted no-underline hover:text-foreground"
+                className="truncate text-tertiary no-underline hover:text-primary"
               >
                 {activeOrg.name}
               </Link>
             ) : null}
             {activeProject ? (
               <>
-                <Icon d={I_CHEVRON} className="size-3 text-muted opacity-60" />
+                <Icon d={I_CHEVRON} className="size-3 text-tertiary opacity-60" />
                 <Link
                   href={activeProject.href}
-                  className="truncate font-medium text-foreground no-underline hover:underline"
+                  className="truncate font-medium text-primary no-underline hover:underline"
                 >
                   {activeProject.name}
                 </Link>

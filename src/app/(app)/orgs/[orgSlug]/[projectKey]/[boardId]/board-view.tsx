@@ -33,7 +33,9 @@ import {
 } from 'react';
 import Link from 'next/link';
 import type { Priority } from '@prisma/client';
-import { Modal } from '@heroui/react/modal';
+import { X as CloseIcon } from '@untitledui/icons';
+import { Button as AriaButton } from 'react-aria-components';
+import { Dialog, Modal, ModalOverlay } from '@/components/application/modals/modal';
 
 import {
   Kanban,
@@ -95,10 +97,10 @@ type BoardViewProps = {
 };
 
 const PRIORITY_DOT: Record<Priority, string | null> = {
-  URGENT: 'bg-danger',
-  HIGH: 'bg-warning',
-  MEDIUM: 'bg-accent',
-  LOW: 'bg-muted',
+  URGENT: 'bg-error-solid',
+  HIGH: 'bg-warning-solid',
+  MEDIUM: 'bg-brand-solid',
+  LOW: 'bg-quaternary',
   NONE: null,
 };
 
@@ -149,10 +151,10 @@ function TicketCard({
   return (
     <div
       className={cx(
-        'no-native-drag flex flex-col gap-2.5 rounded-lg border bg-surface p-3 transition-colors',
+        'no-native-drag flex flex-col gap-2.5 rounded-lg border bg-primary p-3 transition-colors',
         overlay
-          ? 'rotate-2 border-accent shadow-lg'
-          : 'border-border shadow-xs hover:border-border-secondary',
+          ? 'rotate-2 border-brand shadow-lg'
+          : 'border-secondary shadow-xs hover:border-tertiary',
       )}
     >
       <div className="flex items-start gap-1">
@@ -164,14 +166,14 @@ function TicketCard({
           onPointerDown={(event) => event.stopPropagation()}
           draggable={false}
           onDragStart={(event) => event.preventDefault()}
-          className="min-w-0 flex-1 text-sm leading-snug font-medium text-foreground no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="min-w-0 flex-1 text-sm leading-snug font-medium text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           {ticket.title}
         </Link>
         {action}
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-muted">
+      <div className="flex items-center gap-2 text-xs text-tertiary">
         {PRIORITY_DOT[ticket.priority] ? (
           <span
             aria-label={PRIORITY_LABEL[ticket.priority]}
@@ -186,7 +188,7 @@ function TicketCard({
 
         {ticket.dueDateLabel ? (
           <span
-            className={cx('whitespace-nowrap', ticket.overdue && 'font-medium text-danger')}
+            className={cx('whitespace-nowrap', ticket.overdue && 'font-medium text-error-primary')}
             title={ticket.overdue ? 'Overdue' : 'Due date'}
           >
             {ticket.dueDateLabel}
@@ -213,14 +215,14 @@ function TicketCard({
             <span
               title={ticket.assigneeName}
               aria-label={`Assigned to ${ticket.assigneeName}`}
-              className="grid size-6 place-items-center rounded-full bg-surface-secondary text-[0.625rem] font-medium text-muted"
+              className="grid size-6 place-items-center rounded-full bg-secondary text-[0.625rem] font-medium text-tertiary"
             >
               {initials(ticket.assigneeName)}
             </span>
           ) : (
             <span
               aria-label="Unassigned"
-              className="grid size-6 place-items-center rounded-full border border-dashed border-border text-[0.625rem] text-muted"
+              className="grid size-6 place-items-center rounded-full border border-dashed border-secondary text-[0.625rem] text-tertiary"
             >
               &ndash;
             </span>
@@ -256,13 +258,13 @@ function Pill({
   dot?: ReactNode;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-surface-secondary has-[select:focus-visible]:outline-2 has-[select:focus-visible]:outline-offset-1 has-[select:focus-visible]:outline-focus">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-secondary px-2.5 py-1 text-xs text-primary transition-colors hover:bg-secondary has-[select:focus-visible]:outline-2 has-[select:focus-visible]:outline-offset-1 has-[select:focus-visible]:outline-focus-ring">
       {dot}
       <select
         aria-label={label}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="cursor-pointer appearance-none bg-transparent text-xs text-foreground outline-none"
+        className="cursor-pointer appearance-none bg-transparent text-xs text-primary outline-none"
       >
         {children}
       </select>
@@ -275,7 +277,7 @@ function Pill({
  *
  * Title and description are the whole point, so they are borderless and large;
  * the metadata sits under them as pills, and the dialog's own chrome stays out
- * of the way. Escape and the backdrop close it -- HeroUI's Modal owns the focus
+ * of the way. Escape and the backdrop close it -- react-aria's Modal owns the focus
  * trap and the scroll lock.
  */
 function AddCard({
@@ -349,7 +351,7 @@ function AddCard({
           setError(null);
           setOpen(true);
         }}
-        className="mt-1 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-start text-sm text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        className="mt-1 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-start text-sm text-tertiary transition-colors hover:bg-secondary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
       >
         <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-4">
           <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -357,17 +359,14 @@ function AddCard({
         Add a card
       </button>
 
-      <Modal.Backdrop isOpen={open} onOpenChange={setOpen} variant="blur">
-        <Modal.Container placement="center">
-          <Modal.Dialog
-            aria-labelledby={headingId}
-            className="gap-0 p-0 shadow-2xl sm:max-w-[36rem]"
-          >
+      <ModalOverlay isOpen={open} onOpenChange={setOpen}>
+        <Modal className="w-full sm:max-w-[36rem]">
+          <Dialog aria-labelledby={headingId} className="gap-0 p-0">
             <div className="flex items-center gap-1.5 px-4 pt-4 pb-2">
-              <span className="rounded bg-surface-secondary px-1.5 py-0.5 font-mono text-[0.6875rem] text-muted">
+              <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[0.6875rem] text-tertiary">
                 {projectKey}
               </span>
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3 text-muted">
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3 text-tertiary">
                 <path
                   d="M6 3.5 10.5 8 6 12.5"
                   stroke="currentColor"
@@ -376,11 +375,17 @@ function AddCard({
                   strokeLinejoin="round"
                 />
               </svg>
-              <span id={headingId} className="text-sm font-medium text-foreground">
+              <span id={headingId} className="text-sm font-medium text-primary">
                 New card
               </span>
             </div>
-            <Modal.CloseTrigger />
+            <AriaButton
+              aria-label="Close"
+              onPress={() => setOpen(false)}
+              className="absolute top-3 right-3 grid size-8 cursor-pointer place-items-center rounded-md text-fg-quaternary outline-focus-ring transition-colors hover:bg-secondary hover:text-fg-quaternary_hover focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
+              <CloseIcon className="size-4" />
+            </AriaButton>
 
             <div className="flex flex-col gap-1 px-4 pt-2">
               {/* `field-sizing-content` grows both fields with their text, so a
@@ -400,7 +405,7 @@ function AddCard({
                 }}
                 aria-label="Card title"
                 placeholder="Card title"
-                className="w-full resize-none border-0 bg-transparent p-0 text-lg font-medium text-foreground field-sizing-content placeholder:text-muted focus:outline-none"
+                className="w-full resize-none border-0 bg-transparent p-0 text-lg font-medium text-primary field-sizing-content placeholder:text-tertiary focus:outline-none"
               />
               <textarea
                 rows={2}
@@ -415,7 +420,7 @@ function AddCard({
                 }}
                 aria-label="Description"
                 placeholder="Add description…"
-                className="w-full resize-none border-0 bg-transparent p-0 text-sm text-foreground field-sizing-content placeholder:text-muted focus:outline-none"
+                className="w-full resize-none border-0 bg-transparent p-0 text-sm text-primary field-sizing-content placeholder:text-tertiary focus:outline-none"
               />
             </div>
 
@@ -427,7 +432,7 @@ function AddCard({
                 dot={
                   <span
                     aria-hidden="true"
-                    className="size-2 rounded-full border border-muted"
+                    className="size-2 rounded-full border border-tertiary"
                     title={targetColumn.name}
                   />
                 }
@@ -448,7 +453,7 @@ function AddCard({
                     aria-hidden="true"
                     className={cx(
                       'size-2 rounded-full',
-                      PRIORITY_DOT[priority] ?? 'border border-muted',
+                      PRIORITY_DOT[priority] ?? 'border border-tertiary',
                     )}
                   />
                 }
@@ -470,7 +475,7 @@ function AddCard({
                   assignee ? (
                     <span
                       aria-hidden="true"
-                      className="grid size-4 place-items-center rounded-full bg-surface-secondary text-[0.5rem] font-medium text-foreground"
+                      className="grid size-4 place-items-center rounded-full bg-secondary text-[0.5rem] font-medium text-primary"
                     >
                       {initials(assignee.name)}
                     </span>
@@ -479,7 +484,7 @@ function AddCard({
                       viewBox="0 0 16 16"
                       fill="none"
                       aria-hidden="true"
-                      className="size-3.5 text-muted"
+                      className="size-3.5 text-tertiary"
                     >
                       <path
                         d="M8 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3 13.5a5 5 0 0 1 10 0"
@@ -507,13 +512,13 @@ function AddCard({
               </div>
             ) : null}
 
-            <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
+            <div className="flex items-center justify-between gap-3 border-t border-secondary px-4 py-3">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-tertiary">
                 <input
                   type="checkbox"
                   checked={createMore}
                   onChange={(event) => setCreateMore(event.target.checked)}
-                  className="size-3.5 accent-accent"
+                  className="size-3.5 accent-brand-600"
                 />
                 Create more
               </label>
@@ -521,7 +526,7 @@ function AddCard({
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="rounded-lg px-2.5 py-1.5 text-sm text-muted transition-colors hover:text-foreground"
+                  className="rounded-lg px-2.5 py-1.5 text-sm text-tertiary transition-colors hover:text-primary"
                 >
                   Cancel
                 </button>
@@ -529,15 +534,15 @@ function AddCard({
                   type="button"
                   onClick={submit}
                   disabled={pending || title.trim().length === 0}
-                  className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-foreground transition-opacity disabled:opacity-50"
+                  className="rounded-lg bg-brand-solid px-3 py-1.5 text-sm font-medium text-white transition-opacity disabled:opacity-50"
                 >
                   {pending ? 'Creating…' : 'Create card'}
                 </button>
               </div>
             </div>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
     </>
   );
 }
@@ -626,13 +631,13 @@ export function BoardView({
               <KanbanColumn
                 key={column.id}
                 value={column.id}
-                className="flex w-full flex-col rounded-xl border border-border bg-surface-secondary/40 md:w-72 md:shrink-0"
+                className="flex w-full flex-col rounded-xl border border-secondary bg-secondary/40 md:w-72 md:shrink-0"
               >
                 <header className="flex items-center gap-2 px-3 py-2.5">
-                  <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">
+                  <h2 className="text-xs font-semibold tracking-wide text-tertiary uppercase">
                     {column.name}
                   </h2>
-                  <span className="rounded-full bg-surface-secondary px-1.5 text-xs text-muted tabular-nums">
+                  <span className="rounded-full bg-secondary px-1.5 text-xs text-tertiary tabular-nums">
                     {tickets.length}
                   </span>
                 </header>
@@ -671,7 +676,7 @@ export function BoardView({
                   })}
 
                   {tickets.length === 0 ? (
-                    <p className="grid flex-1 place-items-center px-2 py-6 text-center text-xs text-muted">
+                    <p className="grid flex-1 place-items-center px-2 py-6 text-center text-xs text-tertiary">
                       Drop a card here
                     </p>
                   ) : null}
@@ -710,7 +715,7 @@ export function BoardView({
       </Kanban>
 
       {total === 0 ? (
-        <p className="text-sm text-muted">
+        <p className="text-sm text-tertiary">
           Add a card to any column to get started, then drag cards between columns as work moves
           along.
         </p>

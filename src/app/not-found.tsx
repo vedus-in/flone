@@ -17,7 +17,7 @@ export default function NotFound() {
       <div className="flex w-full max-w-md flex-col items-center gap-7 text-center">
         <span
           aria-hidden="true"
-          className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent"
+          className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand-primary text-brand-secondary"
         >
           <svg viewBox="0 0 32 32" fill="currentColor" className="size-5">
             <rect x="3" y="5" width="6" height="22" rx="2" />
@@ -27,18 +27,18 @@ export default function NotFound() {
         </span>
 
         <div className="flex flex-col items-center gap-2">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted tabular-nums">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-tertiary tabular-nums">
             Error 404
           </p>
-          <h1 className="text-balance text-2xl font-semibold tracking-tight text-foreground">
+          <h1 className="text-balance text-2xl font-semibold tracking-tight text-primary">
             This page isn’t here
           </h1>
-          <p className="max-w-[44ch] text-pretty text-sm leading-relaxed text-muted">
+          <p className="max-w-[44ch] text-pretty text-sm leading-relaxed text-tertiary">
             That page doesn’t exist, or you don’t have access to it.
           </p>
         </div>
 
-        <ButtonLink href="/" variant="primary">
+        <ButtonLink href="/" color="primary">
           Back to your boards
         </ButtonLink>
       </div>

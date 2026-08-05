@@ -24,17 +24,18 @@ import { register } from './actions';
  * `defaultValue`, stays uncontrolled -- so that same reset clears it -- and is
  * never echoed back (SPEC 4.7).
  *
- * These are plain `Input`s inside `Field`, NOT HeroUI's `TextField` wrapper.
- * `TextField` installs react-aria's form plumbing, which restores its own
- * initial value on the `reset` event; with a controlled value that fires
- * `onChange('')` and would defeat the workaround above.
+ * These are plain `Input`s inside `Field` -- `@/components/ui` exports Untitled
+ * UI's `InputBase`, NOT its `TextField`-backed `Input`. `TextField` installs
+ * react-aria's form plumbing, which restores its own initial value on the
+ * `reset` event; with a controlled value that fires `onChange('')` and would
+ * defeat the workaround above.
  *
  * `minLength={12}` mirrors the server rule for early, local feedback -- it is a
  * convenience, never the check. `register/actions.ts` re-validates with zod, and
  * the messages rendered under each field are the server's own closed literals.
  */
 const LINK =
-  'rounded-sm font-medium text-link underline-offset-4 outline-none hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
+  'rounded-sm font-medium text-brand-secondary underline-offset-4 outline-none hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
 /** Joins the ids that actually rendered; `undefined` when none did. */
 function describedBy(...ids: Array<string | false | undefined>): string | undefined {
@@ -53,12 +54,7 @@ export function RegisterForm() {
   return (
     <Card className="gap-6 p-6 sm:p-7">
       <Card.Header className="gap-1.5">
-        <Card.Title
-          className="text-lg leading-6 tracking-tight"
-          render={(props) => <h1 {...props} />}
-        >
-          Create your account
-        </Card.Title>
+        <h1 className="text-lg leading-6 font-semibold text-primary">Create your account</h1>
         <Card.Description>Three fields and you are in.</Card.Description>
       </Card.Header>
 
@@ -75,7 +71,6 @@ export function RegisterForm() {
               autoFocus
               required
               maxLength={80}
-              fullWidth
               value={name}
               onChange={(event) => setName(event.target.value)}
               aria-describedby={describedBy(fieldErrors?.name && 'register-name-error')}
@@ -92,7 +87,6 @@ export function RegisterForm() {
               autoComplete="email"
               required
               maxLength={254}
-              fullWidth
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               aria-describedby={describedBy(fieldErrors?.email && 'register-email-error')}
@@ -114,7 +108,6 @@ export function RegisterForm() {
               required
               minLength={12}
               maxLength={200}
-              fullWidth
               aria-describedby={describedBy(
                 'register-password-hint',
                 fieldErrors?.password && 'register-password-error',
@@ -123,13 +116,13 @@ export function RegisterForm() {
             />
           </Field>
 
-          <SubmitButton fullWidth pendingLabel="Creating account...">
+          <SubmitButton className="w-full" pendingLabel="Creating account...">
             Create account
           </SubmitButton>
         </form>
       </Card.Content>
 
-      <Card.Footer className="justify-center gap-1.5 border-t border-border pt-6 text-sm text-muted">
+      <Card.Footer className="justify-center gap-1.5 border-t border-secondary pt-6 text-sm text-tertiary">
         <span>Already have an account?</span>
         <Link href="/login" className={LINK}>
           Sign in

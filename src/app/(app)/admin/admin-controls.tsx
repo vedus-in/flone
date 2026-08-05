@@ -1,7 +1,8 @@
 'use client';
 
 import { useActionState, useRef } from 'react';
-import { Spinner, Switch, Table } from '@heroui/react';
+import { Table } from '@/components/application/table/table';
+import { Toggle } from '@/components/base/toggle/toggle';
 import { Badge, FormError, SubmitButton } from '@/components/ui';
 import type { ActionResult } from '@/lib/result';
 import { setRegistration, setUserAdmin } from './actions';
@@ -22,7 +23,7 @@ function ActionStatus({ state }: { state: ActionResult | null }) {
   if (!state.ok) return <FormError>{state.error}</FormError>;
   if (!state.message) return null;
   return (
-    <p role="status" className="text-xs text-muted">
+    <p role="status" className="text-xs text-tertiary">
       {state.message}
     </p>
   );
@@ -83,32 +84,24 @@ export function RegistrationControl({ registrationEnabled }: { registrationEnabl
           toggle just as effectively but keeps the control focusable, so a
           keyboard user does not lose their place on every flip.
         */}
-        <Switch
+        <Toggle
+          label="Allow new accounts"
           isSelected={registrationEnabled}
           isReadOnly={isPending}
           onChange={() => formRef.current?.requestSubmit()}
-        >
-          <Switch.Content>
-            <Switch.Control>
-              <Switch.Thumb />
-            </Switch.Control>
-            Allow new accounts
-          </Switch.Content>
-        </Switch>
+        />
 
         <Badge tone={registrationEnabled ? 'success' : 'warning'}>
           {registrationEnabled ? 'Open' : 'Closed'}
         </Badge>
 
-        {isPending ? (
-          <span className="inline-flex items-center gap-1.5 text-xs text-muted">
-            <Spinner size="sm" color="current" aria-hidden="true" />
-            Saving...
-          </span>
-        ) : null}
+        {/* ponytail: text-only pending hint. Untitled UI's `LoadingIndicator`
+            starts at 32px, which is page-scale, not inline-next-to-12px-text
+            scale. Swap it in if a small spinner is ever added upstream. */}
+        {isPending ? <span className="text-xs text-tertiary">Saving...</span> : null}
       </div>
 
-      <p className="text-sm text-muted">
+      <p className="text-sm text-tertiary">
         {registrationEnabled
           ? 'Anyone who reaches the sign-up page can create an account.'
           : 'The sign-up page shows a closed notice instead of the form, and the server refuses new accounts even if the form is submitted directly.'}
@@ -116,7 +109,7 @@ export function RegistrationControl({ registrationEnabled }: { registrationEnabl
 
       <ActionStatus state={state} />
 
-      <p className="text-xs text-muted">
+      <p className="text-xs text-tertiary">
         One exception, on purpose: if this instance ever has no accounts at all,
         registration re-opens automatically so that a first account can be created, and
         that account becomes an administrator. Without it, closing registration on an
@@ -160,81 +153,79 @@ export function UserAdminTable({
 
   return (
     <div className="flex flex-col gap-4">
-      <Table variant="secondary">
-        <Table.ScrollContainer>
-          <Table.Content aria-label="Accounts on this instance">
-            <Table.Header>
-              <Table.Column isRowHeader>Name</Table.Column>
-              <Table.Column>Email</Table.Column>
-              <Table.Column>Joined</Table.Column>
-              <Table.Column>Site admin</Table.Column>
-              <Table.Column textValue="Actions">
-                <span className="visually-hidden">Actions</span>
-              </Table.Column>
-            </Table.Header>
+      <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
+        <Table size="sm" aria-label="Accounts on this instance">
+          <Table.Header>
+            <Table.Head isRowHeader>Name</Table.Head>
+            <Table.Head>Email</Table.Head>
+            <Table.Head>Joined</Table.Head>
+            <Table.Head>Site admin</Table.Head>
+            <Table.Head textValue="Actions">
+              <span className="visually-hidden">Actions</span>
+            </Table.Head>
+          </Table.Header>
 
-            <Table.Body
-              items={users}
-              dependencies={[adminCount]}
-              renderEmptyState={() => (
-                <span className="text-sm text-muted">No accounts on this instance yet.</span>
-              )}
-            >
-              {(user) => (
-                <Table.Row id={user.id} textValue={user.name}>
-                  <Table.Cell textValue={user.name}>
-                    <span className="font-medium text-foreground">{user.name}</span>
-                    {user.isSelf ? <span className="ms-2 text-xs text-muted">you</span> : null}
-                  </Table.Cell>
+          <Table.Body
+            items={users}
+            dependencies={[adminCount]}
+            renderEmptyState={() => (
+              <span className="text-sm text-tertiary">No accounts on this instance yet.</span>
+            )}
+          >
+            {(user) => (
+              <Table.Row id={user.id} textValue={user.name}>
+                <Table.Cell textValue={user.name}>
+                  <span className="font-medium text-primary">{user.name}</span>
+                  {user.isSelf ? <span className="ms-2 text-xs text-tertiary">you</span> : null}
+                </Table.Cell>
 
-                  <Table.Cell className="text-muted">{user.email}</Table.Cell>
+                <Table.Cell className="text-tertiary">{user.email}</Table.Cell>
 
-                  <Table.Cell className="whitespace-nowrap text-muted" textValue={user.joinedLabel}>
-                    <time dateTime={user.joinedISO}>{user.joinedLabel}</time>
-                  </Table.Cell>
+                <Table.Cell className="whitespace-nowrap text-tertiary" textValue={user.joinedLabel}>
+                  <time dateTime={user.joinedISO}>{user.joinedLabel}</time>
+                </Table.Cell>
 
-                  <Table.Cell textValue={user.isAdmin ? 'Yes' : 'No'}>
-                    {user.isAdmin ? (
-                      <Badge tone="accent">Admin</Badge>
-                    ) : (
-                      <span className="text-muted">
-                        <span aria-hidden="true">&mdash;</span>
-                        <span className="visually-hidden">Not an administrator</span>
-                      </span>
-                    )}
-                  </Table.Cell>
+                <Table.Cell textValue={user.isAdmin ? 'Yes' : 'No'}>
+                  {user.isAdmin ? (
+                    <Badge tone="accent">Admin</Badge>
+                  ) : (
+                    <span className="text-tertiary">
+                      <span aria-hidden="true">&mdash;</span>
+                      <span className="visually-hidden">Not an administrator</span>
+                    </span>
+                  )}
+                </Table.Cell>
 
-                  <Table.Cell textValue={user.isAdmin ? 'Revoke admin' : 'Make admin'}>
-                    <form action={formAction} className="flex justify-end">
-                      <input type="hidden" name="userId" value={user.id} readOnly />
-                      <input
-                        type="hidden"
-                        name="isAdmin"
-                        value={user.isAdmin ? 'false' : 'true'}
-                        readOnly
-                      />
-                      <SubmitButton
-                        size="sm"
-                        variant={user.isAdmin ? 'danger-soft' : 'secondary'}
-                        // Mirrors the two server-side invariants. The server
-                        // refuses either way; this only avoids offering a click
-                        // that is guaranteed to fail.
-                        isDisabled={user.isAdmin && (user.isSelf || onlyOneAdmin)}
-                      >
-                        {user.isAdmin ? 'Revoke admin' : 'Make admin'}
-                      </SubmitButton>
-                    </form>
-                  </Table.Cell>
-                </Table.Row>
-              )}
-            </Table.Body>
-          </Table.Content>
-        </Table.ScrollContainer>
-      </Table>
+                <Table.Cell textValue={user.isAdmin ? 'Revoke admin' : 'Make admin'}>
+                  <form action={formAction} className="flex justify-end">
+                    <input type="hidden" name="userId" value={user.id} readOnly />
+                    <input
+                      type="hidden"
+                      name="isAdmin"
+                      value={user.isAdmin ? 'false' : 'true'}
+                      readOnly
+                    />
+                    <SubmitButton
+                      size="sm"
+                      color={user.isAdmin ? 'secondary-destructive' : 'secondary'}
+                      // Mirrors the two server-side invariants. The server
+                      // refuses either way; this only avoids offering a click
+                      // that is guaranteed to fail.
+                      isDisabled={user.isAdmin && (user.isSelf || onlyOneAdmin)}
+                    >
+                      {user.isAdmin ? 'Revoke admin' : 'Make admin'}
+                    </SubmitButton>
+                  </form>
+                </Table.Cell>
+              </Table.Row>
+            )}
+          </Table.Body>
+        </Table>
+      </div>
 
       <ActionStatus state={state} />
 
-      <p className="text-xs text-muted">
+      <p className="text-xs text-tertiary">
         Site administrators govern this instance &mdash; registration, and each other. It
         grants no access to any organization&rsquo;s projects, boards or tickets. You cannot
         revoke your own access, and the last remaining administrator cannot be removed.

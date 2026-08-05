@@ -116,14 +116,14 @@ export function ActionForm({
         <div className="flex flex-col gap-1.5">
           <p
             role="alert"
-            className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+            className="rounded-lg bg-error-primary px-3 py-2 text-sm text-error-primary"
           >
             {state.error}
           </p>
           {fieldErrors.length > 0 ? (
             <ul className="flex flex-col gap-1 ps-1">
               {fieldErrors.map(([field, message]) => (
-                <li key={field} className="text-xs text-danger">
+                <li key={field} className="text-xs text-error-primary">
                   {message}
                 </li>
               ))}
@@ -135,7 +135,7 @@ export function ActionForm({
       {state && state.ok && state.message ? (
         <p
           role="status"
-          className="rounded-lg bg-success-soft px-3 py-2 text-sm text-success-soft-foreground"
+          className="rounded-lg bg-success-primary px-3 py-2 text-sm text-success-primary"
         >
           {state.message}
         </p>

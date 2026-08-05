@@ -1,9 +1,7 @@
 import Link from 'next/link';
 import { Role } from '@prisma/client';
-import { Breadcrumbs } from '@heroui/react/breadcrumbs';
-import { Card } from '@heroui/react/card';
-import { Disclosure } from '@heroui/react/disclosure';
-import { Table } from '@heroui/react/table';
+import { ChevronDown } from '@untitledui/icons';
+import { Table } from '@/components/application/table/table';
 import { prisma } from '@/lib/db';
 import {
   atLeast,
@@ -15,11 +13,13 @@ import {
 } from '@/lib/authz';
 import {
   Badge,
+  Breadcrumbs,
+  Card,
+  Field,
   Input,
   Label,
   PageHeader,
   SubmitButton,
-  TextField,
 } from '@/components/ui';
 import { ActionForm } from '../../../action-form';
 import {
@@ -45,9 +45,9 @@ const ROLE_HELP: Record<Role, string> = {
 const ROLE_ORDER: Role[] = [Role.OWNER, Role.ADMIN, Role.MEMBER];
 
 /**
- * A native `<select>` wearing HeroUI's field tokens.
+ * A native `<select>` wearing Untitled UI's field tokens.
  *
- * Deliberately native rather than HeroUI's `Select`: React 19 resets a
+ * Deliberately native rather than Untitled UI's `Select`: React 19 resets a
  * `<form action={fn}>` once the action settles, and `ActionForm`'s restore
  * workaround puts the submitted values back by writing to
  * `form.elements` -- which only reaches real `<select>` elements. A
@@ -55,18 +55,18 @@ const ROLE_ORDER: Role[] = [Role.OWNER, Role.ADMIN, Role.MEMBER];
  * whatever the form actually submits.
  */
 const SELECT_CLASS =
-  'min-h-9 rounded-field border border-field-border bg-field px-3 py-2 text-sm text-field-foreground shadow-field outline-none transition-colors hover:bg-field-hover focus-visible:focus-field-ring';
+  'min-h-9 rounded-lg border border-primary bg-primary px-3 py-2 text-sm text-primary shadow-xs outline-focus-ring transition-colors hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-offset-2';
 
 const NAV_ITEM =
-  'rounded-lg px-3 py-1.5 text-sm font-medium outline-none transition-colors focus-visible:focus-ring';
-const NAV_ON = 'bg-surface text-foreground shadow-surface';
-const NAV_OFF = 'text-muted hover:text-foreground';
+  'rounded-lg px-3 py-1.5 text-sm font-medium outline-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+const NAV_ON = 'bg-primary text-primary shadow-xs';
+const NAV_OFF = 'text-tertiary hover:text-primary';
 
 function SectionNav({ org }: { org: OrgRef }) {
   return (
     <nav
       aria-label="Organization sections"
-      className="flex w-fit items-center gap-1 rounded-xl bg-surface-secondary p-1"
+      className="flex w-fit items-center gap-1 rounded-xl bg-secondary p-1"
     >
       <Link href={orgPath(org)} className={`${NAV_ITEM} ${NAV_OFF}`}>
         Projects
@@ -135,166 +135,164 @@ export default async function OrganizationSettingsPage({
       {/* Members                                                             */}
       {/* ------------------------------------------------------------------ */}
       <section className="flex flex-col gap-4" aria-labelledby="members-heading">
-        <h2 id="members-heading" className="text-sm font-medium text-foreground">
+        <h2 id="members-heading" className="text-sm font-medium text-primary">
           Members
         </h2>
 
-        <Table variant="secondary">
-          <Table.ScrollContainer>
-            <Table.Content aria-label="Members of this organization">
-              <Table.Header>
-                <Table.Column isRowHeader className="w-full">
-                  Member
-                </Table.Column>
-                <Table.Column className="whitespace-nowrap">Role</Table.Column>
-                {canManage ? (
-                  <Table.Column className="whitespace-nowrap text-end">Manage</Table.Column>
-                ) : null}
-              </Table.Header>
+        <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
+          <Table size="sm" aria-label="Members of this organization">
+            <Table.Header>
+              <Table.Head isRowHeader className="w-full">
+                Member
+              </Table.Head>
+              <Table.Head className="whitespace-nowrap">Role</Table.Head>
+              {canManage ? (
+                <Table.Head className="whitespace-nowrap text-end">Manage</Table.Head>
+              ) : null}
+            </Table.Header>
 
-              <Table.Body>
-                {members.map((member) => {
-                  const isSelf = member.user.id === ctx.user.id;
-                  const targetIsOwner = member.role === Role.OWNER;
-                  // UI politeness only -- the actions re-check every one of these.
-                  const actionable = canManage && !isSelf && (!targetIsOwner || isOwner);
-                  const lastOwner = targetIsOwner && ownerCount <= 1;
-                  const roleFieldId = `role-${member.id}`;
+            <Table.Body>
+              {members.map((member) => {
+                const isSelf = member.user.id === ctx.user.id;
+                const targetIsOwner = member.role === Role.OWNER;
+                // UI politeness only -- the actions re-check every one of these.
+                const actionable = canManage && !isSelf && (!targetIsOwner || isOwner);
+                const lastOwner = targetIsOwner && ownerCount <= 1;
+                const roleFieldId = `role-${member.id}`;
 
-                  return (
-                    <Table.Row key={member.id} id={member.id}>
-                      <Table.Cell>
-                        <div className="flex min-w-0 flex-col gap-0.5 py-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-medium text-foreground">
-                              {member.user.name}
+                return (
+                  <Table.Row key={member.id} id={member.id}>
+                    <Table.Cell>
+                      <div className="flex min-w-0 flex-col gap-0.5 py-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-primary">
+                            {member.user.name}
+                          </span>
+                          {isSelf ? <Badge>You</Badge> : null}
+                        </div>
+                        <span className="text-xs text-tertiary">{member.user.email}</span>
+                      </div>
+                    </Table.Cell>
+
+                    <Table.Cell className="whitespace-nowrap align-top">
+                      <Badge tone={targetIsOwner ? 'accent' : 'neutral'}>
+                        {ROLE_LABEL[member.role]}
+                      </Badge>
+                    </Table.Cell>
+
+                    {canManage ? (
+                      <Table.Cell className="align-top">
+                        <div className="flex flex-col items-end gap-2">
+                          {actionable ? (
+                            <div className="flex flex-wrap items-start justify-end gap-2">
+                              <ActionForm
+                                action={changeMemberRole}
+                                className="flex flex-col items-end gap-2"
+                                aria-label={`Change role for ${member.user.name}`}
+                              >
+                                <input
+                                  type="hidden"
+                                  name="orgSlug"
+                                  value={ctx.org.slug}
+                                />
+                                <input
+                                  type="hidden"
+                                  name="membershipId"
+                                  value={member.id}
+                                />
+                                <div className="flex items-center gap-2">
+                                  <Label htmlFor={roleFieldId} className="visually-hidden">
+                                    Role for {member.user.name}
+                                  </Label>
+                                  <select
+                                    id={roleFieldId}
+                                    name="role"
+                                    defaultValue={member.role}
+                                    className={`${SELECT_CLASS} w-32`}
+                                  >
+                                    {assignableRoles.map((role) => (
+                                      <option key={role} value={role}>
+                                        {ROLE_LABEL[role]}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <SubmitButton
+                                    color="secondary"
+                                    size="sm"
+                                    pendingLabel="Saving..."
+                                  >
+                                    Update
+                                  </SubmitButton>
+                                </div>
+                              </ActionForm>
+
+                              <ActionForm
+                                action={removeMember}
+                                className="flex flex-col items-end gap-2"
+                                aria-label={`Remove ${member.user.name}`}
+                              >
+                                <input
+                                  type="hidden"
+                                  name="orgSlug"
+                                  value={ctx.org.slug}
+                                />
+                                <input
+                                  type="hidden"
+                                  name="membershipId"
+                                  value={member.id}
+                                />
+                                <SubmitButton
+                                  color="secondary-destructive"
+                                  size="sm"
+                                  pendingLabel="Removing..."
+                                >
+                                  Remove
+                                </SubmitButton>
+                              </ActionForm>
+                            </div>
+                          ) : (
+                            // Short and non-wrapping on purpose. The full
+                            // sentence here wrapped inside a narrow, end-aligned
+                            // column and stretched every row to several lines.
+                            // The reason lives in `title` for anyone who wants it.
+                            <span
+                              className="text-xs whitespace-nowrap text-tertiary"
+                              title={
+                                isSelf
+                                  ? 'You cannot change your own role or remove yourself.'
+                                  : 'Only an owner can change or remove another owner.'
+                              }
+                            >
+                              {isSelf ? 'That is you' : 'Owners only'}
                             </span>
-                            {isSelf ? <Badge>You</Badge> : null}
-                          </div>
-                          <span className="text-xs text-muted">{member.user.email}</span>
+                          )}
+
+                          {lastOwner ? (
+                            <span
+                              className="text-xs whitespace-nowrap text-tertiary"
+                              title="An organization must always have at least one owner."
+                            >
+                              Last owner
+                            </span>
+                          ) : null}
                         </div>
                       </Table.Cell>
-
-                      <Table.Cell className="whitespace-nowrap align-top">
-                        <Badge tone={targetIsOwner ? 'accent' : 'neutral'}>
-                          {ROLE_LABEL[member.role]}
-                        </Badge>
-                      </Table.Cell>
-
-                      {canManage ? (
-                        <Table.Cell className="align-top">
-                          <div className="flex flex-col items-end gap-2">
-                            {actionable ? (
-                              <div className="flex flex-wrap items-start justify-end gap-2">
-                                <ActionForm
-                                  action={changeMemberRole}
-                                  className="flex flex-col items-end gap-2"
-                                  aria-label={`Change role for ${member.user.name}`}
-                                >
-                                  <input
-                                    type="hidden"
-                                    name="orgSlug"
-                                    value={ctx.org.slug}
-                                  />
-                                  <input
-                                    type="hidden"
-                                    name="membershipId"
-                                    value={member.id}
-                                  />
-                                  <div className="flex items-center gap-2">
-                                    <Label htmlFor={roleFieldId} className="visually-hidden">
-                                      Role for {member.user.name}
-                                    </Label>
-                                    <select
-                                      id={roleFieldId}
-                                      name="role"
-                                      defaultValue={member.role}
-                                      className={`${SELECT_CLASS} w-32`}
-                                    >
-                                      {assignableRoles.map((role) => (
-                                        <option key={role} value={role}>
-                                          {ROLE_LABEL[role]}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <SubmitButton
-                                      variant="secondary"
-                                      size="sm"
-                                      pendingLabel="Saving..."
-                                    >
-                                      Update
-                                    </SubmitButton>
-                                  </div>
-                                </ActionForm>
-
-                                <ActionForm
-                                  action={removeMember}
-                                  className="flex flex-col items-end gap-2"
-                                  aria-label={`Remove ${member.user.name}`}
-                                >
-                                  <input
-                                    type="hidden"
-                                    name="orgSlug"
-                                    value={ctx.org.slug}
-                                  />
-                                  <input
-                                    type="hidden"
-                                    name="membershipId"
-                                    value={member.id}
-                                  />
-                                  <SubmitButton
-                                    variant="danger-soft"
-                                    size="sm"
-                                    pendingLabel="Removing..."
-                                  >
-                                    Remove
-                                  </SubmitButton>
-                                </ActionForm>
-                              </div>
-                            ) : (
-                              // Short and non-wrapping on purpose. The full
-                              // sentence here wrapped inside a narrow, end-aligned
-                              // column and stretched every row to several lines.
-                              // The reason lives in `title` for anyone who wants it.
-                              <span
-                                className="text-xs whitespace-nowrap text-muted"
-                                title={
-                                  isSelf
-                                    ? 'You cannot change your own role or remove yourself.'
-                                    : 'Only an owner can change or remove another owner.'
-                                }
-                              >
-                                {isSelf ? 'That is you' : 'Owners only'}
-                              </span>
-                            )}
-
-                            {lastOwner ? (
-                              <span
-                                className="text-xs whitespace-nowrap text-muted"
-                                title="An organization must always have at least one owner."
-                              >
-                                Last owner
-                              </span>
-                            ) : null}
-                          </div>
-                        </Table.Cell>
-                      ) : null}
-                    </Table.Row>
-                  );
-                })}
-              </Table.Body>
-            </Table.Content>
-          </Table.ScrollContainer>
-        </Table>
+                    ) : null}
+                  </Table.Row>
+                );
+              })}
+            </Table.Body>
+          </Table>
+        </div>
 
         <dl className="grid gap-2 sm:grid-cols-3">
           {ROLE_ORDER.map((role) => (
             <div
               key={role}
-              className="flex flex-col gap-1 rounded-xl border border-border px-3 py-2.5"
+              className="flex flex-col gap-1 rounded-xl border border-secondary px-3 py-2.5"
             >
-              <dt className="text-xs font-medium text-foreground">{ROLE_LABEL[role]}</dt>
-              <dd className="text-xs text-muted">{ROLE_HELP[role]}</dd>
+              <dt className="text-xs font-medium text-primary">{ROLE_LABEL[role]}</dt>
+              <dd className="text-xs text-tertiary">{ROLE_HELP[role]}</dd>
             </div>
           ))}
         </dl>
@@ -324,16 +322,17 @@ export default async function OrganizationSettingsPage({
               <input type="hidden" name="orgSlug" value={ctx.org.slug} />
 
               <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] sm:items-start">
-                <TextField
-                  isRequired
-                  type="email"
-                  maxLength={254}
-                  autoComplete="email"
-                  fullWidth
-                >
-                  <Label>Email</Label>
-                  <Input name="email" placeholder="teammate@example.com" />
-                </TextField>
+                <Field htmlFor="member-email" label="Email">
+                  <Input
+                    id="member-email"
+                    name="email"
+                    type="email"
+                    required
+                    maxLength={254}
+                    autoComplete="email"
+                    placeholder="teammate@example.com"
+                  />
+                </Field>
 
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="member-role">Role</Label>
@@ -378,21 +377,19 @@ export default async function OrganizationSettingsPage({
               aria-label="Rename organization"
             >
               <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-              {/* HeroUI v3: `defaultValue` belongs on TextField, `name` on Input. */}
-              <TextField
-                isRequired
-                minLength={2}
-                maxLength={60}
-                autoComplete="organization"
-                defaultValue={ctx.org.name}
-                fullWidth
-                className="max-w-md"
-              >
-                <Label>Name</Label>
-                <Input name="name" />
-              </TextField>
+              <Field htmlFor="org-name" label="Name" className="max-w-md">
+                <Input
+                  id="org-name"
+                  name="name"
+                  required
+                  minLength={2}
+                  maxLength={60}
+                  autoComplete="organization"
+                  defaultValue={ctx.org.name}
+                />
+              </Field>
               <div className="flex flex-wrap items-center gap-2">
-                <SubmitButton variant="secondary">Save name</SubmitButton>
+                <SubmitButton color="secondary">Save name</SubmitButton>
               </div>
             </ActionForm>
           </Card>
@@ -404,45 +401,51 @@ export default async function OrganizationSettingsPage({
       {/* ------------------------------------------------------------------ */}
       {isOwner ? (
         <section aria-labelledby="danger-heading">
-          <Card className="gap-0 border border-danger/25 p-0">
-            <Disclosure>
-              <Disclosure.Heading level={2} id="danger-heading">
-                <Disclosure.Trigger className="flex w-full items-center justify-between gap-3 rounded-2xl px-6 py-4 text-sm font-medium text-danger">
-                  Delete this organization
-                  <Disclosure.Indicator />
-                </Disclosure.Trigger>
-              </Disclosure.Heading>
-              <Disclosure.Content>
-                <div className="flex flex-col gap-4 px-6 pb-6">
-                  <p className="max-w-prose text-sm text-muted">
-                    Every project, board, ticket and comment in {ctx.org.name} is deleted
-                    permanently. This cannot be undone.
-                  </p>
-                  <ActionForm
-                    action={deleteOrganization}
-                    className="flex flex-col gap-4"
-                    aria-label="Delete organization"
+          <Card className="gap-0 p-0 ring-error_subtle">
+            <details className="group">
+              <summary
+                id="danger-heading"
+                className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-6 py-4 text-sm font-medium text-error-primary"
+              >
+                Delete this organization
+                <ChevronDown
+                  aria-hidden="true"
+                  className="size-4 transition-transform duration-100 group-open:rotate-180"
+                />
+              </summary>
+              <div className="flex flex-col gap-4 px-6 pb-6">
+                <p className="max-w-prose text-sm text-tertiary">
+                  Every project, board, ticket and comment in {ctx.org.name} is deleted
+                  permanently. This cannot be undone.
+                </p>
+                <ActionForm
+                  action={deleteOrganization}
+                  className="flex flex-col gap-4"
+                  aria-label="Delete organization"
+                >
+                  <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                  <Field
+                    htmlFor="org-confirm-name"
+                    label={`Type ${ctx.org.name} to confirm`}
+                    className="max-w-md"
                   >
-                    <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-                    <TextField
-                      isRequired
+                    <Input
+                      id="org-confirm-name"
+                      name="confirmName"
+                      required
                       maxLength={200}
                       autoComplete="off"
-                      fullWidth
-                      className="max-w-md"
-                    >
-                      <Label>Type {ctx.org.name} to confirm</Label>
-                      <Input name="confirmName" spellCheck={false} />
-                    </TextField>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <SubmitButton variant="danger" pendingLabel="Deleting...">
-                        Delete organization
-                      </SubmitButton>
-                    </div>
-                  </ActionForm>
-                </div>
-              </Disclosure.Content>
-            </Disclosure>
+                      spellCheck={false}
+                    />
+                  </Field>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <SubmitButton color="primary-destructive" pendingLabel="Deleting...">
+                      Delete organization
+                    </SubmitButton>
+                  </div>
+                </ActionForm>
+              </div>
+            </details>
           </Card>
         </section>
       ) : null}

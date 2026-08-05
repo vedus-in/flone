@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
-import { Card } from '@heroui/react/card';
 import { loadPage, requireAdmin } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { getAppSettings } from '@/lib/settings';
-import { PageHeader } from '@/components/ui';
+import { Card, PageHeader } from '@/components/ui';
 import { RegistrationControl, UserAdminTable, type AdminUserRow } from './admin-controls';
 
 /**
@@ -106,7 +105,7 @@ export default async function AdminPage() {
         </Card.Content>
         {truncated ? (
           <Card.Footer>
-            <p className="text-xs text-muted">
+            <p className="text-xs text-tertiary">
               Showing {users.length} of {userCount} accounts. Administrators are listed
               first, then the oldest accounts.
             </p>

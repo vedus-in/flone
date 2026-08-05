@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { Card } from '@heroui/react/card';
 import { listUserOrgs, loadPage, orgPath } from '@/lib/authz';
-import { Badge, ButtonLink, PageHeader } from '@/components/ui';
+import { Badge, ButtonLink, Card, PageHeader } from '@/components/ui';
 
 export const metadata: Metadata = { title: 'Organizations' };
 
@@ -37,7 +36,7 @@ export default async function HomePage() {
           <li key={org.id}>
             {/* The title's `::after` covers the card, so the whole tile is one
                 link -- one tab stop, one accessible name, no nested anchors. */}
-            <Card className="h-full gap-2 transition-colors hover:bg-surface-hover has-[a:focus-visible]:focus-ring">
+            <Card className="h-full gap-2 transition-colors hover:bg-primary_hover has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-focus-ring">
               <Card.Header className="flex-row items-start justify-between gap-3">
                 <Card.Title className="min-w-0 text-base">
                   <Link

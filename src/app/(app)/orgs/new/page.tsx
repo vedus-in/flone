@@ -1,9 +1,7 @@
 import type { Metadata } from 'next';
-import { Card } from '@heroui/react/card';
-import { Description } from '@heroui/react/description';
-import { Disclosure } from '@heroui/react/disclosure';
+import { ChevronDown } from '@untitledui/icons';
 import { listUserOrgs, loadPage } from '@/lib/authz';
-import { ButtonLink, Input, Label, SubmitButton, TextField } from '@/components/ui';
+import { ButtonLink, Card, Field, Input, SubmitButton } from '@/components/ui';
 import { ActionForm } from '../../action-form';
 import { createOrganization } from './actions';
 
@@ -21,10 +19,10 @@ export default async function NewOrganizationPage() {
   return (
     <div className="mx-auto flex w-full max-w-lg flex-col gap-6">
       <header className="flex flex-col gap-2">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+        <h1 className="text-xl font-semibold tracking-tight text-primary">
           {firstRun ? "Let's set up your workspace" : 'New organization'}
         </h1>
-        <p className="text-sm text-muted">
+        <p className="text-sm text-tertiary">
           {firstRun
             ? 'An organization holds your projects, boards and teammates. You can create more later.'
             : 'Organizations are separate workspaces. Nothing is shared between them.'}
@@ -37,48 +35,56 @@ export default async function NewOrganizationPage() {
           className="flex flex-col gap-5"
           aria-label="New organization"
         >
-          {/* Per HeroUI v3: value-ish props belong on TextField, `name` on the Input. */}
-          <TextField
-            isRequired
-            minLength={2}
-            maxLength={60}
-            autoComplete="organization"
-            fullWidth
+          <Field
+            htmlFor="org-name"
+            label="Name"
+            hint="We turn this into a URL, for example /orgs/acme."
           >
-            <Label>Name</Label>
-            <Input name="name" autoFocus placeholder="Acme" />
-            <Description>We turn this into a URL, for example /orgs/acme.</Description>
-          </TextField>
+            <Input
+              id="org-name"
+              name="name"
+              required
+              minLength={2}
+              maxLength={60}
+              autoComplete="organization"
+              autoFocus
+              placeholder="Acme"
+            />
+          </Field>
 
-          <Disclosure>
-            <Disclosure.Heading level={2}>
-              <Disclosure.Trigger className="flex w-full items-center justify-between gap-2 rounded-lg text-sm font-medium text-muted transition-colors hover:text-foreground">
-                Choose the URL yourself
-                <Disclosure.Indicator />
-              </Disclosure.Trigger>
-            </Disclosure.Heading>
-            <Disclosure.Content>
-              <Disclosure.Body>
-                <TextField
+          {/* Native `<details>`: Untitled UI ships no disclosure, and the browser
+              already does the state, the keyboard and the ARIA for free. */}
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-lg text-sm font-medium text-tertiary transition-colors hover:text-primary">
+              Choose the URL yourself
+              <ChevronDown
+                aria-hidden="true"
+                className="size-4 transition-transform duration-100 group-open:rotate-180"
+              />
+            </summary>
+            <div className="pt-4">
+              <Field
+                htmlFor="org-slug"
+                label="URL"
+                hint="Leave blank to generate one. 2 to 40 lowercase letters, numbers or dashes."
+              >
+                <Input
+                  id="org-slug"
+                  name="slug"
                   maxLength={40}
                   pattern="[a-z0-9][a-z0-9-]{0,38}[a-z0-9]"
                   autoComplete="off"
-                  fullWidth
-                >
-                  <Label>URL</Label>
-                  <Input name="slug" placeholder="acme" spellCheck={false} />
-                  <Description>
-                    Leave blank to generate one. 2 to 40 lowercase letters, numbers or dashes.
-                  </Description>
-                </TextField>
-              </Disclosure.Body>
-            </Disclosure.Content>
-          </Disclosure>
+                  placeholder="acme"
+                  spellCheck={false}
+                />
+              </Field>
+            </div>
+          </details>
 
           <div className="flex flex-wrap items-center gap-2">
             <SubmitButton pendingLabel="Creating...">Create organization</SubmitButton>
             {!firstRun ? (
-              <ButtonLink href="/" variant="ghost">
+              <ButtonLink href="/" color="tertiary">
                 Cancel
               </ButtonLink>
             ) : null}

@@ -61,16 +61,16 @@ function cx(...values: Array<string | false | null | undefined>): string {
 /* -------------------------------------------------------------------------- */
 
 const POPUP =
-  'z-50 max-h-[min(24rem,70dvh)] min-w-56 origin-[var(--transform-origin)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-1 shadow-2xl outline-none';
+  'z-50 max-h-[min(24rem,70dvh)] min-w-56 origin-[var(--transform-origin)] overflow-y-auto overscroll-contain rounded-xl border border-secondary bg-primary p-1 shadow-2xl outline-none';
 
 // `py-2` on touch: 44px-ish rows. `md:py-1.5` tightens it back up for a mouse.
 const ITEM =
-  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground outline-none data-[highlighted]:bg-surface-secondary data-[disabled]:opacity-50 md:py-1.5';
+  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-primary outline-none data-[highlighted]:bg-secondary data-[disabled]:opacity-50 md:py-1.5';
 
 const DANGER =
-  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-danger outline-none data-[highlighted]:bg-danger-soft md:py-1.5';
+  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-error-primary outline-none data-[highlighted]:bg-error-primary md:py-1.5';
 
-const LABEL = 'px-2.5 pt-1.5 pb-1 text-[0.6875rem] font-medium tracking-wider text-muted uppercase';
+const LABEL = 'px-2.5 pt-1.5 pb-1 text-[0.6875rem] font-medium tracking-wider text-tertiary uppercase';
 
 function Icon({ d, className }: { d: string; className?: string }) {
   return (
@@ -106,9 +106,9 @@ const I_DOTS = 'M8 3.2h.01M8 8h.01M8 12.8h.01';
 function SubTrigger({ icon, children }: { icon: string; children: ReactNode }) {
   return (
     <Menu.SubmenuTrigger className={ITEM}>
-      <Icon d={icon} className="text-muted" />
+      <Icon d={icon} className="text-tertiary" />
       <span className="flex-1">{children}</span>
-      <Icon d={I_CHEVRON} className="size-3 text-muted" />
+      <Icon d={I_CHEVRON} className="size-3 text-tertiary" />
     </Menu.SubmenuTrigger>
   );
 }
@@ -126,18 +126,18 @@ function Submenu({ children }: { children: ReactNode }) {
 /** A tick occupying fixed width, so labels stay aligned whether ticked or not. */
 function Tick({ on }: { on: boolean }) {
   return on ? (
-    <Icon d={I_CHECK} className="size-3.5 text-accent" />
+    <Icon d={I_CHECK} className="size-3.5 text-brand-secondary" />
   ) : (
     <span aria-hidden="true" className="size-3.5 shrink-0" />
   );
 }
 
 const PRIORITIES: Array<{ value: Priority; label: string; className: string }> = [
-  { value: Priority.URGENT, label: 'Urgent', className: 'text-danger' },
-  { value: Priority.HIGH, label: 'High', className: 'text-warning' },
-  { value: Priority.MEDIUM, label: 'Medium', className: 'text-foreground' },
-  { value: Priority.LOW, label: 'Low', className: 'text-muted' },
-  { value: Priority.NONE, label: 'No priority', className: 'text-muted' },
+  { value: Priority.URGENT, label: 'Urgent', className: 'text-error-primary' },
+  { value: Priority.HIGH, label: 'High', className: 'text-warning-primary' },
+  { value: Priority.MEDIUM, label: 'Medium', className: 'text-primary' },
+  { value: Priority.LOW, label: 'Low', className: 'text-tertiary' },
+  { value: Priority.NONE, label: 'No priority', className: 'text-tertiary' },
 ];
 
 /** Local calendar day, offset by `days`, as YYYY-MM-DD. */
@@ -245,7 +245,7 @@ function TicketMenuItems({
               }
             >
               <Tick on={ticket.assigneeName === null} />
-              <span className="text-muted">Unassigned</span>
+              <span className="text-tertiary">Unassigned</span>
             </Menu.Item>
             {members.map((member) => (
               <Menu.Item
@@ -281,20 +281,20 @@ function TicketMenuItems({
                 {option.label}
               </Menu.Item>
             ))}
-            <Menu.Separator className="my-1 h-px bg-border" />
+            <Menu.Separator className="my-1 h-px bg-border-secondary" />
             <Menu.Item
               className={ITEM}
               disabled={ticket.dueDateLabel === null}
               onClick={() => run(() => setTicketDueDate({ ticketId: ticket.id, dueDate: null }))}
             >
               <Tick on={false} />
-              <span className="text-muted">Clear due date</span>
+              <span className="text-tertiary">Clear due date</span>
             </Menu.Item>
           </Submenu>
         </Menu.SubmenuRoot>
       </Menu.Group>
 
-      <Menu.Separator className="my-1 h-px bg-border" />
+      <Menu.Separator className="my-1 h-px bg-border-secondary" />
 
       <Menu.SubmenuRoot>
         <SubTrigger icon={I_COPY}>Copy</SubTrigger>
@@ -368,7 +368,7 @@ function TicketMenuItems({
           `deleteTicketFromBoard` enforces the same rule again. */}
       {ticket.canDelete ? (
         <>
-          <Menu.Separator className="my-1 h-px bg-border" />
+          <Menu.Separator className="my-1 h-px bg-border-secondary" />
 
           <Menu.Item
             className={DANGER}
@@ -376,12 +376,12 @@ function TicketMenuItems({
           >
             <Icon d={I_TRASH} />
             <span className="flex-1">Delete</span>
-            <kbd className="hidden font-mono text-[0.6875rem] text-muted md:inline">Ctrl Del</kbd>
+            <kbd className="hidden font-mono text-[0.6875rem] text-tertiary md:inline">Ctrl Del</kbd>
           </Menu.Item>
         </>
       ) : null}
 
-      <div className="mt-1 border-t border-border px-2.5 pt-2 pb-1 text-[0.6875rem] text-muted">
+      <div className="mt-1 border-t border-secondary px-2.5 pt-2 pb-1 text-[0.6875rem] text-tertiary">
         Updated {ticket.updatedAtLabel}
         {ticket.dueDateLabel ? <> &middot; due {ticket.dueDateLabel}</> : null}
       </div>
@@ -435,7 +435,7 @@ export function TicketMenuButton(data: MenuData) {
         onPointerDown={(event) => event.stopPropagation()}
         // -mt-1/-me-1 pull the larger touch target back so it does not push the
         // title down: the hit area grows, the visual weight does not.
-        className="-mt-1 -me-1 grid size-9 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus data-[popup-open]:bg-surface-secondary data-[popup-open]:text-foreground md:mt-0 md:me-0 md:size-7"
+        className="-mt-1 -me-1 grid size-9 shrink-0 place-items-center rounded-md text-tertiary transition-colors hover:bg-secondary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring data-[popup-open]:bg-secondary data-[popup-open]:text-primary md:mt-0 md:me-0 md:size-7"
       >
         <Icon d={I_DOTS} className="size-4" />
       </Menu.Trigger>

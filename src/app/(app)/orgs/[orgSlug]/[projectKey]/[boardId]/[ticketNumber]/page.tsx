@@ -33,7 +33,7 @@ import {
  * The follow-up read below repeats the membership predicate rather than trusting
  * the id alone, so it is safe on its own terms.
  *
- * Presentation only: this page stays a Server Component. Every HeroUI module
+ * Presentation only: this page stays a Server Component. Every Untitled UI module
  * ships its own `'use client'`, and the one genuinely interactive part of the
  * route lives in `comments.tsx`.
  */
@@ -86,7 +86,7 @@ function Crumb({ href, children }: { href: string; children: ReactNode }) {
   return (
     <Link
       href={href}
-      className="rounded-sm px-0.5 font-medium no-underline hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+      className="rounded-sm px-0.5 font-medium no-underline hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
     >
       {children}
     </Link>
@@ -94,14 +94,14 @@ function Crumb({ href, children }: { href: string; children: ReactNode }) {
 }
 
 function SectionHeading({ children }: { children: ReactNode }) {
-  return <h2 className="text-sm leading-6 font-medium text-foreground">{children}</h2>;
+  return <h2 className="text-sm leading-6 font-medium text-primary">{children}</h2>;
 }
 
 function Fact({ term, children }: { term: string; children: ReactNode }) {
   return (
     <>
-      <dt className="text-muted">{term}</dt>
-      <dd className="min-w-0 text-foreground">{children}</dd>
+      <dt className="text-tertiary">{term}</dt>
+      <dd className="min-w-0 text-primary">{children}</dd>
     </>
   );
 }
@@ -179,14 +179,14 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
 
   return (
     <div className="flex flex-col gap-6">
-      <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-sm text-muted">
+      <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-sm text-tertiary">
         <Crumb href={orgPath(ctx.org)}>{ctx.org.name}</Crumb>
         <CrumbSeparator />
         <Crumb href={projectPath(ctx.org, ctx.project)}>{ctx.project.name}</Crumb>
         <CrumbSeparator />
         <Crumb href={boardPath(ctx.org, ctx.project, ctx.board)}>{ctx.board.name}</Crumb>
         <CrumbSeparator />
-        <span aria-current="page" className="px-0.5 font-mono font-medium text-foreground">
+        <span aria-current="page" className="px-0.5 font-mono font-medium text-primary">
           {label}
         </span>
       </nav>
@@ -196,7 +196,7 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
         actions={
           <ButtonLink
             href={boardPath(ctx.org, ctx.project, ctx.board)}
-            variant="secondary"
+            color="secondary"
             size="sm"
           >
             Back to board
@@ -205,7 +205,7 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
       >
         <Badge className="font-mono">{label}</Badge>
         <Badge tone="accent">{detail.column.name}</Badge>
-        <span className="text-sm text-muted">
+        <span className="text-sm text-tertiary">
           Opened by {detail.createdBy.name} on{' '}
           <time dateTime={detail.createdAt.toISOString()}>{formatDateTime(detail.createdAt)}</time>
         </span>
@@ -221,7 +221,7 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
               {ctx.ticket.description ? (
                 <Prose>{ctx.ticket.description}</Prose>
               ) : (
-                <p className="text-sm text-muted">No description yet.</p>
+                <p className="text-sm text-tertiary">No description yet.</p>
               )}
 
               <Separator />

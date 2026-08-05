@@ -16,8 +16,8 @@ import { readSession } from '@/lib/session';
  * `readSession()` is used rather than `requireUser()` because the interesting
  * case here is the *absence* of a session, which must not throw.
  *
- * This stays a Server Component. HeroUI ships `'use client'` inside each of its
- * own component modules, so the pages below can render HeroUI directly without
+ * This stays a Server Component. Untitled UI ships `'use client'` inside each of
+ * its own component modules, so the pages below can render them directly without
  * a provider and without becoming client modules themselves.
  */
 export const dynamic = 'force-dynamic';
@@ -37,13 +37,13 @@ export default async function AuthLayout({ children }: { children: ReactNode }) 
          */}
         <span
           aria-hidden="true"
-          className="grid size-10 place-items-center rounded-xl bg-accent text-base font-semibold text-accent-foreground"
+          className="grid size-10 place-items-center rounded-xl bg-brand-solid text-base font-semibold text-white"
         >
           K
         </span>
         <div className="flex flex-col gap-1">
-          <span className="text-base font-semibold tracking-tight text-foreground">Kanban</span>
-          <p className="text-sm text-muted">A simple, secure board for small teams.</p>
+          <span className="text-base font-semibold tracking-tight text-primary">Kanban</span>
+          <p className="text-sm text-tertiary">A simple, secure board for small teams.</p>
         </div>
       </header>
 

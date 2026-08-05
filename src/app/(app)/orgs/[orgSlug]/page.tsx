@@ -1,8 +1,6 @@
 import Link from 'next/link';
 import { Role } from '@prisma/client';
-import { Card } from '@heroui/react/card';
-import { Description } from '@heroui/react/description';
-import { Disclosure } from '@heroui/react/disclosure';
+import { ChevronDown } from '@untitledui/icons';
 import { prisma } from '@/lib/db';
 import {
   atLeast,
@@ -11,12 +9,12 @@ import {
   requireOrgBySlug,
 } from '@/lib/authz';
 import {
+  Card,
   EmptyState,
+  Field,
   Input,
-  Label,
   SubmitButton,
   Textarea,
-  TextField,
 } from '@/components/ui';
 import { ActionForm } from '../../action-form';
 import { createProject } from './actions';
@@ -33,7 +31,7 @@ const UPDATED = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }
 
 function ProjectIcon() {
   return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-4 shrink-0 text-muted">
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-4 shrink-0 text-tertiary">
       <path
         d="M8 1.75 13.75 5v6L8 14.25 2.25 11V5zM2.25 5 8 8.25 13.75 5M8 8.25v6"
         stroke="currentColor"
@@ -83,13 +81,13 @@ export default async function OrganizationPage({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-sm font-medium text-foreground">Projects</h1>
+        <h1 className="text-sm font-medium text-primary">Projects</h1>
         {canManage ? (
           <a
             href="#new-project"
             aria-label="New project"
             title="New project"
-            className="grid size-6 place-items-center rounded-md text-muted no-underline transition-colors hover:bg-surface-secondary hover:text-foreground"
+            className="grid size-6 place-items-center rounded-md text-tertiary no-underline transition-colors hover:bg-secondary hover:text-primary"
           >
             <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-4">
               <path
@@ -115,14 +113,14 @@ export default async function OrganizationPage({
       ) : (
         <section className="flex flex-col" aria-label="Projects">
           <div className="flex items-center gap-2 px-3 pb-2">
-            <span className="rounded-md bg-surface-secondary px-2 py-1 text-xs font-medium text-foreground">
+            <span className="rounded-md bg-secondary px-2 py-1 text-xs font-medium text-primary">
               All projects
             </span>
-            <span className="text-xs text-muted tabular-nums">{projects.length}</span>
+            <span className="text-xs text-tertiary tabular-nums">{projects.length}</span>
           </div>
 
           <div
-            className={`${ROW} border-b border-border py-2 text-xs text-muted`}
+            className={`${ROW} border-b border-secondary py-2 text-xs text-tertiary`}
             aria-hidden="true"
           >
             <span>Name</span>
@@ -143,25 +141,25 @@ export default async function OrganizationPage({
                   key={project.id}
                   /* The name link's `::after` covers the row, so the whole row is
                      one link -- one tab stop, one accessible name. */
-                  className={`${ROW} relative border-b border-border/60 py-2.5 text-sm transition-colors hover:bg-surface-hover has-[a:focus-visible]:focus-ring`}
+                  className={`${ROW} relative border-b border-secondary/60 py-2.5 text-sm transition-colors hover:bg-primary_hover has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-focus-ring`}
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <ProjectIcon />
                     <Link
                       href={projectPath(ctx.org, project)}
-                      className="truncate font-medium text-foreground no-underline outline-none after:absolute after:inset-0 after:content-['']"
+                      className="truncate font-medium text-primary no-underline outline-none after:absolute after:inset-0 after:content-['']"
                     >
                       {project.name}
                     </Link>
                   </span>
-                  <span className="hidden truncate font-mono text-xs text-muted sm:block">
+                  <span className="hidden truncate font-mono text-xs text-tertiary sm:block">
                     {project.key}
                   </span>
-                  <span className="hidden text-end text-xs text-muted tabular-nums sm:block">
+                  <span className="hidden text-end text-xs text-tertiary tabular-nums sm:block">
                     {project.boards.length}
                   </span>
-                  <span className="text-end text-xs text-muted tabular-nums">{tickets}</span>
-                  <span className="hidden text-end text-xs text-muted sm:block">
+                  <span className="text-end text-xs text-tertiary tabular-nums">{tickets}</span>
+                  <span className="hidden text-end text-xs text-tertiary sm:block">
                     {UPDATED.format(project.updatedAt)}
                   </span>
                 </li>
@@ -176,57 +174,70 @@ export default async function OrganizationPage({
       {canManage ? (
         <section id="new-project" aria-labelledby="new-project-heading">
           <Card className="gap-0 p-0">
-            <Disclosure defaultExpanded={empty}>
-              <Disclosure.Heading level={2} id="new-project-heading">
-                <Disclosure.Trigger className="flex w-full items-center justify-between gap-3 rounded-2xl px-5 py-4 text-sm font-medium text-foreground">
-                  New project
-                  <Disclosure.Indicator />
-                </Disclosure.Trigger>
-              </Disclosure.Heading>
-              <Disclosure.Content>
-                <div className="px-5 pb-5">
-                  <ActionForm
-                    action={createProject}
-                    className="flex flex-col gap-5"
-                    aria-label="New project"
-                  >
-                    <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+            <details className="group" open={empty}>
+              <summary
+                id="new-project-heading"
+                className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-5 py-4 text-sm font-medium text-primary"
+              >
+                New project
+                <ChevronDown
+                  aria-hidden="true"
+                  className="size-4 transition-transform duration-100 group-open:rotate-180"
+                />
+              </summary>
+              <div className="px-5 pb-5">
+                <ActionForm
+                  action={createProject}
+                  className="flex flex-col gap-5"
+                  aria-label="New project"
+                >
+                  <input type="hidden" name="orgSlug" value={ctx.org.slug} />
 
-                    <div className="grid gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-                      <TextField isRequired maxLength={80} autoComplete="off" fullWidth>
-                        <Label>Name</Label>
-                        <Input
-                          name="name"
-                          autoFocus={empty}
-                          placeholder="Website Redesign"
-                        />
-                      </TextField>
+                  <div className="grid gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                    <Field htmlFor="project-name" label="Name">
+                      <Input
+                        id="project-name"
+                        name="name"
+                        required
+                        maxLength={80}
+                        autoComplete="off"
+                        autoFocus={empty}
+                        placeholder="Website Redesign"
+                      />
+                    </Field>
 
-                      <TextField
+                    <Field
+                      htmlFor="project-key"
+                      label="Key"
+                      hint="Optional. Derived from the name if blank."
+                    >
+                      <Input
+                        id="project-key"
+                        name="key"
                         maxLength={10}
                         pattern="[A-Za-z][A-Za-z0-9]{1,9}"
                         autoComplete="off"
-                        fullWidth
-                      >
-                        <Label>Key</Label>
-                        <Input name="key" placeholder="WEB" spellCheck={false} />
-                        <Description>Optional. Derived from the name if blank.</Description>
-                      </TextField>
-                    </div>
+                        placeholder="WEB"
+                        spellCheck={false}
+                      />
+                    </Field>
+                  </div>
 
-                    <TextField maxLength={2000} fullWidth>
-                      <Label>Description</Label>
-                      <Textarea name="description" rows={3} />
-                      <Description>Optional.</Description>
-                    </TextField>
+                  <Field htmlFor="project-description" label="Description" hint="Optional.">
+                    <Textarea
+                      id="project-description"
+                      name="description"
+                      rows={3}
+                      maxLength={2000}
+                    />
+                  </Field>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      <SubmitButton pendingLabel="Creating...">Create project</SubmitButton>
-                    </div>
-                  </ActionForm>
-                </div>
-              </Disclosure.Content>
-            </Disclosure>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <SubmitButton pendingLabel="Creating...">Create project</SubmitButton>
+                  </div>
+                </ActionForm>
+              </div>
+            </details>
           </Card>
         </section>
       ) : null}

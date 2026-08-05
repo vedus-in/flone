@@ -1,22 +1,25 @@
-import type { ComponentProps, HTMLAttributes, ReactNode } from 'react';
+import { Children, Fragment, type HTMLAttributes, type ReactNode } from 'react';
 import NextLink from 'next/link';
-import { buttonVariants, type ButtonVariants } from '@heroui/react/button';
-import { Chip, type ChipVariants } from '@heroui/react/chip';
-import { Label } from '@heroui/react/label';
+import { Badge as UntitledBadge } from '@/components/base/badges/badges';
+import { EmptyState as UntitledEmptyState } from '@/components/application/empty-state/empty-state';
+import { Label } from '@/components/base/input/label';
+import { cx } from '@/lib/utils/cx';
 
 /**
- * Shared presentational primitives, rebuilt on HeroUI v3.
+ * Shared presentational primitives, built on Untitled UI.
  *
  * These are deliberately server-safe: no hooks, no event handlers, no
- * `'use client'`. HeroUI's own component modules each carry `'use client'`, so
- * they can be rendered straight from a Server Component and these wrappers can
- * too. Nothing here holds logic worth testing -- it is layout and token plumbing.
+ * `'use client'`. Untitled UI's own component modules each carry `'use client'`,
+ * so they can be rendered straight from a Server Component and these wrappers
+ * can too. Nothing here holds logic worth testing -- it is layout and token
+ * plumbing.
  *
  * The rule of thumb for what belongs in this file: something the app needs that
- * HeroUI does not ship (`Prose`, `FormError`, `PageHeader`), or a HeroUI
- * component re-exported so call sites have ONE import site. Anything richer --
- * `Card.Header`, `TextField`, `Select`, `Modal` -- is imported from
- * `@heroui/react` directly at the call site.
+ * Untitled UI's open-source set does not ship (`Card`, `Breadcrumbs`,
+ * `Separator`, `PageHeader`, `Prose`, `FormError`), or an Untitled UI component
+ * re-exported so call sites have ONE import site. Anything richer -- `Table`,
+ * `Modal`, `Dropdown`, `Select`, `Toggle` -- is imported from
+ * `@/components/base/...` or `@/components/application/...` at the call site.
  *
  * `SubmitButton` is the one client primitive; it lives in its own `'use client'`
  * module and is re-exported here.
@@ -24,65 +27,163 @@ import { Label } from '@heroui/react/label';
 export { SubmitButton } from './submit-button';
 
 /**
- * Straight re-exports. `Button` is HeroUI's: it forwards `type`, so
+ * Straight re-exports. `Button` is Untitled UI's: it forwards `type`, so
  * `<Button type="submit">` inside `<form action={serverAction}>` submits and the
- * action receives the FormData. `TextField` is the field wrapper -- remember
- * that `value` / `defaultValue` belong on `TextField`, while `name` belongs on
- * the `Input` / `Textarea` inside it.
+ * action receives the FormData.
+ *
+ * `Input` and `TextArea` are Untitled UI's *Base* variants deliberately: the
+ * `Input` / `TextArea` it also ships wrap react-aria's `TextField`, which owns
+ * the label, moves `id` onto a wrapper `<div>`, and restores its own initial
+ * value on the form `reset` event. That last one breaks the controlled email in
+ * `login-form.tsx` (React 19 resets the form after an action, which would fire
+ * `onChange('')` and wipe it). The Base variants are the plain `<input>` /
+ * `<textarea>` with the same styling, so `id`, `required`, `value` and a native
+ * `onChange` event all behave as they read, and `Field` below owns the label.
  */
-export { Button } from '@heroui/react/button';
-export { Card } from '@heroui/react/card';
-export { Input } from '@heroui/react/input';
-export { Separator } from '@heroui/react/separator';
-export { TextField } from '@heroui/react/textfield';
+export { Button } from '@/components/base/buttons/button';
+export { InputBase as Input } from '@/components/base/input/input';
 export { Label };
+export { Avatar } from '@/components/base/avatar/avatar';
+export { LoadingIndicator } from '@/components/application/loading-indicator/loading-indicator';
 /**
- * HeroUI spells it `TextArea`; the rest of this app has always spelled it
+ * Untitled UI spells it `TextArea`; the rest of this app has always spelled it
  * `Textarea`. Aliased rather than renamed so no call site has to care.
  */
-export { TextArea, TextArea as Textarea } from '@heroui/react/textarea';
-
-export type ButtonVariant = NonNullable<ButtonVariants['variant']>;
-export type ButtonSize = NonNullable<ButtonVariants['size']>;
-
-function cx(...values: Array<string | false | null | undefined>): string {
-  return values.filter(Boolean).join(' ');
-}
+export {
+  TextAreaBase as TextArea,
+  TextAreaBase as Textarea,
+} from '@/components/base/textarea/textarea';
 
 /* -------------------------------------------------------------------------- */
 /* Navigation                                                                  */
 /* -------------------------------------------------------------------------- */
 
-type ButtonLinkProps = Omit<ComponentProps<typeof NextLink>, 'className'> & {
-  variant?: ButtonVariant;
-  size?: ButtonSize;
-  fullWidth?: boolean;
-  isIconOnly?: boolean;
+/**
+ * `ButtonLink` lives in its own `'use client'` module -- it reads Untitled UI's
+ * `styles` object, and a plain object imported from a client module into a
+ * Server Component arrives as a client reference rather than the object itself.
+ */
+export { ButtonLink } from './button-link';
+
+/**
+ * Untitled UI ships breadcrumbs only in PRO, and the markup is trivial: an
+ * ordered list of links whose separator is decoration, not content.
+ *
+ * The separator is injected here rather than drawn with a `::before` on the item
+ * so it can carry `aria-hidden` -- CSS generated content is announced by some
+ * screen readers, and "slash" between every crumb is noise.
+ */
+export function Breadcrumbs({
+  children,
+  className,
+}: {
+  children: ReactNode;
   className?: string;
+}) {
+  return (
+    <nav aria-label="Breadcrumb" className={className}>
+      <ol className="flex flex-wrap items-center gap-1.5 text-sm">
+        {Children.toArray(children).map((child, index) => (
+          <Fragment key={index}>
+            {index > 0 ? (
+              <li aria-hidden="true" className="text-fg-quaternary">
+                /
+              </li>
+            ) : null}
+            {child}
+          </Fragment>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
+/**
+ * One crumb. With `href` it is a link; without, it is the current page and gets
+ * `aria-current="page"` -- so the last crumb is written without an href.
+ */
+Breadcrumbs.Item = function BreadcrumbsItem({
+  href,
+  children,
+}: {
+  href?: string;
+  children: ReactNode;
+}) {
+  return (
+    <li className="min-w-0">
+      {href ? (
+        <NextLink
+          href={href}
+          className="rounded-sm font-medium text-tertiary outline-focus-ring transition duration-100 ease-linear hover:text-tertiary_hover focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          {children}
+        </NextLink>
+      ) : (
+        <span aria-current="page" className="font-medium text-secondary">
+          {children}
+        </span>
+      )}
+    </li>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/* Surfaces                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Untitled UI's open-source set has no card, so this is the app's own: the same
+ * surface its `TableCard` and modals use -- `bg-primary`, a hairline ring rather
+ * than a border so it does not affect layout, and `shadow-xs`.
+ *
+ * The subcomponents mirror the shape the app already used, so call sites did not
+ * have to change when the design system did.
+ */
+export function Card({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      {...rest}
+      className={cx(
+        'flex flex-col gap-4 rounded-xl bg-primary p-5 shadow-xs ring-1 ring-secondary',
+        className,
+      )}
+    />
+  );
+}
+
+Card.Header = function CardHeader({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  return <div {...rest} className={cx('flex flex-col gap-1', className)} />;
+};
+
+Card.Title = function CardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElement>) {
+  return <h2 {...rest} className={cx('text-md font-semibold text-primary', className)} />;
+};
+
+Card.Description = function CardDescription({
+  className,
+  ...rest
+}: HTMLAttributes<HTMLParagraphElement>) {
+  return <p {...rest} className={cx('text-sm text-tertiary', className)} />;
+};
+
+Card.Content = function CardContent({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  return <div {...rest} className={cx('flex flex-col gap-3', className)} />;
+};
+
+Card.Footer = function CardFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  return <div {...rest} className={cx('flex flex-wrap items-center gap-3', className)} />;
 };
 
 /**
- * An anchor wearing HeroUI's button styles. Use for navigation, NEVER for a
- * mutation -- every mutation goes through a `<form action={serverAction}>`.
- *
- * HeroUI's `Button` renders a real `<button>` and its `render` prop may not swap
- * the element type, so the styles are applied via `buttonVariants()` to a
- * `next/link` anchor instead. That also keeps client-side navigation.
+ * A hairline rule. `<hr>` already means "thematic break" to assistive tech, so
+ * no `role` is needed; the border is zeroed and replaced with a background so it
+ * renders at exactly one device pixel.
  */
-export function ButtonLink({
-  variant = 'secondary',
-  size = 'md',
-  fullWidth,
-  isIconOnly,
+export function Separator({
   className,
   ...rest
-}: ButtonLinkProps) {
-  return (
-    <NextLink
-      {...rest}
-      className={buttonVariants({ variant, size, fullWidth, isIconOnly, className })}
-    />
-  );
+}: Omit<HTMLAttributes<HTMLHRElement>, 'children'>) {
+  return <hr {...rest} className={cx('h-px w-full border-0 bg-border-secondary', className)} />;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -103,10 +204,10 @@ type FieldProps = {
 /**
  * Label + control + hint + error, wired by id.
  *
- * Deliberately NOT built on `TextField`: this wrapper takes an arbitrary control
- * as `children` and associates it explicitly, so it also works for selects,
- * checkboxes and native controls. Use HeroUI's `TextField` directly when the
- * field is a plain text input and you want its validation plumbing.
+ * Deliberately NOT built on Untitled UI's `Input`: that component owns its own
+ * label and hint, which is the right choice for a plain text field. This wrapper
+ * takes an arbitrary control as `children` and associates it explicitly, so it
+ * also works for selects, checkboxes and native controls.
  */
 export function Field({ htmlFor, label, hint, error, children, className }: FieldProps) {
   return (
@@ -116,12 +217,12 @@ export function Field({ htmlFor, label, hint, error, children, className }: Fiel
       </Label>
       {children}
       {hint ? (
-        <span id={`${htmlFor}-hint`} className="text-xs text-muted">
+        <span id={`${htmlFor}-hint`} className="text-xs text-tertiary">
           {hint}
         </span>
       ) : null}
       {error ? (
-        <span id={`${htmlFor}-error`} role="alert" className="text-xs text-danger">
+        <span id={`${htmlFor}-error`} role="alert" className="text-xs text-error-primary">
           {error}
         </span>
       ) : null}
@@ -145,7 +246,7 @@ export function FormError({
     <p
       role="alert"
       className={cx(
-        'rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground',
+        'rounded-lg bg-error-primary px-3 py-2 text-sm text-error-primary ring-1 ring-error_subtle',
         className,
       )}
     >
@@ -173,25 +274,32 @@ export function Prose({ children, className }: { children: ReactNode; className?
 
 export type BadgeTone = 'neutral' | 'accent' | 'danger' | 'success' | 'warning';
 
-const TONE_COLOR: Record<BadgeTone, NonNullable<ChipVariants['color']>> = {
-  neutral: 'default',
-  accent: 'accent',
-  danger: 'danger',
+const TONE_COLOR = {
+  neutral: 'gray',
+  accent: 'brand',
+  danger: 'error',
   success: 'success',
   warning: 'warning',
-};
+} as const satisfies Record<BadgeTone, string>;
 
-type BadgeProps = Omit<HTMLAttributes<HTMLSpanElement>, 'color'> & {
+type BadgeProps = {
   tone?: BadgeTone;
   children: ReactNode;
+  className?: string;
 };
 
-/** Small inline status pill: a role, a project key, a column name. */
-export function Badge({ tone = 'neutral', className, children, ...rest }: BadgeProps) {
+/**
+ * Small inline status pill: a role, a project key, a column name.
+ *
+ * The app's `tone` vocabulary is kept rather than adopting Untitled UI's colour
+ * names, because it says what the badge MEANS -- `danger` survives a rebrand
+ * that turns error red into something else.
+ */
+export function Badge({ tone = 'neutral', className, children }: BadgeProps) {
   return (
-    <Chip {...rest} color={TONE_COLOR[tone]} size="sm" variant="secondary" className={className}>
+    <UntitledBadge type="pill-color" color={TONE_COLOR[tone]} size="sm" className={className}>
       {children}
-    </Chip>
+    </UntitledBadge>
   );
 }
 
@@ -219,8 +327,8 @@ export function PageHeader({
   return (
     <header className={cx('flex flex-wrap items-start justify-between gap-4', className)}>
       <div className="flex min-w-0 flex-col gap-1.5">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">{title}</h1>
-        {description ? <p className="text-sm text-muted">{description}</p> : null}
+        <h1 className="text-xl font-semibold text-primary">{title}</h1>
+        {description ? <p className="text-sm text-tertiary">{description}</p> : null}
         {children ? <div className="flex flex-wrap items-center gap-2">{children}</div> : null}
       </div>
       {actions ? (
@@ -240,21 +348,30 @@ type EmptyStateProps = {
 
 /**
  * A real empty state, not a shrug: says what is missing, why, and offers the one
- * action that fixes it. No icon -- the text carries it.
+ * action that fixes it.
+ *
+ * Untitled UI's `EmptyState` is a compound component whose pieces are assembled
+ * per call site; this collapses the three the app actually uses into the flat
+ * props every page already passes.
  */
 export function EmptyState({ title, description, children, className }: EmptyStateProps) {
   return (
-    <div
-      className={cx(
-        'flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-6 py-12 text-center',
-        className,
-      )}
+    <UntitledEmptyState
+      size="sm"
+      className={cx('rounded-xl border border-dashed border-secondary px-6 py-12', className)}
     >
-      <h2 className="text-base font-medium text-foreground">{title}</h2>
-      {description ? <p className="max-w-[46ch] text-sm text-muted">{description}</p> : null}
+      <UntitledEmptyState.Header>
+        <UntitledEmptyState.FeaturedIcon color="gray" theme="modern" />
+      </UntitledEmptyState.Header>
+      <UntitledEmptyState.Content>
+        <UntitledEmptyState.Title>{title}</UntitledEmptyState.Title>
+        {description ? (
+          <UntitledEmptyState.Description>{description}</UntitledEmptyState.Description>
+        ) : null}
+      </UntitledEmptyState.Content>
       {children ? (
-        <div className="mt-1 flex flex-wrap items-center justify-center gap-2">{children}</div>
+        <UntitledEmptyState.Footer>{children}</UntitledEmptyState.Footer>
       ) : null}
-    </div>
+    </UntitledEmptyState>
   );
 }

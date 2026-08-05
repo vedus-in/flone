@@ -1,9 +1,6 @@
 import Link from 'next/link';
 import { Role } from '@prisma/client';
-import { Breadcrumbs } from '@heroui/react/breadcrumbs';
-import { Card } from '@heroui/react/card';
-import { Description } from '@heroui/react/description';
-import { Disclosure } from '@heroui/react/disclosure';
+import { ChevronDown } from '@untitledui/icons';
 import { prisma } from '@/lib/db';
 import {
   atLeast,
@@ -14,16 +11,17 @@ import {
 } from '@/lib/authz';
 import {
   Badge,
+  Breadcrumbs,
   ButtonLink,
+  Card,
   EmptyState,
+  Field,
   Input,
-  Label,
   PageHeader,
   Prose,
   Separator,
   SubmitButton,
   Textarea,
-  TextField,
 } from '@/components/ui';
 import { ActionForm } from '../../../action-form';
 import { createBoard, deleteBoard, deleteProject, renameBoard, updateProject } from './actions';
@@ -66,13 +64,13 @@ export default async function ProjectPage({
 
         <PageHeader title={ctx.project.name}>
           <Badge>{ctx.project.key}</Badge>
-          <span className="text-xs text-muted">
+          <span className="text-xs text-tertiary">
             {boards.length} {boards.length === 1 ? 'board' : 'boards'}
           </span>
         </PageHeader>
 
         {ctx.project.description ? (
-          <Prose className="max-w-prose text-muted">{ctx.project.description}</Prose>
+          <Prose className="max-w-prose text-tertiary">{ctx.project.description}</Prose>
         ) : null}
       </div>
 
@@ -80,7 +78,7 @@ export default async function ProjectPage({
       {/* Boards                                                              */}
       {/* ------------------------------------------------------------------ */}
       <section className="flex flex-col gap-4" aria-labelledby="boards-heading">
-        <h2 id="boards-heading" className="text-sm font-medium text-foreground">
+        <h2 id="boards-heading" className="text-sm font-medium text-primary">
           Boards
         </h2>
 
@@ -102,12 +100,12 @@ export default async function ProjectPage({
                     <Card.Title className="min-w-0 text-base">
                       <Link
                         href={boardPath(ctx.org, ctx.project, board)}
-                        className="rounded-sm outline-none hover:underline focus-visible:focus-ring"
+                        className="rounded-sm outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                       >
                         {board.name}
                       </Link>
                     </Card.Title>
-                    <span className="shrink-0 text-xs text-muted">
+                    <span className="shrink-0 text-xs text-tertiary">
                       {board._count.tickets}{' '}
                       {board._count.tickets === 1 ? 'ticket' : 'tickets'}
                     </span>
@@ -116,7 +114,7 @@ export default async function ProjectPage({
                   <Card.Footer className="mt-auto">
                     <ButtonLink
                       href={boardPath(ctx.org, ctx.project, board)}
-                      variant="secondary"
+                      color="secondary"
                       size="sm"
                     >
                       Open board
@@ -124,62 +122,61 @@ export default async function ProjectPage({
                   </Card.Footer>
 
                   {canManage ? (
-                    <Disclosure className="border-t border-border pt-2">
-                      <Disclosure.Heading level={3}>
-                        <Disclosure.Trigger className="flex w-full items-center justify-between gap-2 rounded-lg text-xs font-medium text-muted transition-colors hover:text-foreground">
-                          Manage board
-                          <Disclosure.Indicator />
-                        </Disclosure.Trigger>
-                      </Disclosure.Heading>
-                      <Disclosure.Content>
-                        <div className="flex flex-col gap-4 pt-3">
-                          <ActionForm
-                            action={renameBoard}
-                            className="flex flex-col gap-3"
-                            aria-label={`Rename ${board.name}`}
-                          >
-                            <input type="hidden" name="boardId" value={board.id} />
-                            <TextField
-                              isRequired
+                    <details className="group border-t border-secondary pt-2">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-lg text-xs font-medium text-tertiary transition-colors hover:text-primary">
+                        Manage board
+                        <ChevronDown
+                          aria-hidden="true"
+                          className="size-4 transition-transform duration-100 group-open:rotate-180"
+                        />
+                      </summary>
+                      <div className="flex flex-col gap-4 pt-3">
+                        <ActionForm
+                          action={renameBoard}
+                          className="flex flex-col gap-3"
+                          aria-label={`Rename ${board.name}`}
+                        >
+                          <input type="hidden" name="boardId" value={board.id} />
+                          <Field htmlFor={`board-name-${board.id}`} label="Board name">
+                            <Input
+                              id={`board-name-${board.id}`}
+                              name="name"
+                              required
                               maxLength={80}
                               autoComplete="off"
                               defaultValue={board.name}
-                              fullWidth
+                            />
+                          </Field>
+                          <div className="flex">
+                            <SubmitButton color="secondary" size="sm">
+                              Rename
+                            </SubmitButton>
+                          </div>
+                        </ActionForm>
+
+                        <Separator />
+
+                        <ActionForm
+                          action={deleteBoard}
+                          className="flex flex-col gap-3"
+                          aria-label={`Delete ${board.name}`}
+                        >
+                          <input type="hidden" name="boardId" value={board.id} />
+                          <p className="text-xs text-tertiary">
+                            Deleting a board removes its tickets and comments permanently.
+                          </p>
+                          <div className="flex">
+                            <SubmitButton
+                              color="secondary-destructive"
+                              size="sm"
+                              pendingLabel="Deleting..."
                             >
-                              <Label>Board name</Label>
-                              <Input name="name" />
-                            </TextField>
-                            <div className="flex">
-                              <SubmitButton variant="secondary" size="sm">
-                                Rename
-                              </SubmitButton>
-                            </div>
-                          </ActionForm>
-
-                          <Separator />
-
-                          <ActionForm
-                            action={deleteBoard}
-                            className="flex flex-col gap-3"
-                            aria-label={`Delete ${board.name}`}
-                          >
-                            <input type="hidden" name="boardId" value={board.id} />
-                            <p className="text-xs text-muted">
-                              Deleting a board removes its tickets and comments permanently.
-                            </p>
-                            <div className="flex">
-                              <SubmitButton
-                                variant="danger-soft"
-                                size="sm"
-                                pendingLabel="Deleting..."
-                              >
-                                Delete board
-                              </SubmitButton>
-                            </div>
-                          </ActionForm>
-                        </div>
-                      </Disclosure.Content>
-                    </Disclosure>
+                              Delete board
+                            </SubmitButton>
+                          </div>
+                        </ActionForm>
+                      </div>
+                    </details>
                   ) : null}
                 </Card>
               </li>
@@ -189,39 +186,39 @@ export default async function ProjectPage({
 
         {canManage ? (
           <Card className="gap-0 p-0">
-            <Disclosure defaultExpanded={empty}>
-              <Disclosure.Heading level={3}>
-                <Disclosure.Trigger className="flex w-full items-center justify-between gap-3 rounded-2xl px-5 py-4 text-sm font-medium text-foreground">
-                  New board
-                  <Disclosure.Indicator />
-                </Disclosure.Trigger>
-              </Disclosure.Heading>
-              <Disclosure.Content>
-                <div className="px-5 pb-5">
-                  <ActionForm
-                    action={createBoard}
-                    className="flex flex-col gap-4"
-                    aria-label="New board"
-                  >
-                    <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-                    <input type="hidden" name="projectKey" value={ctx.project.key} />
-                    <TextField
-                      isRequired
+            <details className="group" open={empty}>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-5 py-4 text-sm font-medium text-primary">
+                New board
+                <ChevronDown
+                  aria-hidden="true"
+                  className="size-4 transition-transform duration-100 group-open:rotate-180"
+                />
+              </summary>
+              <div className="px-5 pb-5">
+                <ActionForm
+                  action={createBoard}
+                  className="flex flex-col gap-4"
+                  aria-label="New board"
+                >
+                  <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                  <input type="hidden" name="projectKey" value={ctx.project.key} />
+                  <Field htmlFor="board-name" label="Name" className="max-w-md">
+                    <Input
+                      id="board-name"
+                      name="name"
+                      required
                       maxLength={80}
                       autoComplete="off"
-                      fullWidth
-                      className="max-w-md"
-                    >
-                      <Label>Name</Label>
-                      <Input name="name" autoFocus={empty} placeholder="Sprint 1" />
-                    </TextField>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <SubmitButton pendingLabel="Creating...">Create board</SubmitButton>
-                    </div>
-                  </ActionForm>
-                </div>
-              </Disclosure.Content>
-            </Disclosure>
+                      autoFocus={empty}
+                      placeholder="Sprint 1"
+                    />
+                  </Field>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <SubmitButton pendingLabel="Creating...">Create board</SubmitButton>
+                  </div>
+                </ActionForm>
+              </div>
+            </details>
           </Card>
         ) : null}
       </section>
@@ -231,7 +228,7 @@ export default async function ProjectPage({
       {/* ------------------------------------------------------------------ */}
       {canManage ? (
         <section className="flex flex-col gap-4" aria-labelledby="project-settings-heading">
-          <h2 id="project-settings-heading" className="text-sm font-medium text-foreground">
+          <h2 id="project-settings-heading" className="text-sm font-medium text-primary">
             Project settings
           </h2>
 
@@ -244,49 +241,49 @@ export default async function ProjectPage({
               <input type="hidden" name="orgSlug" value={ctx.org.slug} />
               <input type="hidden" name="projectKey" value={ctx.project.key} />
 
-              {/* HeroUI v3: `defaultValue` belongs on TextField, `name` on the control. */}
-              <TextField
-                isRequired
-                maxLength={80}
-                autoComplete="off"
-                defaultValue={ctx.project.name}
-                fullWidth
+              <Field
+                htmlFor="project-name"
+                label="Name"
+                hint={`The key ${ctx.project.key} is part of every link and cannot be changed.`}
                 className="max-w-md"
               >
-                <Label>Name</Label>
-                <Input name="name" />
-                <Description>
-                  The key {ctx.project.key} is part of every link and cannot be changed.
-                </Description>
-              </TextField>
+                <Input
+                  id="project-name"
+                  name="name"
+                  required
+                  maxLength={80}
+                  autoComplete="off"
+                  defaultValue={ctx.project.name}
+                />
+              </Field>
 
-              <TextField
-                maxLength={2000}
-                defaultValue={ctx.project.description ?? ''}
-                fullWidth
-              >
-                <Label>Description</Label>
-                <Textarea name="description" rows={4} />
-                <Description>Optional.</Description>
-              </TextField>
+              <Field htmlFor="project-description" label="Description" hint="Optional.">
+                <Textarea
+                  id="project-description"
+                  name="description"
+                  rows={4}
+                  maxLength={2000}
+                  defaultValue={ctx.project.description ?? ''}
+                />
+              </Field>
 
               <div className="flex flex-wrap items-center gap-2">
-                <SubmitButton variant="secondary">Save project</SubmitButton>
+                <SubmitButton color="secondary">Save project</SubmitButton>
               </div>
             </ActionForm>
           </Card>
 
-          <Card className="gap-0 border border-danger/25 p-0">
-            <Disclosure>
-              <Disclosure.Heading level={3}>
-                <Disclosure.Trigger className="flex w-full items-center justify-between gap-3 rounded-2xl px-6 py-4 text-sm font-medium text-danger">
-                  Delete this project
-                  <Disclosure.Indicator />
-                </Disclosure.Trigger>
-              </Disclosure.Heading>
-              <Disclosure.Content>
-                <div className="flex flex-col gap-4 px-6 pb-6">
-                  <p className="max-w-prose text-sm text-muted">
+          <Card className="gap-0 p-0 ring-error_subtle">
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-6 py-4 text-sm font-medium text-error-primary">
+                Delete this project
+                <ChevronDown
+                  aria-hidden="true"
+                  className="size-4 transition-transform duration-100 group-open:rotate-180"
+                />
+              </summary>
+              <div className="flex flex-col gap-4 px-6 pb-6">
+                  <p className="max-w-prose text-sm text-tertiary">
                     Every board, ticket and comment in {ctx.project.key} is deleted
                     permanently. This cannot be undone.
                   </p>
@@ -297,25 +294,28 @@ export default async function ProjectPage({
                   >
                     <input type="hidden" name="orgSlug" value={ctx.org.slug} />
                     <input type="hidden" name="projectKey" value={ctx.project.key} />
-                    <TextField
-                      isRequired
-                      maxLength={50}
-                      autoComplete="off"
-                      fullWidth
+                    <Field
+                      htmlFor="project-confirm-key"
+                      label={`Type ${ctx.project.key} to confirm`}
                       className="max-w-xs"
                     >
-                      <Label>Type {ctx.project.key} to confirm</Label>
-                      <Input name="confirmKey" spellCheck={false} />
-                    </TextField>
+                      <Input
+                        id="project-confirm-key"
+                        name="confirmKey"
+                        required
+                        maxLength={50}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </Field>
                     <div className="flex flex-wrap items-center gap-2">
-                      <SubmitButton variant="danger" pendingLabel="Deleting...">
+                      <SubmitButton color="primary-destructive" pendingLabel="Deleting...">
                         Delete project
                       </SubmitButton>
                     </div>
                   </ActionForm>
-                </div>
-              </Disclosure.Content>
-            </Disclosure>
+              </div>
+            </details>
           </Card>
         </section>
       ) : null}
