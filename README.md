@@ -1,6 +1,6 @@
 # Kanban
 
-A small, multi-tenant Kanban application. People sign up with an email address and a password, create or join an organization, and work inside it: an organization holds projects, a project holds boards, a board holds three fixed columns (To Do, In Progress, Done), and tickets move between those columns and carry a comment thread. The organization is the tenant boundary, and it is enforced on every single read and write by walking up from the resource to its organization inside the database query itself — there is no place where one tenant can observe another. It is deliberately small: the whole app is ten pages, no JSON API, and no third-party services.
+A small, multi-tenant Kanban application. People sign up with an email address and a password, create or join an organization, and work inside it: an organization holds projects, a project holds boards, a board holds three fixed columns (To Do, In Progress, Done), and tickets move between those columns and carry a comment thread. The organization is the tenant boundary, and it is enforced on every single read and write by walking up from the resource to its organization inside the database query itself — there is no place where one tenant can observe another. It is deliberately small: a handful of pages, no third-party services, and one API endpoint — an MCP server that speaks to the same authorization layer as everything else.
 
 `SPEC.md` in this repository is the canonical specification. If the code and this README disagree, read the spec.
 
@@ -13,10 +13,11 @@ A small, multi-tenant Kanban application. People sign up with an email address a
 - **Boards** — many per project. Every new board is seeded with the three columns `To Do`, `In Progress`, `Done`.
 - **Tickets** — title, optional description, a per-board sequential number, an optional assignee. Moved between columns and reordered within a column using buttons on the card.
 - **Comments** — plain-text comments on a ticket. You can edit and delete your own; admins and owners can moderate any.
+- **MCP** — one authenticated endpoint (`/api/mcp`) that lets an AI assistant read and update the boards you can already see. See [MCP access](#mcp-access).
 
 ### Not included, on purpose
 
-File uploads, notifications, email of any kind, password reset, password change, OAuth/SSO, labels, due dates, priorities, search, filtering, activity feeds, realtime/websockets, drag-and-drop, an admin panel, billing, a dark-mode toggle, i18n, analytics, markdown rendering, avatars, and any public REST/JSON API. Board columns are fixed at three and cannot be added, renamed, or deleted.
+File uploads, notifications, email of any kind, password reset, password change, OAuth/SSO, labels, filtering, activity feeds, realtime/websockets, an admin panel, billing, a dark-mode toggle, i18n, analytics, markdown rendering, avatars, and any public REST/JSON API — `/api/mcp` is the only route handler, it speaks MCP rather than REST, and it is closed to anyone without a session token. Board columns are fixed at three and cannot be added, renamed, or deleted.
 
 ## Stack
 
@@ -78,6 +79,64 @@ Register an account at `/register`, and you will be sent straight to the organiz
 | `bun run db:migrate` | `prisma migrate dev` — creates and applies a migration from schema changes. Local only. |
 | `bun run db:deploy` | `prisma migrate deploy` — applies existing migrations. Used in production. |
 | `bun run typecheck` | `tsc --noEmit`. |
+| `bun run mcp:smoke` | End-to-end check of `/api/mcp` against a running server. Needs `KANBAN_MCP_TOKEN`. |
+
+## MCP access
+
+The app is also an [MCP](https://modelcontextprotocol.io) server, so an AI assistant can work your boards: `POST /api/mcp`, Streamable HTTP transport, stateless.
+
+### Get a token
+
+Sign in, open the account menu at the foot of the sidebar, choose **MCP access**, and create a token. It is shown once.
+
+A token *is* a session — the same `Session` row a browser sign-in creates, with the same SHA-256 storage, the same 30-day rolling expiry, and the same revocation. Two consequences worth being clear about: it carries your full access to every organization you belong to, and it stays valid as long as it keeps being used. Revoke it on the same page.
+
+### Connect a client
+
+```bash
+claude mcp add --transport http kanban https://your-kanban.example.com/api/mcp \
+  --header "Authorization: Bearer <your-token>"
+```
+
+Or install this repository as a plugin, which brings the server and a skill that teaches the model how to use it:
+
+```bash
+claude plugin marketplace add <this-repo>
+claude plugin install kanban@kanban
+```
+
+The plugin's `.mcp.json` reads two environment variables:
+
+```bash
+export KANBAN_URL=https://your-kanban.example.com   # defaults to http://localhost:3000
+export KANBAN_MCP_TOKEN=<your-token>
+```
+
+Any other MCP client works the same way — point it at the endpoint with that one header.
+
+### Tools
+
+| Tool | What it does |
+| --- | --- |
+| `list_boards` | Every organization, project, and board you can reach, with ids. |
+| `get_board` | Columns and their tickets, plus assignable members. |
+| `get_ticket` | One ticket in full, with its comments. |
+| `search_tickets` | Substring match on title and description across your boards. |
+| `create_ticket` | Adds a ticket; `column` accepts a name. |
+| `update_ticket` | Title, description, priority, due date, assignee — any combination. |
+| `move_ticket` | Another column of the same board, optionally at a position. |
+| `comment_ticket` | Posts a comment as the token's owner. |
+| `delete_ticket` | Author, `ADMIN`, or `OWNER` only. |
+
+There is no tool that creates organizations, projects, or boards — do that in the web app.
+
+### Verifying it
+
+```bash
+KANBAN_MCP_TOKEN=<token> bun run mcp:smoke
+```
+
+It checks the handshake, that an unauthenticated call is a 401, that a bad argument comes back as a tool error rather than a transport error, then creates a ticket on the first board it can see, updates, moves, comments on, and finally deletes it.
 
 ## Deploying to Railway
 
@@ -112,7 +171,7 @@ What is actually implemented:
 - **Authorization** is re-derived on every read and every write by walking from the resource up to its organization *inside the Prisma `where` clause*, using the user id from the session. A resource that does not exist and a resource in another tenant return the same `null` from the same query, so there is no existence oracle. No action ever trusts a client-supplied user, organization, or role.
 - **Login is enumeration-resistant**: a single database lookup and a single scrypt invocation on both the found and not-found branches (an unknown email is hashed against a dummy hash), and every failure returns the identical message. Registration does reveal whether an address is taken — see the list below.
 - **Validation**: every Server Action re-parses its `FormData` with zod before touching the database, including length caps and rejection of control characters that Postgres `text` cannot store.
-- **No public API surface**: there are no route handlers (`route.ts`) and no `middleware.ts` anywhere in the tree. Mutations are only reachable as Server Actions, which require a POST carrying a `Next-Action` header that a cross-origin form cannot set — that, plus `sameSite=lax` and Next's `Origin`/`Host` check, is why there is no CSRF token.
+- **One API surface, authenticated**: there is no `middleware.ts`, and exactly one route handler — `/api/mcp`. Everything else is reachable only as a Server Action, which requires a POST carrying a `Next-Action` header that a cross-origin form cannot set; that, plus `sameSite=lax` and Next's `Origin`/`Host` check, is why there is no CSRF token. The MCP endpoint is not a CSRF hole either: it authenticates with an `Authorization: Bearer` header, which no cross-site form, image, or script can attach, and it answers no `OPTIONS`, so no origin is ever granted CORS access. It performs no authorization of its own — every tool goes through the same `require*` walk and the same Server Actions as the web UI.
 - **Security headers** are set in `next.config.ts` for every path: a Content-Security-Policy (with `base-uri 'none'`, `form-action 'self'`, `object-src 'none'`, `frame-ancestors 'none'`), `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`, `Strict-Transport-Security`, `Permissions-Policy`, and `Cross-Origin-Opener-Policy`. `poweredByHeader` is off.
 - **Error handling** never returns a Prisma message, an error code, or a stack trace to the browser; actions return one of a fixed set of literals. Passwords, hashes, session tokens, and raw login form data are never logged, and the Prisma client never enables query logging.
 
@@ -124,7 +183,7 @@ What is deliberately **not** implemented, and what that means for you:
 - **Rate limiting is in-process only.** Login and registration throttles live in the memory of a single Node process, so a redeploy or crash resets every counter, and running more than one replica multiplies every limit by the replica count. scrypt's cost is the real floor here. Move the counters into Postgres before scaling out.
 - **Registration reveals whether an email is already registered**, as does adding a member by email. Hiding either requires sending email, which is out of scope.
 - **The CSP is not nonce-based**, so `script-src` allows inline scripts and is not XSS protection. The app is defended by React's escaping instead: it never constructs HTML from user input, uses no markdown renderer or sanitizer, and `dangerouslySetInnerHTML` is banned.
-- **No audit log, no account deletion, no session management UI.** A user cannot see or revoke their other sessions.
+- **No audit log and no account deletion.** `/tokens` lists your live sessions and revokes any of them, but it shows only when each was created — there is no device, IP, or last-used detail to tell two of them apart, and no way to scope a token to less than your full access.
 
 ## Data model
 

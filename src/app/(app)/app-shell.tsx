@@ -383,6 +383,9 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                   </span>
                 </Dropdown.Item>
               </Dropdown.Section>
+              <Dropdown.Item id="tokens" href="/tokens" textValue="MCP access">
+                MCP access
+              </Dropdown.Item>
               {isAdmin ? (
                 <Dropdown.Item id="admin" href="/admin" textValue="Site administration">
                   Site administration

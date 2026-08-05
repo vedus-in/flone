@@ -1,0 +1,13 @@
+{
+  "name": "kanban",
+  "owner": {
+    "name": "Kanban"
+  },
+  "plugins": [
+    {
+      "name": "kanban",
+      "source": "./",
+      "description": "Read and update your Kanban boards, tickets and comments from any MCP client."
+    }
+  ]
+}

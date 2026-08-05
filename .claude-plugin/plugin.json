@@ -1,0 +1,9 @@
+{
+  "name": "kanban",
+  "displayName": "Kanban",
+  "description": "Read and update your Kanban boards, tickets and comments from any MCP client.",
+  "version": "0.1.0",
+  "keywords": ["kanban", "tickets", "project-management", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHash, randomBytes } from 'node:crypto';
 import { cache } from 'react';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { prisma } from '@/lib/db';
 
 /**
@@ -62,10 +62,24 @@ function isNextControlFlowError(e: unknown): boolean {
   );
 }
 
+/**
+ * The cookie is the browser's channel; `Authorization: Bearer <token>` is the
+ * same opaque token presented by a non-browser client (the MCP endpoint —
+ * `/api/mcp` — is the only one today). It is the SAME credential against the
+ * SAME `Session` row: identical hashing, expiry, rolling refresh and revocation.
+ *
+ * This adds no CSRF surface. A cross-site form, image or script cannot set an
+ * `Authorization` header, and the cookie is still checked first, so an ordinary
+ * browser request never takes this path.
+ */
 async function presentedToken(): Promise<string | null> {
   const store = await cookies();
   const value = store.get(SESSION_COOKIE)?.value;
-  return value && value.length > 0 ? value : null;
+  if (value && value.length > 0) return value;
+
+  const authorization = (await headers()).get('authorization');
+  const bearer = /^Bearer +([A-Za-z0-9._~+/-]+=*)$/.exec(authorization ?? '');
+  return bearer ? bearer[1] : null;
 }
 
 /* -------------------------------------------------------------------------- */
