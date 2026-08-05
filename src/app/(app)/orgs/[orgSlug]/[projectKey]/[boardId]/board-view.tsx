@@ -33,6 +33,7 @@ import {
 } from 'react';
 import Link from 'next/link';
 import type { Priority } from '@prisma/client';
+import { Modal } from '@heroui/react/modal';
 
 import {
   Kanban,
@@ -234,41 +235,120 @@ function TicketCard({
 /* Add card                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function AddCard({ boardId, column }: { boardId: string; column: BoardColumnData }) {
+/**
+ * A pill wearing a native `<select>`.
+ *
+ * Deliberately native: these are 3-5 option enums, and a real select brings its
+ * own keyboard handling, typeahead and -- the reason that matters -- the OS
+ * picker on a phone. A custom listbox would be more markup for less behaviour.
+ */
+function Pill({
+  label,
+  value,
+  onChange,
+  children,
+  dot,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+  dot?: ReactNode;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-surface-secondary has-[select:focus-visible]:outline-2 has-[select:focus-visible]:outline-offset-1 has-[select:focus-visible]:outline-focus">
+      {dot}
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="cursor-pointer appearance-none bg-transparent text-xs text-foreground outline-none"
+      >
+        {children}
+      </select>
+    </span>
+  );
+}
+
+/**
+ * The compose dialog.
+ *
+ * Title and description are the whole point, so they are borderless and large;
+ * the metadata sits under them as pills, and the dialog's own chrome stays out
+ * of the way. Escape and the backdrop close it -- HeroUI's Modal owns the focus
+ * trap and the scroll lock.
+ */
+function AddCard({
+  boardId,
+  column,
+  columns,
+  projectKey,
+  members,
+}: {
+  boardId: string;
+  column: BoardColumnData;
+  columns: BoardColumnData[];
+  projectKey: string;
+  members: BoardMember[];
+}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   // Controlled: React 19 resets a form bound to an action once it settles,
   // regardless of the result, which would discard a rejected title.
   const [title, setTitle] = useState('');
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fieldId = useId();
+  const [description, setDescription] = useState('');
+  const [columnId, setColumnId] = useState(column.id);
+  const [priority, setPriority] = useState<Priority>('NONE');
+  /** The empty string is "unassigned"; the action treats it as null. */
+  const [assigneeId, setAssigneeId] = useState('');
+  // Off by default: the common case is one card, and a dialog that refuses to
+  // close is worse than one extra click.
+  const [createMore, setCreateMore] = useState(false);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+  const headingId = useId();
 
   function submit() {
     const value = title.trim();
     if (!value) return;
     const data = new FormData();
     data.set('boardId', boardId);
-    data.set('columnId', column.id);
+    data.set('columnId', columnId);
     data.set('title', value);
+    data.set('description', description.trim());
+    data.set('priority', priority);
+    data.set('assigneeId', assigneeId);
 
     startTransition(async () => {
       const result = await createTicket(null, data);
-      if (result.ok) {
-        setTitle('');
-        setError(null);
-        inputRef.current?.focus();
-      } else {
+      if (!result.ok) {
         setError(result.error);
+        return;
       }
+      setTitle('');
+      setDescription('');
+      setPriority('NONE');
+      setAssigneeId('');
+      setError(null);
+      if (createMore) titleRef.current?.focus();
+      else setOpen(false);
     });
   }
 
-  if (!open) {
-    return (
+  const targetColumn = columns.find((candidate) => candidate.id === columnId) ?? column;
+  const assignee = members.find((member) => member.id === assigneeId) ?? null;
+
+  return (
+    <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          // The dialog is per-column, so it always opens pointed at the column
+          // whose button was pressed -- even if it was left on another one.
+          setColumnId(column.id);
+          setError(null);
+          setOpen(true);
+        }}
         className="mt-1 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-start text-sm text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       >
         <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-4">
@@ -276,59 +356,189 @@ function AddCard({ boardId, column }: { boardId: string; column: BoardColumnData
         </svg>
         Add a card
       </button>
-    );
-  }
 
-  return (
-    <div className="mt-1 flex flex-col gap-2">
-      <label className="visually-hidden" htmlFor={fieldId}>
-        Add a card to {column.name}
-      </label>
-      <textarea
-        id={fieldId}
-        ref={inputRef}
-        autoFocus
-        rows={2}
-        maxLength={200}
-        value={title}
-        onChange={(event) => setTitle(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            submit();
-          }
-          if (event.key === 'Escape') {
-            setOpen(false);
-            setTitle('');
-            setError(null);
-          }
-        }}
-        placeholder="What needs doing?"
-        className="w-full resize-none rounded-lg border border-border bg-surface p-2.5 text-sm text-foreground placeholder:text-muted focus-visible:border-accent focus-visible:outline-none"
-      />
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={submit}
-          disabled={pending || title.trim().length === 0}
-          className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-foreground disabled:opacity-50"
-        >
-          {pending ? 'Adding…' : 'Add'}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setOpen(false);
-            setTitle('');
-            setError(null);
-          }}
-          className="rounded-lg px-2 py-1.5 text-sm text-muted hover:text-foreground"
-        >
-          Cancel
-        </button>
-      </div>
-      <FormError>{error}</FormError>
-    </div>
+      <Modal.Backdrop isOpen={open} onOpenChange={setOpen} variant="blur">
+        <Modal.Container placement="center">
+          <Modal.Dialog
+            aria-labelledby={headingId}
+            className="gap-0 p-0 shadow-2xl sm:max-w-[36rem]"
+          >
+            <div className="flex items-center gap-1.5 px-4 pt-4 pb-2">
+              <span className="rounded bg-surface-secondary px-1.5 py-0.5 font-mono text-[0.6875rem] text-muted">
+                {projectKey}
+              </span>
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3 text-muted">
+                <path
+                  d="M6 3.5 10.5 8 6 12.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span id={headingId} className="text-sm font-medium text-foreground">
+                New card
+              </span>
+            </div>
+            <Modal.CloseTrigger />
+
+            <div className="flex flex-col gap-1 px-4 pt-2">
+              {/* `field-sizing-content` grows both fields with their text, so a
+                  long title never hides behind a scrollbar. */}
+              <textarea
+                ref={titleRef}
+                autoFocus
+                rows={1}
+                maxLength={200}
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+                aria-label="Card title"
+                placeholder="Card title"
+                className="w-full resize-none border-0 bg-transparent p-0 text-lg font-medium text-foreground field-sizing-content placeholder:text-muted focus:outline-none"
+              />
+              <textarea
+                rows={2}
+                maxLength={2000}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+                aria-label="Description"
+                placeholder="Add description…"
+                className="w-full resize-none border-0 bg-transparent p-0 text-sm text-foreground field-sizing-content placeholder:text-muted focus:outline-none"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 px-4 pt-4 pb-3">
+              <Pill
+                label="Column"
+                value={columnId}
+                onChange={setColumnId}
+                dot={
+                  <span
+                    aria-hidden="true"
+                    className="size-2 rounded-full border border-muted"
+                    title={targetColumn.name}
+                  />
+                }
+              >
+                {columns.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </option>
+                ))}
+              </Pill>
+
+              <Pill
+                label="Priority"
+                value={priority}
+                onChange={(value) => setPriority(value as Priority)}
+                dot={
+                  <span
+                    aria-hidden="true"
+                    className={cx(
+                      'size-2 rounded-full',
+                      PRIORITY_DOT[priority] ?? 'border border-muted',
+                    )}
+                  />
+                }
+              >
+                {(Object.keys(PRIORITY_LABEL) as Priority[]).map((value) => (
+                  <option key={value} value={value}>
+                    {PRIORITY_LABEL[value]}
+                  </option>
+                ))}
+              </Pill>
+
+              {/* Members of this organization only. The action re-checks the
+                  membership regardless -- this list decides what to OFFER. */}
+              <Pill
+                label="Assignee"
+                value={assigneeId}
+                onChange={setAssigneeId}
+                dot={
+                  assignee ? (
+                    <span
+                      aria-hidden="true"
+                      className="grid size-4 place-items-center rounded-full bg-surface-secondary text-[0.5rem] font-medium text-foreground"
+                    >
+                      {initials(assignee.name)}
+                    </span>
+                  ) : (
+                    <svg
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      aria-hidden="true"
+                      className="size-3.5 text-muted"
+                    >
+                      <path
+                        d="M8 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3 13.5a5 5 0 0 1 10 0"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )
+                }
+              >
+                <option value="">Unassigned</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+              </Pill>
+            </div>
+
+            {error ? (
+              <div className="px-4 pb-3">
+                <FormError>{error}</FormError>
+              </div>
+            ) : null}
+
+            <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  checked={createMore}
+                  onChange={(event) => setCreateMore(event.target.checked)}
+                  className="size-3.5 accent-accent"
+                />
+                Create more
+              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded-lg px-2.5 py-1.5 text-sm text-muted transition-colors hover:text-foreground"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={pending || title.trim().length === 0}
+                  className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-foreground transition-opacity disabled:opacity-50"
+                >
+                  {pending ? 'Creating…' : 'Create card'}
+                </button>
+              </div>
+            </div>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </>
   );
 }
 
@@ -468,7 +678,13 @@ export function BoardView({
                 </KanbanColumnContent>
 
                 <div className="px-2 pb-2">
-                  <AddCard boardId={boardId} column={column} />
+                  <AddCard
+                    boardId={boardId}
+                    column={column}
+                    columns={liveColumns}
+                    projectKey={projectKey}
+                    members={members}
+                  />
                 </div>
               </KanbanColumn>
             );

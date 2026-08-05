@@ -55,6 +55,25 @@ function fieldErrorsOf(error: z.ZodError): Record<string, string> {
 }
 
 /**
+ * An assignee must belong to THIS organization.
+ *
+ * Without this check a valid cuid for any user on the instance would be
+ * accepted, which both leaks that the account exists and lets a stranger be
+ * assigned work. Shared by `createTicket` and `assignTicketFromBoard` so the
+ * two cannot drift -- the organization id always comes from the upward walk,
+ * never from the form.
+ */
+async function isOrgMember(organizationId: string, userId: string): Promise<boolean> {
+  const membership = await prisma.membership.findFirst({
+    where: { organizationId, userId },
+    select: { id: true },
+  });
+  return membership !== null;
+}
+
+const NOT_A_MEMBER = 'That person is not a member of this organization.';
+
+/**
  * SPEC 7.5: the `number` retry is keyed STRICTLY to the `(boardId, number)`
  * constraint. A blanket `P2002` retry would silently mask genuine unique
  * violations. Prisma reports `meta.target` as either the column list or the
@@ -81,6 +100,10 @@ const createTicketSchema = z.object({
   columnId: cuid,
   title: ticketTitleSchema,
   description: ticketDescriptionSchema,
+  // Optional: the compose dialog offers these, the MCP tool does not send them.
+  priority: z.nativeEnum(Priority).default(Priority.NONE),
+  /** The empty string leaves the card unassigned. */
+  assigneeId: z.union([cuid, z.literal('')]).default(''),
 });
 
 export async function createTicket(
@@ -95,6 +118,8 @@ export async function createTicket(
       columnId: field(formData, 'columnId'),
       title: field(formData, 'title'),
       description: field(formData, 'description'),
+      priority: field(formData, 'priority') || undefined,
+      assigneeId: field(formData, 'assigneeId'),
     });
     if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
 
@@ -103,6 +128,10 @@ export async function createTicket(
     // MANDATORY: proves the target column belongs to THIS board, so a forged
     // columnId cannot drop a ticket into another board's column.
     const column = await requireColumnInBoard(ctx.board.id, parsed.data.columnId);
+
+    if (parsed.data.assigneeId !== '' && !(await isOrgMember(ctx.org.id, parsed.data.assigneeId))) {
+      return fail(NOT_A_MEMBER);
+    }
 
     const description = parsed.data.description.length > 0 ? parsed.data.description : null;
 
@@ -127,6 +156,8 @@ export async function createTicket(
               position: (highestPosition._max.position ?? 0) + 1,
               title: parsed.data.title,
               description,
+              priority: parsed.data.priority,
+              assigneeId: parsed.data.assigneeId === '' ? null : parsed.data.assigneeId,
               // Identity comes from the session. Never from the form.
               createdById: user.id,
             },
@@ -448,15 +479,8 @@ export async function assignTicketFromBoard(input: {
 
     const ctx = await requireTicket(parsed.data.ticketId);
 
-    // The assignee must be a member of THIS organization. Without this check a
-    // valid cuid for any user on the instance would be accepted, which both
-    // leaks that the account exists and lets a stranger be assigned work.
-    if (parsed.data.assigneeId !== '') {
-      const membership = await prisma.membership.findFirst({
-        where: { organizationId: ctx.org.id, userId: parsed.data.assigneeId },
-        select: { id: true },
-      });
-      if (!membership) return fail('That person is not a member of this organization.');
+    if (parsed.data.assigneeId !== '' && !(await isOrgMember(ctx.org.id, parsed.data.assigneeId))) {
+      return fail(NOT_A_MEMBER);
     }
 
     await prisma.ticket.update({
