@@ -1,7 +1,6 @@
 import { Children, Fragment, type HTMLAttributes, type ReactNode } from 'react';
 import NextLink from 'next/link';
 import { Badge as UntitledBadge } from '@/components/base/badges/badges';
-import { EmptyState as UntitledEmptyState } from '@/components/application/empty-state/empty-state';
 import { Label } from '@/components/base/input/label';
 import { cx } from '@/lib/utils/cx';
 
@@ -338,40 +337,9 @@ export function PageHeader({
   );
 }
 
-type EmptyStateProps = {
-  title: ReactNode;
-  description?: ReactNode;
-  /** The call to action. Omit it when the viewer's role cannot perform it. */
-  children?: ReactNode;
-  className?: string;
-};
-
 /**
- * A real empty state, not a shrug: says what is missing, why, and offers the one
- * action that fixes it.
- *
- * Untitled UI's `EmptyState` is a compound component whose pieces are assembled
- * per call site; this collapses the three the app actually uses into the flat
- * props every page already passes.
+ * `EmptyState` lives in its own `'use client'` module for the same reason as
+ * `ButtonLink`: it dots into an Untitled UI compound component, and those
+ * sub-components read as `undefined` from a Server Component.
  */
-export function EmptyState({ title, description, children, className }: EmptyStateProps) {
-  return (
-    <UntitledEmptyState
-      size="sm"
-      className={cx('rounded-xl border border-dashed border-secondary px-6 py-12', className)}
-    >
-      <UntitledEmptyState.Header>
-        <UntitledEmptyState.FeaturedIcon color="gray" theme="modern" />
-      </UntitledEmptyState.Header>
-      <UntitledEmptyState.Content>
-        <UntitledEmptyState.Title>{title}</UntitledEmptyState.Title>
-        {description ? (
-          <UntitledEmptyState.Description>{description}</UntitledEmptyState.Description>
-        ) : null}
-      </UntitledEmptyState.Content>
-      {children ? (
-        <UntitledEmptyState.Footer>{children}</UntitledEmptyState.Footer>
-      ) : null}
-    </UntitledEmptyState>
-  );
-}
+export { EmptyState } from './empty-state';

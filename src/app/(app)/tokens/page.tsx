@@ -1,6 +1,13 @@
 import { headers } from 'next/headers';
 
-import { Table } from '@/components/application/table/table';
+import {
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRoot,
+  TableRow,
+} from '@/components/table';
 import { loadPage, requireUser } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { Badge, Card, PageHeader, SubmitButton } from '@/components/ui';
@@ -110,32 +117,32 @@ export default async function TokensPage() {
         </h2>
 
         <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
-          <Table size="sm" aria-label="Your active sessions and tokens">
-            <Table.Header>
-              <Table.Head isRowHeader className="w-full">
+          <TableRoot size="sm" aria-label="Your active sessions and tokens">
+            <TableHeader>
+              <TableHead isRowHeader className="w-full">
                 Created
-              </Table.Head>
-              <Table.Head className="whitespace-nowrap">Expires</Table.Head>
-              <Table.Head className="whitespace-nowrap text-end">Revoke</Table.Head>
-            </Table.Header>
+              </TableHead>
+              <TableHead className="whitespace-nowrap">Expires</TableHead>
+              <TableHead className="whitespace-nowrap text-end">Revoke</TableHead>
+            </TableHeader>
 
-            <Table.Body>
+            <TableBody>
               {sessions.map((session) => {
                 const isCurrent = session.id === user.sessionId;
                 return (
-                  <Table.Row key={session.id} id={session.id}>
-                    <Table.Cell>
+                  <TableRow key={session.id} id={session.id}>
+                    <TableCell>
                       <div className="flex flex-wrap items-center gap-2 py-1">
                         <span className="text-primary tabular-nums">
                           {STAMP.format(session.createdAt)}
                         </span>
                         {isCurrent ? <Badge tone="accent">This browser</Badge> : null}
                       </div>
-                    </Table.Cell>
-                    <Table.Cell className="whitespace-nowrap align-middle text-tertiary tabular-nums">
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap align-middle text-tertiary tabular-nums">
                       {STAMP.format(session.expiresAt)}
-                    </Table.Cell>
-                    <Table.Cell className="align-middle">
+                    </TableCell>
+                    <TableCell className="align-middle">
                       <ActionForm
                         action={revokeSession}
                         className="flex justify-end"
@@ -150,12 +157,12 @@ export default async function TokensPage() {
                           {isCurrent ? 'Sign out' : 'Revoke'}
                         </SubmitButton>
                       </ActionForm>
-                    </Table.Cell>
-                  </Table.Row>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </Table.Body>
-          </Table>
+            </TableBody>
+          </TableRoot>
         </div>
 
         <p className="max-w-prose text-xs text-tertiary">

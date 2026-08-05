@@ -1,7 +1,14 @@
 'use client';
 
 import { useActionState, useRef } from 'react';
-import { Table } from '@/components/application/table/table';
+import {
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRoot,
+  TableRow,
+} from '@/components/table';
 import { Toggle } from '@/components/base/toggle/toggle';
 import { Badge, FormError, SubmitButton } from '@/components/ui';
 import type { ActionResult } from '@/lib/result';
@@ -154,18 +161,18 @@ export function UserAdminTable({
   return (
     <div className="flex flex-col gap-4">
       <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
-        <Table size="sm" aria-label="Accounts on this instance">
-          <Table.Header>
-            <Table.Head isRowHeader>Name</Table.Head>
-            <Table.Head>Email</Table.Head>
-            <Table.Head>Joined</Table.Head>
-            <Table.Head>Site admin</Table.Head>
-            <Table.Head textValue="Actions">
+        <TableRoot size="sm" aria-label="Accounts on this instance">
+          <TableHeader>
+            <TableHead isRowHeader>Name</TableHead>
+            <TableHead>Email</TableHead>
+            <TableHead>Joined</TableHead>
+            <TableHead>Site admin</TableHead>
+            <TableHead textValue="Actions">
               <span className="visually-hidden">Actions</span>
-            </Table.Head>
-          </Table.Header>
+            </TableHead>
+          </TableHeader>
 
-          <Table.Body
+          <TableBody
             items={users}
             dependencies={[adminCount]}
             renderEmptyState={() => (
@@ -173,19 +180,19 @@ export function UserAdminTable({
             )}
           >
             {(user) => (
-              <Table.Row id={user.id} textValue={user.name}>
-                <Table.Cell textValue={user.name}>
+              <TableRow id={user.id} textValue={user.name}>
+                <TableCell textValue={user.name}>
                   <span className="font-medium text-primary">{user.name}</span>
                   {user.isSelf ? <span className="ms-2 text-xs text-tertiary">you</span> : null}
-                </Table.Cell>
+                </TableCell>
 
-                <Table.Cell className="text-tertiary">{user.email}</Table.Cell>
+                <TableCell className="text-tertiary">{user.email}</TableCell>
 
-                <Table.Cell className="whitespace-nowrap text-tertiary" textValue={user.joinedLabel}>
+                <TableCell className="whitespace-nowrap text-tertiary" textValue={user.joinedLabel}>
                   <time dateTime={user.joinedISO}>{user.joinedLabel}</time>
-                </Table.Cell>
+                </TableCell>
 
-                <Table.Cell textValue={user.isAdmin ? 'Yes' : 'No'}>
+                <TableCell textValue={user.isAdmin ? 'Yes' : 'No'}>
                   {user.isAdmin ? (
                     <Badge tone="accent">Admin</Badge>
                   ) : (
@@ -194,9 +201,9 @@ export function UserAdminTable({
                       <span className="visually-hidden">Not an administrator</span>
                     </span>
                   )}
-                </Table.Cell>
+                </TableCell>
 
-                <Table.Cell textValue={user.isAdmin ? 'Revoke admin' : 'Make admin'}>
+                <TableCell textValue={user.isAdmin ? 'Revoke admin' : 'Make admin'}>
                   <form action={formAction} className="flex justify-end">
                     <input type="hidden" name="userId" value={user.id} readOnly />
                     <input
@@ -216,11 +223,11 @@ export function UserAdminTable({
                       {user.isAdmin ? 'Revoke admin' : 'Make admin'}
                     </SubmitButton>
                   </form>
-                </Table.Cell>
-              </Table.Row>
+                </TableCell>
+              </TableRow>
             )}
-          </Table.Body>
-        </Table>
+          </TableBody>
+        </TableRoot>
       </div>
 
       <ActionStatus state={state} />

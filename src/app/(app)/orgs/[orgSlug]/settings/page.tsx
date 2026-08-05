@@ -1,7 +1,14 @@
 import Link from 'next/link';
 import { Role } from '@prisma/client';
 import { ChevronDown } from '@untitledui/icons';
-import { Table } from '@/components/application/table/table';
+import {
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRoot,
+  TableRow,
+} from '@/components/table';
 import { prisma } from '@/lib/db';
 import {
   atLeast,
@@ -140,18 +147,18 @@ export default async function OrganizationSettingsPage({
         </h2>
 
         <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
-          <Table size="sm" aria-label="Members of this organization">
-            <Table.Header>
-              <Table.Head isRowHeader className="w-full">
+          <TableRoot size="sm" aria-label="Members of this organization">
+            <TableHeader>
+              <TableHead isRowHeader className="w-full">
                 Member
-              </Table.Head>
-              <Table.Head className="whitespace-nowrap">Role</Table.Head>
+              </TableHead>
+              <TableHead className="whitespace-nowrap">Role</TableHead>
               {canManage ? (
-                <Table.Head className="whitespace-nowrap text-end">Manage</Table.Head>
+                <TableHead className="whitespace-nowrap text-end">Manage</TableHead>
               ) : null}
-            </Table.Header>
+            </TableHeader>
 
-            <Table.Body>
+            <TableBody>
               {members.map((member) => {
                 const isSelf = member.user.id === ctx.user.id;
                 const targetIsOwner = member.role === Role.OWNER;
@@ -161,8 +168,8 @@ export default async function OrganizationSettingsPage({
                 const roleFieldId = `role-${member.id}`;
 
                 return (
-                  <Table.Row key={member.id} id={member.id}>
-                    <Table.Cell>
+                  <TableRow key={member.id} id={member.id}>
+                    <TableCell>
                       <div className="flex min-w-0 flex-col gap-0.5 py-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium text-primary">
@@ -172,16 +179,16 @@ export default async function OrganizationSettingsPage({
                         </div>
                         <span className="text-xs text-tertiary">{member.user.email}</span>
                       </div>
-                    </Table.Cell>
+                    </TableCell>
 
-                    <Table.Cell className="whitespace-nowrap align-top">
+                    <TableCell className="whitespace-nowrap align-top">
                       <Badge tone={targetIsOwner ? 'accent' : 'neutral'}>
                         {ROLE_LABEL[member.role]}
                       </Badge>
-                    </Table.Cell>
+                    </TableCell>
 
                     {canManage ? (
-                      <Table.Cell className="align-top">
+                      <TableCell className="align-top">
                         <div className="flex flex-col items-end gap-2">
                           {actionable ? (
                             <div className="flex flex-wrap items-start justify-end gap-2">
@@ -276,13 +283,13 @@ export default async function OrganizationSettingsPage({
                             </span>
                           ) : null}
                         </div>
-                      </Table.Cell>
+                      </TableCell>
                     ) : null}
-                  </Table.Row>
+                  </TableRow>
                 );
               })}
-            </Table.Body>
-          </Table>
+            </TableBody>
+          </TableRoot>
         </div>
 
         <dl className="grid gap-2 sm:grid-cols-3">
