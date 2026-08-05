@@ -4,14 +4,19 @@
  * The authenticated chrome: a persistent left sidebar carrying the whole
  * navigation tree, and a slim header carrying context.
  *
- * Structure follows the Jira model -- an organization switcher at the top, then
- * that organization's projects with their boards nested beneath, so every board
- * is one click away instead of three. The account lives at the foot of the
- * sidebar behind an avatar menu, not as a bare "Sign out" in the header.
+ * Structure follows the Linear model -- a workspace switcher at the top, then
+ * collapsible sections, then the project tree with its boards nested beneath an
+ * indent guide, so every board is one click away instead of three. The account
+ * lives at the foot of the sidebar behind an avatar menu, not as a bare
+ * "Sign out" in the header.
  *
- * A client module for exactly three reasons: the drawer needs open/closed
- * state, the project tree needs expand/collapse state, and the active item is
- * derived from `usePathname()`. Everything it renders is data the SERVER
+ * Rows are 28px and 13px type on purpose: this density is the whole point of the
+ * look. The active row is a neutral wash rather than an accent tint -- colour in
+ * the sidebar competes with colour on the board.
+ *
+ * A client module for exactly four reasons: the drawer needs open/closed state,
+ * the sections and the project tree need expand/collapse state, and the active
+ * item is derived from `usePathname()`. Everything it renders is data the SERVER
  * resolved; it performs no data access and makes no authorization decision.
  * `@/lib/authz` is `server-only`, so hrefs arrive already built.
  */
@@ -88,47 +93,107 @@ function Icon({ d, className }: { d: string; className?: string }) {
 }
 
 const I_BOARD = 'M2.5 2.5h11v11h-11zM6 2.5v11M10 2.5v11';
+const I_CUBE = 'M8 1.75 13.75 5v6L8 14.25 2.25 11V5zM2.25 5 8 8.25 13.75 5M8 8.25v6';
 const I_PEOPLE =
   'M6 7.5a2.25 2.25 0 1 0 0-4.5 2.25 2.25 0 0 0 0 4.5ZM1.75 13.5a4.25 4.25 0 0 1 8.5 0M11 3.2a2.25 2.25 0 0 1 0 4.4M12.2 9.6a4.25 4.25 0 0 1 2.05 3.9';
-const I_SHIELD = 'M8 1.75 13 3.5v4c0 3.2-2.1 5.6-5 6.75-2.9-1.15-5-3.55-5-6.75v-4z';
 const I_PLUS = 'M8 3.5v9M3.5 8h9';
 const I_MENU = 'M2.5 4.5h11M2.5 8h11M2.5 11.5h11';
 const I_CHEVRON = 'M6 3.5 10.5 8 6 12.5';
+const I_CARET = 'm4.5 6.5 3.5 3.5 3.5-3.5';
 const I_SWITCH = 'M4 6.5 8 3l4 3.5M12 9.5 8 13l-4-3.5';
 
 /* -------------------------------------------------------------------------- */
+
+/**
+ * A collapsible sidebar group. The heading is the toggle, so the whole label is
+ * the hit target rather than a 12px chevron.
+ */
+function Section({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center gap-0.5 pe-1">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-1 rounded px-2 py-1 text-start text-xs font-medium text-muted transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus"
+        >
+          <span className="truncate">{title}</span>
+          <Icon
+            d={I_CARET}
+            className={cx('size-3 opacity-70 transition-transform', !open && '-rotate-90')}
+          />
+        </button>
+        {action}
+      </div>
+      {open ? <ul className="flex flex-col gap-px">{children}</ul> : null}
+    </div>
+  );
+}
 
 function NavRow({
   href,
   children,
   active,
   onNavigate,
-  depth = 0,
   icon,
+  indented = false,
 }: {
   href: string;
   children: ReactNode;
   active: boolean;
   onNavigate: () => void;
-  depth?: number;
   icon?: string;
+  indented?: boolean;
 }) {
   return (
     <Link
       href={href}
       onClick={onNavigate}
       aria-current={active ? 'page' : undefined}
-      style={{ paddingInlineStart: `${0.625 + depth * 0.875}rem` }}
       className={cx(
-        'flex items-center gap-2 rounded-md py-1.5 pe-2 text-sm no-underline transition-colors',
-        'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+        'flex h-7 items-center gap-2 rounded-md pe-2 text-[0.8125rem] no-underline transition-colors',
+        'outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus',
+        indented ? 'ps-1.5' : 'ps-2',
         active
-          ? 'bg-accent-soft font-medium text-accent-soft-foreground'
+          ? 'bg-surface-secondary font-medium text-foreground'
           : 'text-muted hover:bg-surface-secondary hover:text-foreground',
       )}
     >
-      {icon ? <Icon d={icon} /> : null}
+      {icon ? <Icon d={icon} className="size-3.5 opacity-80" /> : null}
       <span className="min-w-0 truncate">{children}</span>
+    </Link>
+  );
+}
+
+/** The small square button that sits beside a section heading. */
+function SectionAction({
+  href,
+  label,
+  onNavigate,
+}: {
+  href: string;
+  label: string;
+  onNavigate: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      aria-label={label}
+      title={label}
+      className="grid size-5 shrink-0 place-items-center rounded text-muted transition-colors hover:bg-surface-secondary hover:text-foreground"
+    >
+      <Icon d={I_PLUS} className="size-3.5" />
     </Link>
   );
 }
@@ -177,15 +242,15 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
 
   const sidebar = (
     <div className="flex h-full flex-col">
-      {/* Organization switcher */}
-      <div className="border-b border-border p-2">
+      {/* Workspace switcher */}
+      <div className="p-2">
         {orgs.length === 0 ? (
           <Link
             href="/orgs/new"
             onClick={closeDrawer}
-            className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm text-muted no-underline hover:bg-surface-secondary hover:text-foreground"
+            className="flex h-8 items-center gap-2 rounded-md px-2 text-[0.8125rem] text-muted no-underline hover:bg-surface-secondary hover:text-foreground"
           >
-            <Icon d={I_PLUS} />
+            <Icon d={I_PLUS} className="size-3.5" />
             New organization
           </Link>
         ) : (
@@ -193,23 +258,18 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
             <Dropdown.Trigger>
               <button
                 type="button"
-                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-start transition-colors hover:bg-surface-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                className="flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-start transition-colors hover:bg-surface-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus"
               >
                 <span
                   aria-hidden="true"
-                  className="grid size-7 shrink-0 place-items-center rounded-md bg-accent text-xs font-semibold text-accent-foreground"
+                  className="grid size-5 shrink-0 place-items-center rounded bg-accent text-[0.625rem] font-semibold text-accent-foreground"
                 >
                   {initials(activeOrg?.name ?? 'K')}
                 </span>
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium text-foreground">
-                    {activeOrg?.name ?? 'Kanban'}
-                  </span>
-                  <span className="truncate text-[0.6875rem] text-muted">
-                    {activeOrg ? activeOrg.role.toLowerCase() : 'no organization'}
-                  </span>
+                <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium text-foreground">
+                  {activeOrg?.name ?? 'Kanban'}
                 </span>
-                <Icon d={I_SWITCH} className="size-3.5 text-muted" />
+                <Icon d={I_CARET} className="size-3 text-muted" />
               </button>
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom start" className="min-w-64">
@@ -241,40 +301,63 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
         )}
       </div>
 
-      {/* Project / board tree */}
-      <nav aria-label="Projects" className="flex-1 overflow-y-auto p-2">
+      {/* Sections */}
+      <nav aria-label="Navigation" className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 pb-2">
         {activeOrg ? (
           <>
-            <div className="flex items-center justify-between px-2.5 pt-1 pb-1.5">
-              <span className="text-[0.6875rem] font-semibold tracking-wider text-muted uppercase">
-                Projects
-              </span>
-              <Link
-                href={activeOrg.newProjectHref}
-                onClick={closeDrawer}
-                aria-label="New project"
-                title="New project"
-                className="grid size-5 place-items-center rounded text-muted hover:bg-surface-secondary hover:text-foreground"
-              >
-                <Icon d={I_PLUS} className="size-3.5" />
-              </Link>
-            </div>
+            <Section title="Workspace">
+              <li>
+                <NavRow
+                  href={activeOrg.href}
+                  active={pathname === activeOrg.href}
+                  onNavigate={closeDrawer}
+                  icon={I_CUBE}
+                >
+                  Projects
+                </NavRow>
+              </li>
+              <li>
+                <NavRow
+                  href={activeOrg.settingsHref}
+                  active={pathname === activeOrg.settingsHref}
+                  onNavigate={closeDrawer}
+                  icon={I_PEOPLE}
+                >
+                  Members &amp; settings
+                </NavRow>
+              </li>
+            </Section>
 
-            {activeOrg.projects.length === 0 ? (
-              <p className="px-2.5 py-2 text-sm text-muted">No projects yet</p>
-            ) : (
-              <ul className="flex flex-col gap-0.5">
-                {activeOrg.projects.map((project) => {
+            <Section
+              title="Your projects"
+              action={
+                <SectionAction
+                  href={activeOrg.newProjectHref}
+                  label="New project"
+                  onNavigate={closeDrawer}
+                />
+              }
+            >
+              {activeOrg.projects.length === 0 ? (
+                <li className="px-2 py-1 text-[0.8125rem] text-muted">No projects yet</li>
+              ) : (
+                activeOrg.projects.map((project) => {
                   const isOpen = expanded.has(project.id);
+                  const isActive = pathname === project.href;
                   return (
-                    <li key={project.id} className="flex flex-col gap-0.5">
-                      <div className="flex items-center">
+                    <li key={project.id}>
+                      <div
+                        className={cx(
+                          'flex h-7 items-center gap-0.5 rounded-md pe-2 ps-0.5 transition-colors',
+                          isActive ? 'bg-surface-secondary' : 'hover:bg-surface-secondary',
+                        )}
+                      >
                         <button
                           type="button"
                           onClick={() => toggleProject(project.id)}
                           aria-expanded={isOpen}
                           aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${project.name}`}
-                          className="grid size-6 shrink-0 place-items-center rounded text-muted hover:text-foreground"
+                          className="grid size-5 shrink-0 place-items-center rounded text-muted transition-colors hover:text-foreground"
                         >
                           <Icon
                             d={I_CHEVRON}
@@ -284,25 +367,26 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                         <Link
                           href={project.href}
                           onClick={closeDrawer}
-                          aria-current={pathname === project.href ? 'page' : undefined}
+                          aria-current={isActive ? 'page' : undefined}
                           className={cx(
-                            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1.5 text-sm no-underline transition-colors',
-                            pathname === project.href
-                              ? 'bg-accent-soft font-medium text-accent-soft-foreground'
-                              : 'text-foreground hover:bg-surface-secondary',
+                            'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus',
+                            isActive ? 'font-medium text-foreground' : 'text-muted',
                           )}
                         >
+                          <Icon d={I_CUBE} className="size-3.5 opacity-80" />
                           <span className="truncate">{project.name}</span>
-                          <span className="ms-auto shrink-0 font-mono text-[0.625rem] text-muted">
-                            {project.key}
-                          </span>
                         </Link>
+                        <span className="shrink-0 font-mono text-[0.625rem] text-muted">
+                          {project.key}
+                        </span>
                       </div>
 
+                      {/* The rule is the indent guide: it ties a board back to
+                          the project it hangs off, which plain padding does not. */}
                       {isOpen ? (
-                        <ul className="flex flex-col gap-0.5">
+                        <ul className="ms-3.5 flex flex-col gap-px border-s border-border ps-1">
                           {project.boards.length === 0 ? (
-                            <li className="ps-9 text-xs text-muted">No boards</li>
+                            <li className="ps-2 py-1 text-xs text-muted">No boards</li>
                           ) : (
                             project.boards.map((board) => (
                               <li key={board.id}>
@@ -312,8 +396,8 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                                     pathname === board.href || pathname.startsWith(`${board.href}/`)
                                   }
                                   onNavigate={closeDrawer}
-                                  depth={2}
                                   icon={I_BOARD}
+                                  indented
                                 >
                                   {board.name}
                                 </NavRow>
@@ -324,53 +408,31 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                       ) : null}
                     </li>
                   );
-                })}
-              </ul>
-            )}
-
-            <div className="mt-4 flex flex-col gap-0.5 border-t border-border pt-3">
-              <NavRow
-                href={activeOrg.settingsHref}
-                active={pathname === activeOrg.settingsHref}
-                onNavigate={closeDrawer}
-                icon={I_PEOPLE}
-              >
-                Members &amp; settings
-              </NavRow>
-              {isAdmin ? (
-                <NavRow
-                  href="/admin"
-                  active={pathname === '/admin'}
-                  onNavigate={closeDrawer}
-                  icon={I_SHIELD}
-                >
-                  Site administration
-                </NavRow>
-              ) : null}
-            </div>
+                })
+              )}
+            </Section>
           </>
         ) : null}
       </nav>
 
       {/* Account */}
-      <div className="border-t border-border p-2">
+      <div className="p-2">
         <Dropdown>
           <Dropdown.Trigger>
             <button
               type="button"
-              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-start transition-colors hover:bg-surface-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-start transition-colors hover:bg-surface-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus"
             >
               <span
                 aria-hidden="true"
-                className="grid size-7 shrink-0 place-items-center rounded-full bg-surface-secondary text-xs font-medium text-foreground"
+                className="grid size-5 shrink-0 place-items-center rounded-full bg-surface-secondary text-[0.625rem] font-medium text-foreground"
               >
                 {initials(userName)}
               </span>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm text-foreground">{userName}</span>
-                <span className="truncate text-[0.6875rem] text-muted">{userEmail}</span>
+              <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-muted">
+                {userName}
               </span>
-              <Icon d={I_SWITCH} className="size-3.5 text-muted" />
+              <Icon d={I_SWITCH} className="size-3 text-muted" />
             </button>
           </Dropdown.Trigger>
           <Dropdown.Popover placement="top start" className="min-w-56">
@@ -415,7 +477,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
 
   return (
     <div className="flex min-h-dvh">
-      <aside className="hidden w-64 shrink-0 border-e border-border bg-surface lg:block">
+      <aside className="hidden w-56 shrink-0 border-e border-border bg-surface lg:block">
         <div className="sticky top-0 h-dvh">{sidebar}</div>
       </aside>
 
@@ -427,7 +489,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
             onClick={closeDrawer}
             className="absolute inset-0 size-full bg-black/60"
           />
-          <div className="absolute inset-y-0 start-0 w-72 border-e border-border bg-surface shadow-2xl">
+          <div className="absolute inset-y-0 start-0 w-64 border-e border-border bg-surface shadow-2xl">
             {sidebar}
           </div>
         </div>
