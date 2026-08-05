@@ -24,24 +24,33 @@ Get the token from the running app: account menu (bottom of the sidebar) →
 
 ## Working with it
 
-Ids are opaque cuids and must never be guessed. Get them from a read:
+Ids are opaque cuids and must never be guessed. Get them from a read first:
 
-1. `list_boards` — the whole tree: organizations → projects → boards. Start here.
-2. `get_board` — columns and their tickets, plus the members who can be assigned.
-3. `search_tickets` — substring match on title and description across every board.
-4. `get_ticket` — one ticket in full, with its comments.
+| Read | Gives you |
+| --- | --- |
+| `list_boards` | The whole tree: organizations → projects → boards. Start here. |
+| `get_organization` | Members with their `membershipId`, and the org's projects and boards. |
+| `get_board` | Columns and their tickets, plus who can be assigned. |
+| `get_ticket` | One ticket in full, with `commentId`s. |
+| `search_tickets` | Substring match on title and description across every board. |
 
-Then act:
+Then act. Everything the web app can do is here:
 
-- `create_ticket` — `column` accepts a name ("In Progress"), defaulting to the first column.
-- `update_ticket` — title, description, `priority` (NONE/LOW/MEDIUM/HIGH/URGENT), `dueDate` (YYYY-MM-DD), `assignee` (member email). Omitted fields are untouched; an empty string clears `description`, `dueDate` or `assignee`.
-- `move_ticket` — another column of the same board; `position` 0 puts it on top, omit it to append.
-- `comment_ticket`, `delete_ticket`.
+- **Tickets** — `create_ticket` (`column` accepts a name like "In Progress"), `update_ticket`, `move_ticket` (`position` 0 puts it on top; omit to append), `move_ticket_to_board`, `delete_ticket`.
+- **Comments** — `create_comment`, `update_comment`, `delete_comment`.
+- **Boards** — `create_board`, `rename_board`, `delete_board`.
+- **Projects** — `create_project`, `update_project`, `delete_project`.
+- **Organizations** — `create_organization`, `rename_organization`, `delete_organization`.
+- **Members** — `add_member` (by email; they must already have an account), `set_member_role`, `remove_member`.
+- **Site admin** — `admin_list_users`, `admin_set_registration`, `admin_set_user_admin`. These govern the *instance*, not any organization, and only work for a site administrator.
+
+`update_ticket` takes any combination of title, description, `priority` (NONE/LOW/MEDIUM/HIGH/URGENT), `dueDate` (YYYY-MM-DD) and `assignee` (member email). Omitted fields are untouched; an empty string clears `description`, `dueDate` or `assignee`.
 
 ## Conventions
 
 - A ticket's human-facing name is its `ref`, e.g. `PROJ-12`. Say that to the user, not the id.
 - Every result carries a `url` — a path on the Kanban app. Offer it when reporting what changed.
-- Confirm before `delete_ticket`. It also deletes the ticket's comments and cannot be undone.
+- **Ask before deleting anything.** Deletes cascade: a board takes its tickets, a project takes its boards, an organization takes everything. `delete_project` and `delete_organization` also require you to echo the key or name exactly — that guardrail is there to make the deletion deliberate, so treat needing it as a reason to confirm with the user, not a puzzle to solve.
 - Making several changes to one ticket? One `update_ticket` call, not four.
-- Board and column names are fixed here — the app seeds *To Do*, *In Progress*, *Done* and there is no tool to create boards or columns. Ask the user to do that in the web app.
+- Columns are fixed: every board is seeded with *To Do*, *In Progress*, *Done*, and there is no tool to add, rename or delete a column. That is a deliberate limit of the app, not a gap here.
+- Permission errors are honest. "You don't have permission to do that" means the token's owner genuinely lacks the role — a MEMBER cannot create projects or delete other people's tickets. Report it; don't try another tool to route around it.

@@ -13,7 +13,7 @@ A small, multi-tenant Kanban application. People sign up with an email address a
 - **Boards** — many per project. Every new board is seeded with the three columns `To Do`, `In Progress`, `Done`.
 - **Tickets** — title, optional description, a per-board sequential number, an optional assignee. Moved between columns and reordered within a column using buttons on the card.
 - **Comments** — plain-text comments on a ticket. You can edit and delete your own; admins and owners can moderate any.
-- **MCP** — one authenticated endpoint (`/api/mcp`) that lets an AI assistant read and update the boards you can already see. See [MCP access](#mcp-access).
+- **MCP** — one authenticated endpoint (`/api/mcp`) exposing the whole application to an AI assistant: organizations, members, projects, boards, tickets, comments and site administration. See [MCP access](#mcp-access).
 
 ### Not included, on purpose
 
@@ -116,19 +116,22 @@ Any other MCP client works the same way — point it at the endpoint with that o
 
 ### Tools
 
-| Tool | What it does |
-| --- | --- |
-| `list_boards` | Every organization, project, and board you can reach, with ids. |
-| `get_board` | Columns and their tickets, plus assignable members. |
-| `get_ticket` | One ticket in full, with its comments. |
-| `search_tickets` | Substring match on title and description across your boards. |
-| `create_ticket` | Adds a ticket; `column` accepts a name. |
-| `update_ticket` | Title, description, priority, due date, assignee — any combination. |
-| `move_ticket` | Another column of the same board, optionally at a position. |
-| `comment_ticket` | Posts a comment as the token's owner. |
-| `delete_ticket` | Author, `ADMIN`, or `OWNER` only. |
+The whole application, 28 tools. Every one of them is the same Server Action the web UI submits, so the role matrix below is the app's, not a second implementation of it.
 
-There is no tool that creates organizations, projects, or boards — do that in the web app.
+| Area | Tools | Who |
+| --- | --- | --- |
+| Reading | `list_boards`, `get_organization`, `get_board`, `get_ticket`, `search_tickets` | any member |
+| Tickets | `create_ticket`, `update_ticket`, `move_ticket`, `move_ticket_to_board`, `delete_ticket` | any member; delete is author/`ADMIN`/`OWNER` |
+| Comments | `create_comment`, `update_comment`, `delete_comment` | any member; edit and delete are author/`ADMIN`/`OWNER` |
+| Boards | `create_board`, `rename_board`, `delete_board` | `ADMIN` or `OWNER` |
+| Projects | `create_project`, `update_project`, `delete_project` | `ADMIN` or `OWNER` |
+| Organizations | `create_organization`, `rename_organization`, `delete_organization` | anyone may create; rename is `ADMIN`+, delete is `OWNER` |
+| Members | `add_member`, `set_member_role`, `remove_member` | `ADMIN` or `OWNER`; granting `OWNER` is `OWNER`-only |
+| Site admin | `admin_list_users`, `admin_set_registration`, `admin_set_user_admin` | site administrators |
+
+`delete_project` and `delete_organization` require the caller to echo the project key or organization name exactly, the same confirmation the web forms ask for.
+
+Two things are deliberately absent. Signing out would revoke the very token making the call, and login/register mint credentials — a caller holding a token is already authenticated, and account creation stays a human act behind the registration flag. Board columns are fixed at three app-wide, so there is nothing to expose.
 
 ### Verifying it
 
@@ -136,7 +139,7 @@ There is no tool that creates organizations, projects, or boards — do that in 
 KANBAN_MCP_TOKEN=<token> bun run mcp:smoke
 ```
 
-It checks the handshake, that an unauthenticated call is a 401, that a bad argument comes back as a tool error rather than a transport error, then creates a ticket on the first board it can see, updates, moves, comments on, and finally deletes it.
+It checks the handshake, that an unauthenticated call is a 401, and that a bad argument comes back as a tool error rather than a transport error. Then it builds a **throwaway organization of its own** — project, two boards, a ticket, a comment — exercises every tool against it, and deletes the organization in a `finally`. Your real boards are never touched, so it is safe to point at production. The three `admin_*` tools are skipped, not failed, when the token does not belong to a site administrator.
 
 ## Deploying to Railway
 

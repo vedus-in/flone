@@ -1,12 +1,17 @@
 import 'server-only';
 
-import { Priority } from '@prisma/client';
+import { Priority, Role } from '@prisma/client';
 
 import {
   AuthzError,
   boardPath,
   isNextControlFlowError,
+  orgPath,
+  projectPath,
+  requireAdmin,
   requireBoard,
+  requireOrgBySlug,
+  requireProjectByKey,
   requireTicket,
   requireUser,
   ticketPath,
@@ -15,10 +20,29 @@ import {
 import { prisma } from '@/lib/db';
 import { listNavTree } from '@/lib/nav';
 import type { ActionResult } from '@/lib/result';
+import { getAppSettings, isRegistrationOpen } from '@/lib/settings';
 import { COLUMN_ORDER, TICKET_ORDER, cuid } from '@/lib/validation';
 
+import { setRegistration, setUserAdmin } from '@/app/(app)/admin/actions';
+import { createOrganization } from '@/app/(app)/orgs/new/actions';
+import { createProject } from '@/app/(app)/orgs/[orgSlug]/actions';
+import {
+  addMember,
+  changeMemberRole,
+  deleteOrganization,
+  removeMember,
+  renameOrganization,
+} from '@/app/(app)/orgs/[orgSlug]/settings/actions';
+import {
+  createBoard,
+  deleteBoard,
+  deleteProject,
+  renameBoard,
+  updateProject,
+} from '@/app/(app)/orgs/[orgSlug]/[projectKey]/actions';
 import {
   createTicket,
+  moveTicketToBoard,
   placeTicket,
   setTicketDueDate,
   setTicketPriority,
@@ -26,23 +50,36 @@ import {
 import {
   assignTicket,
   createComment,
+  deleteComment,
   deleteTicket,
+  updateComment,
   updateTicket,
 } from '@/app/(app)/orgs/[orgSlug]/[projectKey]/[boardId]/[ticketNumber]/actions';
 
 /**
  * The MCP tool surface (transport lives in `src/app/api/mcp/route.ts`).
  *
+ * It covers the whole application: organizations, members, projects, boards,
+ * tickets, comments and site administration. Everything the web UI can do, a
+ * model can do — under exactly the same rules.
+ *
  * THIS FILE ADDS NO AUTHORIZATION OF ITS OWN, and that is the point. Every read
  * goes through a `require*` helper from `@/lib/authz` or is a nested/rooted
  * select under an id that helper already proved the caller may see; every write
  * is delegated to the SAME Server Action the web UI submits, so the zod parse,
- * the membership walk, the role checks, the `requireColumnInBoard` guard and the
- * `revalidatePath` calls all still happen exactly once, in one place.
+ * the membership walk, the role checks, the last-owner and last-admin locks,
+ * the `requireColumnInBoard` guard and the `revalidatePath` calls all still
+ * happen exactly once, in one place.
  *
  * Identity arrives as a bearer session token (see `presentedToken()` in
  * `@/lib/session`), so an MCP client is precisely as privileged as the person
- * who minted the token — never more.
+ * who minted the token — never more. A MEMBER's token cannot delete an
+ * organization here any more than their browser can.
+ *
+ * Two actions are deliberately absent. `signOut` would revoke the very token
+ * making the call, and `login`/`register` mint credentials — a caller holding a
+ * token is already authenticated, and account creation stays a human act behind
+ * the registration flag.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -85,7 +122,7 @@ function requiredString(args: Args, key: string): string {
 function requiredId(args: Args, key: string): string {
   const parsed = cuid.safeParse(requiredString(args, key));
   if (!parsed.success) {
-    throw new ToolError(`"${key}" must be an id returned by list_boards, get_board or search_tickets.`);
+    throw new ToolError(`"${key}" must be an id returned by a previous read (list_boards, get_organization, get_board, get_ticket or search_tickets).`);
   }
   return parsed.data;
 }
@@ -99,6 +136,12 @@ function optionalInt(args: Args, key: string): number | undefined {
   return value;
 }
 
+function requiredBoolean(args: Args, key: string): boolean {
+  const value = args[key];
+  if (typeof value !== 'boolean') throw new ToolError(`"${key}" must be true or false.`);
+  return value;
+}
+
 /** FormData is the Server Action calling convention; these are its only inputs. */
 function form(values: Record<string, string>): FormData {
   const formData = new FormData();
@@ -106,13 +149,53 @@ function form(values: Record<string, string>): FormData {
   return formData;
 }
 
-/** Server Actions never throw — they answer with a closed error literal. */
-function must(result: ActionResult): { ok: true } {
+/** Server Actions never throw for a rejection — they answer with a closed literal. */
+function must(result: ActionResult): void {
   if (!result.ok) {
     const fields = result.fieldErrors ? ` (${Object.values(result.fieldErrors).join(' ')})` : '';
     throw new ToolError(`${result.error}${fields}`);
   }
-  return { ok: true };
+}
+
+/**
+ * `redirect()` signals by THROWING, and encodes its destination in the thrown
+ * error's digest: `NEXT_REDIRECT;<kind>;<url>;<status>;`.
+ *
+ * ponytail: that digest is a Next internal. If its shape ever changes the parse
+ * returns null and the tool simply reports success without a `url` — degraded,
+ * never wrong. Upgrade path: have the navigating actions return their path in
+ * `ActionResult`.
+ */
+function redirectTarget(e: unknown): string | null {
+  if (!isNextControlFlowError(e)) return null;
+  const digest = (e as { digest?: unknown }).digest;
+  if (typeof digest !== 'string' || !digest.startsWith('NEXT_REDIRECT')) return null;
+  return digest.split(';')[2] ?? null;
+}
+
+/**
+ * For the actions that navigate on success (every create, and the destructive
+ * deletes). A thrown redirect is "done" here, and its URL is the most reliable
+ * handle on what was just created — for a new board it literally contains the
+ * new board id.
+ */
+async function runNavigating(run: () => Promise<ActionResult>): Promise<string | null> {
+  try {
+    must(await run());
+    return null;
+  } catch (e) {
+    const target = redirectTarget(e);
+    if (target !== null) return target;
+    throw e;
+  }
+}
+
+/** Last path segment of a redirect target — the new slug, key or id. */
+function tailOf(path: string | null): string | null {
+  if (!path) return null;
+  const segments = path.split('?')[0].split('/').filter(Boolean);
+  const last = segments[segments.length - 1];
+  return last ? decodeURIComponent(last) : null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -162,14 +245,15 @@ async function resolveMember(organizationId: string, needle: string): Promise<st
   return membership.userId;
 }
 
-function priorityOf(value: string): Priority {
+function enumOf<T extends string>(values: readonly T[], label: string, value: string): T {
   const wanted = value.trim().toUpperCase();
-  const match = Object.values(Priority).find((priority) => priority === wanted);
-  if (!match) {
-    throw new ToolError(`"priority" must be one of: ${Object.values(Priority).join(', ')}.`);
-  }
+  const match = values.find((candidate) => candidate === wanted);
+  if (!match) throw new ToolError(`"${label}" must be one of: ${values.join(', ')}.`);
   return match;
 }
+
+const PRIORITIES = Object.values(Priority);
+const ROLES = Object.values(Role);
 
 function boardSummary(ctx: BoardCtx) {
   return {
@@ -178,6 +262,7 @@ function boardSummary(ctx: BoardCtx) {
     project: ctx.project.name,
     projectKey: ctx.project.key,
     organization: ctx.org.name,
+    orgSlug: ctx.org.slug,
     yourRole: ctx.role,
     url: boardPath(ctx.org, ctx.project, ctx.board),
   };
@@ -202,16 +287,85 @@ type Tool = {
 };
 
 const STRING = { type: 'string' } as const;
+const ORG_SLUG = { ...STRING, description: 'Organization slug, from list_boards.' } as const;
+const PROJECT_KEY = { ...STRING, description: 'Project key, e.g. ENG.' } as const;
 
 export const TOOLS: Tool[] = [
+  /* ------------------------------------------------------------------ */
+  /* Reading                                                             */
+  /* ------------------------------------------------------------------ */
+
   {
     name: 'list_boards',
     title: 'List boards',
     description:
-      'Every organization, project and board the signed-in user can reach, with the ids the other tools need. Start here.',
+      'Every organization, project and board the signed-in user can reach, with the ids and slugs the other tools need. Start here.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
     run: async () => ({ organizations: await listNavTree() }),
+  },
+
+  {
+    name: 'get_organization',
+    title: 'Read an organization',
+    description:
+      'One organization: your role in it, its members (with the membershipId that set_member_role and remove_member need), and its projects and boards.',
+    inputSchema: {
+      type: 'object',
+      properties: { orgSlug: ORG_SLUG },
+      required: ['orgSlug'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    run: async (args) => {
+      const ctx = await requireOrgBySlug(requiredString(args, 'orgSlug'));
+
+      const [members, projects] = await Promise.all([
+        prisma.membership.findMany({
+          where: { organizationId: ctx.org.id },
+          orderBy: [{ role: 'asc' }, { user: { name: 'asc' } }, { id: 'asc' }],
+          select: {
+            id: true,
+            role: true,
+            user: { select: { id: true, name: true, email: true } },
+          },
+        }),
+        prisma.project.findMany({
+          where: { organizationId: ctx.org.id },
+          orderBy: [{ name: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            key: true,
+            name: true,
+            description: true,
+            boards: {
+              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+              select: { id: true, name: true },
+            },
+          },
+        }),
+      ]);
+
+      return {
+        organization: ctx.org.name,
+        orgSlug: ctx.org.slug,
+        yourRole: ctx.role,
+        url: orgPath(ctx.org),
+        members: members.map((row) => ({
+          membershipId: row.id,
+          userId: row.user.id,
+          name: row.user.name,
+          email: row.user.email,
+          role: row.role,
+        })),
+        projects: projects.map((project) => ({
+          projectKey: project.key,
+          name: project.name,
+          description: project.description,
+          boards: project.boards.map((board) => ({ boardId: board.id, name: board.name })),
+        })),
+      };
+    },
   },
 
   {
@@ -288,7 +442,8 @@ export const TOOLS: Tool[] = [
   {
     name: 'get_ticket',
     title: 'Read a ticket',
-    description: 'One ticket in full: description, column, priority, due date, assignee and comments.',
+    description:
+      'One ticket in full: description, column, priority, due date, assignee and comments (with the commentId that update_comment and delete_comment need).',
     inputSchema: {
       type: 'object',
       properties: { ticketId: { ...STRING, description: 'From get_board or search_tickets.' } },
@@ -389,11 +544,7 @@ export const TOOLS: Tool[] = [
           column: { select: { name: true } },
           assignee: { select: { name: true } },
           board: {
-            select: {
-              id: true,
-              name: true,
-              project: { select: { key: true, name: true } },
-            },
+            select: { id: true, name: true, project: { select: { key: true, name: true } } },
           },
         },
       });
@@ -417,6 +568,368 @@ export const TOOLS: Tool[] = [
       };
     },
   },
+
+  /* ------------------------------------------------------------------ */
+  /* Organizations and members                                           */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'create_organization',
+    title: 'Create an organization',
+    description:
+      'Create an organization. You become its OWNER. The slug is derived from the name when omitted, and a random suffix is added if it is taken.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: STRING,
+        slug: { ...STRING, description: '2-40 lowercase letters, numbers or dashes.' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const slug = optionalString(args, 'slug');
+      const target = await runNavigating(() =>
+        createOrganization(
+          null,
+          form({ name: requiredString(args, 'name'), ...(slug ? { slug } : {}) }),
+        ),
+      );
+      return { ok: true, orgSlug: tailOf(target), url: target };
+    },
+  },
+
+  {
+    name: 'rename_organization',
+    title: 'Rename an organization',
+    description: 'Change the display name. The slug and every existing URL stay as they are. ADMIN or OWNER.',
+    inputSchema: {
+      type: 'object',
+      properties: { orgSlug: ORG_SLUG, name: STRING },
+      required: ['orgSlug', 'name'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      must(
+        await renameOrganization(
+          null,
+          form({ orgSlug: requiredString(args, 'orgSlug'), name: requiredString(args, 'name') }),
+        ),
+      );
+      return { ok: true, orgSlug: requiredString(args, 'orgSlug') };
+    },
+  },
+
+  {
+    name: 'delete_organization',
+    title: 'Delete an organization',
+    description:
+      'Permanently delete an organization and every project, board, ticket and comment in it. OWNER only. `confirmName` must equal the organization name exactly — ask the user before calling this.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        confirmName: { ...STRING, description: 'The exact organization name.' },
+      },
+      required: ['orgSlug', 'confirmName'],
+      additionalProperties: false,
+    },
+    annotations: { destructiveHint: true },
+    run: async (args) => {
+      await runNavigating(() =>
+        deleteOrganization(
+          null,
+          form({
+            orgSlug: requiredString(args, 'orgSlug'),
+            confirmName: requiredString(args, 'confirmName'),
+          }),
+        ),
+      );
+      return { ok: true, deleted: requiredString(args, 'orgSlug') };
+    },
+  },
+
+  {
+    name: 'add_member',
+    title: 'Add a member',
+    description:
+      'Add an existing account to an organization by email. There is no invitation email — the person must already have registered. ADMIN or OWNER.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        email: STRING,
+        role: { type: 'string', enum: ['ADMIN', 'MEMBER'], description: 'Default MEMBER.' },
+      },
+      required: ['orgSlug', 'email'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const role = optionalString(args, 'role');
+      must(
+        await addMember(
+          null,
+          form({
+            orgSlug: requiredString(args, 'orgSlug'),
+            email: requiredString(args, 'email'),
+            role: role ? enumOf(['ADMIN', 'MEMBER'] as const, 'role', role) : Role.MEMBER,
+          }),
+        ),
+      );
+      return { ok: true, added: requiredString(args, 'email') };
+    },
+  },
+
+  {
+    name: 'set_member_role',
+    title: 'Change a member role',
+    description:
+      'Change someone\'s role. ADMIN or OWNER; granting OWNER is OWNER-only, and the last OWNER cannot be demoted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        membershipId: { ...STRING, description: 'From get_organization.' },
+        role: { type: 'string', enum: ROLES },
+      },
+      required: ['orgSlug', 'membershipId', 'role'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      const role = enumOf(ROLES, 'role', requiredString(args, 'role'));
+      must(
+        await changeMemberRole(
+          null,
+          form({
+            orgSlug: requiredString(args, 'orgSlug'),
+            membershipId: requiredId(args, 'membershipId'),
+            role,
+          }),
+        ),
+      );
+      return { ok: true, role };
+    },
+  },
+
+  {
+    name: 'remove_member',
+    title: 'Remove a member',
+    description:
+      'Remove someone from an organization. ADMIN or OWNER; only an OWNER may remove another OWNER, and the last OWNER cannot be removed. Their tickets and comments stay.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        membershipId: { ...STRING, description: 'From get_organization.' },
+      },
+      required: ['orgSlug', 'membershipId'],
+      additionalProperties: false,
+    },
+    annotations: { destructiveHint: true },
+    run: async (args) => {
+      must(
+        await removeMember(
+          null,
+          form({
+            orgSlug: requiredString(args, 'orgSlug'),
+            membershipId: requiredId(args, 'membershipId'),
+          }),
+        ),
+      );
+      return { ok: true };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Projects                                                            */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'create_project',
+    title: 'Create a project',
+    description:
+      'Create a project in an organization. The key is derived from the name when omitted. ADMIN or OWNER.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        name: STRING,
+        key: { ...STRING, description: '2-10 characters: a letter then letters or digits, e.g. ENG.' },
+        description: STRING,
+      },
+      required: ['orgSlug', 'name'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const key = optionalString(args, 'key');
+      const description = optionalString(args, 'description');
+      const target = await runNavigating(() =>
+        createProject(
+          null,
+          form({
+            orgSlug: requiredString(args, 'orgSlug'),
+            name: requiredString(args, 'name'),
+            ...(key ? { key } : {}),
+            ...(description ? { description } : {}),
+          }),
+        ),
+      );
+      return { ok: true, projectKey: tailOf(target), url: target };
+    },
+  },
+
+  {
+    name: 'update_project',
+    title: 'Update a project',
+    description:
+      'Change a project name or description. The key never changes. ADMIN or OWNER. Omitted fields are left alone.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        name: STRING,
+        description: { ...STRING, description: 'Empty string clears it.' },
+      },
+      required: ['orgSlug', 'projectKey'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      const orgSlug = requiredString(args, 'orgSlug');
+      const projectKey = requiredString(args, 'projectKey');
+      const name = optionalString(args, 'name');
+      const description = optionalString(args, 'description');
+      if (name === undefined && description === undefined) {
+        throw new ToolError('Nothing to update — pass a name or a description.');
+      }
+
+      // updateProject writes BOTH columns and nulls an absent description, so the
+      // untouched field is read back and re-sent rather than silently wiped.
+      const current = await requireProjectByKey(orgSlug, projectKey);
+
+      must(
+        await updateProject(
+          null,
+          form({
+            orgSlug,
+            projectKey,
+            name: name ?? current.project.name,
+            description: description ?? current.project.description ?? '',
+          }),
+        ),
+      );
+      return { ok: true, projectKey, url: projectPath(current.org, current.project) };
+    },
+  },
+
+  {
+    name: 'delete_project',
+    title: 'Delete a project',
+    description:
+      'Permanently delete a project with every board, ticket and comment in it. ADMIN or OWNER. `confirmKey` must equal the project key exactly — ask the user before calling this.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        confirmKey: { ...STRING, description: 'The exact project key.' },
+      },
+      required: ['orgSlug', 'projectKey', 'confirmKey'],
+      additionalProperties: false,
+    },
+    annotations: { destructiveHint: true },
+    run: async (args) => {
+      await runNavigating(() =>
+        deleteProject(
+          null,
+          form({
+            orgSlug: requiredString(args, 'orgSlug'),
+            projectKey: requiredString(args, 'projectKey'),
+            confirmKey: requiredString(args, 'confirmKey'),
+          }),
+        ),
+      );
+      return { ok: true, deleted: requiredString(args, 'projectKey') };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Boards                                                              */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'create_board',
+    title: 'Create a board',
+    description:
+      'Create a board in a project, seeded with the three columns To Do, In Progress and Done. ADMIN or OWNER.',
+    inputSchema: {
+      type: 'object',
+      properties: { orgSlug: ORG_SLUG, projectKey: PROJECT_KEY, name: STRING },
+      required: ['orgSlug', 'projectKey', 'name'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const target = await runNavigating(() =>
+        createBoard(
+          null,
+          form({
+            orgSlug: requiredString(args, 'orgSlug'),
+            projectKey: requiredString(args, 'projectKey'),
+            name: requiredString(args, 'name'),
+          }),
+        ),
+      );
+      return { ok: true, boardId: tailOf(target), url: target };
+    },
+  },
+
+  {
+    name: 'rename_board',
+    title: 'Rename a board',
+    description: 'Change a board name. ADMIN or OWNER.',
+    inputSchema: {
+      type: 'object',
+      properties: { boardId: STRING, name: STRING },
+      required: ['boardId', 'name'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      must(
+        await renameBoard(
+          null,
+          form({ boardId: requiredId(args, 'boardId'), name: requiredString(args, 'name') }),
+        ),
+      );
+      return { ok: true, boardId: requiredId(args, 'boardId') };
+    },
+  },
+
+  {
+    name: 'delete_board',
+    title: 'Delete a board',
+    description:
+      'Permanently delete a board with its columns, tickets and comments. ADMIN or OWNER — ask the user before calling this.',
+    inputSchema: {
+      type: 'object',
+      properties: { boardId: STRING },
+      required: ['boardId'],
+      additionalProperties: false,
+    },
+    annotations: { destructiveHint: true },
+    run: async (args) => {
+      const boardId = requiredId(args, 'boardId');
+      await runNavigating(() => deleteBoard(null, form({ boardId })));
+      return { ok: true, deleted: boardId };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Tickets                                                             */
+  /* ------------------------------------------------------------------ */
 
   {
     name: 'create_ticket',
@@ -485,14 +998,14 @@ export const TOOLS: Tool[] = [
     name: 'update_ticket',
     title: 'Update a ticket',
     description:
-      'Change any combination of title, description, priority, due date and assignee. Omitted fields are left alone.',
+      'Change any combination of title, description, priority, due date and assignee. Omitted fields are left alone. Any member may edit any ticket.',
     inputSchema: {
       type: 'object',
       properties: {
         ticketId: STRING,
         title: STRING,
         description: { ...STRING, description: 'Empty string clears it.' },
-        priority: { type: 'string', enum: Object.values(Priority) },
+        priority: { type: 'string', enum: PRIORITIES },
         dueDate: { ...STRING, description: 'YYYY-MM-DD, or an empty string to clear it.' },
         assignee: { ...STRING, description: 'Member email or userId; empty string unassigns.' },
       },
@@ -524,34 +1037,37 @@ export const TOOLS: Tool[] = [
             }),
           ),
         );
-        changed.push(title !== undefined ? 'title' : '', description !== undefined ? 'description' : '');
+        if (title !== undefined) changed.push('title');
+        if (description !== undefined) changed.push('description');
       }
 
       if (priority !== undefined) {
-        must(await setTicketPriority({ ticketId, priority: priorityOf(priority) }));
+        must(
+          await setTicketPriority({ ticketId, priority: enumOf(PRIORITIES, 'priority', priority) }),
+        );
         changed.push('priority');
       }
 
       if (dueDate !== undefined) {
-        must(await setTicketDueDate({ ticketId, dueDate: dueDate.trim() === '' ? null : dueDate.trim() }));
+        must(
+          await setTicketDueDate({ ticketId, dueDate: dueDate.trim() === '' ? null : dueDate.trim() }),
+        );
         changed.push('dueDate');
       }
 
       if (assignee !== undefined) {
-        const assigneeId =
-          assignee.trim() === '' ? '' : await resolveMember(ctx.org.id, assignee);
+        const assigneeId = assignee.trim() === '' ? '' : await resolveMember(ctx.org.id, assignee);
         must(await assignTicket(null, form({ ticketId, assigneeId })));
         changed.push('assignee');
       }
 
-      const updated = changed.filter(Boolean);
-      if (updated.length === 0) throw new ToolError('Nothing to update — pass at least one field.');
+      if (changed.length === 0) throw new ToolError('Nothing to update — pass at least one field.');
 
       return {
         ok: true,
         ticketId,
         ref: `${ctx.project.key}-${ctx.ticket.number}`,
-        updated,
+        updated: changed,
         url: ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number),
       };
     },
@@ -597,21 +1113,27 @@ export const TOOLS: Tool[] = [
   },
 
   {
-    name: 'comment_ticket',
-    title: 'Comment on a ticket',
-    description: 'Post a comment, authored by the owner of the token.',
+    name: 'move_ticket_to_board',
+    title: 'Move a ticket to another board',
+    description:
+      'Move a ticket to a different board in the SAME project. It lands in that board\'s first column and is renumbered, so its ref changes.',
     inputSchema: {
       type: 'object',
-      properties: { ticketId: STRING, body: STRING },
-      required: ['ticketId', 'body'],
+      properties: { ticketId: STRING, toBoardId: { ...STRING, description: 'From list_boards.' } },
+      required: ['ticketId', 'toBoardId'],
       additionalProperties: false,
     },
     run: async (args) => {
-      const ctx = await requireTicket(requiredId(args, 'ticketId'));
-      must(await createComment(null, form({ ticketId: ctx.ticket.id, body: requiredString(args, 'body') })));
+      const ticketId = requiredId(args, 'ticketId');
+      must(await moveTicketToBoard({ ticketId, toBoardId: requiredId(args, 'toBoardId') }));
+
+      // Re-read through the authorized walk so the caller gets the NEW ref.
+      const ctx = await requireTicket(ticketId);
       return {
         ok: true,
+        ticketId,
         ref: `${ctx.project.key}-${ctx.ticket.number}`,
+        board: ctx.board.name,
         url: ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number),
       };
     },
@@ -621,7 +1143,7 @@ export const TOOLS: Tool[] = [
     name: 'delete_ticket',
     title: 'Delete a ticket',
     description:
-      'Permanently delete a ticket and its comments. Allowed for the ticket author, or for an ADMIN or OWNER of the organization.',
+      'Permanently delete a ticket and its comments. The ticket author, or an ADMIN or OWNER — ask the user before calling this.',
     inputSchema: {
       type: 'object',
       properties: { ticketId: STRING },
@@ -632,16 +1154,180 @@ export const TOOLS: Tool[] = [
     run: async (args) => {
       const ctx = await requireTicket(requiredId(args, 'ticketId'));
       const ref = `${ctx.project.key}-${ctx.ticket.number}`;
-
-      // deleteTicket signals success by throwing redirect() — that is navigation
-      // for the browser, and simply "done" here.
-      try {
-        must(await deleteTicket(null, form({ ticketId: ctx.ticket.id })));
-      } catch (e) {
-        if (!isNextControlFlowError(e)) throw e;
-      }
-
+      await runNavigating(() => deleteTicket(null, form({ ticketId: ctx.ticket.id })));
       return { ok: true, deleted: ref };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Comments                                                            */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'create_comment',
+    title: 'Comment on a ticket',
+    description: 'Post a comment, authored by the owner of the token. Any member may comment.',
+    inputSchema: {
+      type: 'object',
+      properties: { ticketId: STRING, body: STRING },
+      required: ['ticketId', 'body'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireTicket(requiredId(args, 'ticketId'));
+      must(
+        await createComment(
+          null,
+          form({ ticketId: ctx.ticket.id, body: requiredString(args, 'body') }),
+        ),
+      );
+      return {
+        ok: true,
+        ref: `${ctx.project.key}-${ctx.ticket.number}`,
+        url: ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number),
+      };
+    },
+  },
+
+  {
+    name: 'update_comment',
+    title: 'Edit a comment',
+    description: 'Replace a comment body. The comment author, or an ADMIN or OWNER.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        commentId: { ...STRING, description: 'From get_ticket.' },
+        body: STRING,
+      },
+      required: ['commentId', 'body'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      must(
+        await updateComment(
+          null,
+          form({
+            commentId: requiredId(args, 'commentId'),
+            body: requiredString(args, 'body'),
+          }),
+        ),
+      );
+      return { ok: true, commentId: requiredId(args, 'commentId') };
+    },
+  },
+
+  {
+    name: 'delete_comment',
+    title: 'Delete a comment',
+    description: 'Permanently delete a comment. The comment author, or an ADMIN or OWNER.',
+    inputSchema: {
+      type: 'object',
+      properties: { commentId: { ...STRING, description: 'From get_ticket.' } },
+      required: ['commentId'],
+      additionalProperties: false,
+    },
+    annotations: { destructiveHint: true },
+    run: async (args) => {
+      const commentId = requiredId(args, 'commentId');
+      must(await deleteComment(null, form({ commentId })));
+      return { ok: true, deleted: commentId };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Site administration                                                 */
+  /*                                                                     */
+  /* Instance-level, NOT tenant access: being a site admin governs who   */
+  /* may register and who else is an admin, and grants no ability to     */
+  /* read or write any organization's data. These three fail with        */
+  /* "You don't have permission to do that." for everyone else.          */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'admin_list_users',
+    title: 'List accounts (site admin)',
+    description:
+      'Every account on the instance, and whether registration is currently open. Site administrators only.',
+    inputSchema: {
+      type: 'object',
+      properties: { limit: { type: 'integer', minimum: 1, maximum: 500, description: 'Default 100.' } },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    run: async (args) => {
+      await requireAdmin();
+      const limit = Math.min(optionalInt(args, 'limit') ?? 100, 500) || 100;
+
+      const [users, total, settings, open] = await Promise.all([
+        prisma.user.findMany({
+          // Never `passwordHash`, and never a session token (SPEC §4.7).
+          select: { id: true, name: true, email: true, isAdmin: true, createdAt: true },
+          orderBy: [{ isAdmin: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+          take: limit,
+        }),
+        prisma.user.count(),
+        getAppSettings(),
+        // The flag alone is not the answer: registration re-opens by itself while
+        // the instance has no accounts, and this is the one helper that knows it.
+        isRegistrationOpen(),
+      ]);
+
+      return {
+        registrationEnabled: settings.registrationEnabled,
+        registrationOpen: open,
+        total,
+        shown: users.length,
+        users: users.map((user) => ({
+          userId: user.id,
+          name: user.name,
+          email: user.email,
+          isAdmin: user.isAdmin,
+          createdAt: user.createdAt.toISOString(),
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'admin_set_registration',
+    title: 'Open or close registration (site admin)',
+    description:
+      'Open or close sign-ups for the whole instance. Site administrators only. Registration re-opens by itself while no account exists, so this cannot brick a fresh deployment.',
+    inputSchema: {
+      type: 'object',
+      properties: { enabled: { type: 'boolean' } },
+      required: ['enabled'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      const enabled = requiredBoolean(args, 'enabled');
+      must(await setRegistration(null, form({ enabled: String(enabled) })));
+      return { ok: true, registrationEnabled: enabled };
+    },
+  },
+
+  {
+    name: 'admin_set_user_admin',
+    title: 'Grant or revoke site admin',
+    description:
+      'Grant or revoke site-administrator access on an account. Site administrators only. You cannot revoke your own, and the last administrator cannot be removed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userId: { ...STRING, description: 'From admin_list_users.' },
+        isAdmin: { type: 'boolean' },
+      },
+      required: ['userId', 'isAdmin'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      const userId = requiredId(args, 'userId');
+      const isAdmin = requiredBoolean(args, 'isAdmin');
+      must(await setUserAdmin(null, form({ userId, isAdmin: String(isAdmin) })));
+      return { ok: true, userId, isAdmin };
     },
   },
 ];
