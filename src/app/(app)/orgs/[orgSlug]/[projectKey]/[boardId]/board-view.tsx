@@ -68,6 +68,11 @@ export type BoardTicket = {
   /** True when the due date is in the past and the card is still open. */
   overdue: boolean;
   updatedAtLabel: string;
+  /**
+   * Author-or-privileged, computed on the SERVER exactly as the ticket page
+   * computes it. Presentation only -- `deleteTicketFromBoard` re-derives it.
+   */
+  canDelete: boolean;
 };
 
 export type BoardColumnData = {

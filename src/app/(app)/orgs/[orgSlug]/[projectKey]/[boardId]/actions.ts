@@ -19,6 +19,7 @@ import { z } from 'zod';
 
 import {
   boardPath,
+  requireAuthorOrRole,
   requireBoard,
   requireColumnInBoard,
   requireTicket,
@@ -479,6 +480,10 @@ export async function deleteTicketFromBoard(input: { ticketId: string }): Promis
     if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
 
     const ctx = await requireTicket(parsed.data.ticketId);
+    // SPEC 7.18, identical to `deleteTicket` on the ticket page: the author, or
+    // ADMIN/OWNER. Deleting from the card menu is the same act as deleting from
+    // the ticket, so it cannot be the cheaper one to authorize.
+    requireAuthorOrRole(ctx, ctx.ticket.createdById, 'ADMIN');
 
     // Comments cascade with the ticket per the schema.
     await prisma.ticket.delete({ where: { id: ctx.ticket.id } });

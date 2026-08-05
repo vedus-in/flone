@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { Badge, PageHeader } from '@/components/ui';
-import { boardPath, loadPage, orgPath, projectPath, requireBoardInPath } from '@/lib/authz';
+import { atLeast, boardPath, loadPage, orgPath, projectPath, requireBoardInPath } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { COLUMN_ORDER, TICKET_ORDER } from '@/lib/validation';
 import { BoardView, type BoardColumnData } from './board-view';
@@ -87,6 +87,7 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
           priority: true,
           dueDate: true,
           updatedAt: true,
+          createdById: true,
           assignee: { select: { id: true, name: true } },
           _count: { select: { comments: true } },
         },
@@ -129,6 +130,11 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
   const startOfToday = new Date();
   startOfToday.setUTCHours(0, 0, 0, 0);
 
+  // Author-or-privileged, the same rule `deleteTicket` and
+  // `deleteTicketFromBoard` enforce. Computed here so the card menu does not
+  // offer an action that is certain to be refused.
+  const isPrivileged = atLeast(ctx.role, 'ADMIN');
+
   const columns: BoardColumnData[] = columnRows.map((column) => ({
     id: column.id,
     name: column.name,
@@ -142,6 +148,7 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
       dueDateLabel: ticket.dueDate ? dayFormat.format(ticket.dueDate) : null,
       overdue: ticket.dueDate ? ticket.dueDate < startOfToday : false,
       updatedAtLabel: stampFormat.format(ticket.updatedAt),
+      canDelete: isPrivileged || ticket.createdById === ctx.user.id,
     })),
   }));
 

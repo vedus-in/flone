@@ -364,16 +364,22 @@ function TicketMenuItems({
         </Submenu>
       </Menu.SubmenuRoot>
 
-      <Menu.Separator className="my-1 h-px bg-border" />
+      {/* Author, ADMIN or OWNER only -- the flag is computed on the server and
+          `deleteTicketFromBoard` enforces the same rule again. */}
+      {ticket.canDelete ? (
+        <>
+          <Menu.Separator className="my-1 h-px bg-border" />
 
-      <Menu.Item
-        className={DANGER}
-        onClick={() => run(() => deleteTicketFromBoard({ ticketId: ticket.id }))}
-      >
-        <Icon d={I_TRASH} />
-        <span className="flex-1">Delete</span>
-        <kbd className="hidden font-mono text-[0.6875rem] text-muted md:inline">Ctrl Del</kbd>
-      </Menu.Item>
+          <Menu.Item
+            className={DANGER}
+            onClick={() => run(() => deleteTicketFromBoard({ ticketId: ticket.id }))}
+          >
+            <Icon d={I_TRASH} />
+            <span className="flex-1">Delete</span>
+            <kbd className="hidden font-mono text-[0.6875rem] text-muted md:inline">Ctrl Del</kbd>
+          </Menu.Item>
+        </>
+      ) : null}
 
       <div className="mt-1 border-t border-border px-2.5 pt-2 pb-1 text-[0.6875rem] text-muted">
         Updated {ticket.updatedAtLabel}
@@ -400,6 +406,7 @@ export function TicketContextMenu({ children, ...data }: MenuData & { children: 
               // Delete press while merely browsing the menu.
               if (event.key === 'Delete' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();
+                if (!data.ticket.canDelete) return;
                 void deleteTicketFromBoard({ ticketId: data.ticket.id }).then((result) => {
                   data.onError(result.ok ? null : result.error);
                 });
