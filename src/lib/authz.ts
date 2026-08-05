@@ -1,7 +1,7 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { notFound, redirect } from 'next/navigation';
-import { Role } from '@prisma/client';
+import { Role, type WorkflowStateType } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { readSession, touchSessionCookie } from '@/lib/session';
 import { ERRORS, type ActionResult } from '@/lib/result';
@@ -19,10 +19,17 @@ import { ERRORS, type ActionResult } from '@/lib/result';
  * timing. There is no existence oracle and no separate 403 to leak from.
  *
  * HARD PROHIBITION: outside this file, the tenant-scoped models (Organization,
- * Membership, Project, Board, BoardColumn, Ticket, Comment) must NEVER be
- * reached with `findUnique({ where: { id } })` or any `findFirst` / `count` /
- * `aggregate` lacking a tenant predicate. Fetch through a `require*` helper, or
- * via a nested `select` rooted at an already-authorized entity.
+ * Membership, Project, Board, WorkflowState, Cycle, Label, SavedView, Ticket,
+ * Comment) must NEVER be reached with `findUnique({ where: { id } })` or any
+ * `findFirst` / `count` / `aggregate` lacking a tenant predicate. Fetch through
+ * a `require*` helper, or via a nested `select` rooted at an already-authorized
+ * entity.
+ *
+ * The Linear rework moved the walk's spine off the board. A ticket now belongs
+ * to a PROJECT and its board is optional, so every ticket loader below walks
+ * ticket -> project -> organization. Walking through the board would have made
+ * a board-less issue unreachable, which is exactly the kind of hole that reads
+ * as a 404 and gets shrugged at.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -34,23 +41,34 @@ export type SessionUser = { id: string; email: string; name: string; sessionId: 
 export type OrgRef = { id: string; name: string; slug: string };
 export type ProjectRef = { id: string; name: string; key: string; description: string | null };
 export type BoardRef = { id: string; name: string };
+export type CycleRef = { id: string; number: number; name: string | null; startsAt: Date; endsAt: Date };
+export type StateRef = { id: string; name: string; type: WorkflowStateType; position: number };
 export type TicketRef = {
   id: string;
   number: number;
-  boardId: string;
-  columnId: string;
+  projectId: string;
+  /** Null when the issue is not filed under any board. */
+  boardId: string | null;
+  stateId: string;
+  cycleId: string | null;
+  parentId: string | null;
   position: number;
   title: string;
   description: string | null;
   createdById: string;
   assigneeId: string | null;
+  /** Carried so a state transition can decide what to stamp without a re-read. */
+  startedAt: Date | null;
+  completedAt: Date | null;
 };
 export type CommentRef = { id: string; ticketId: string; authorId: string; body: string };
 
 export type OrgCtx = { user: SessionUser; org: OrgRef; role: Role };
 export type ProjectCtx = OrgCtx & { project: ProjectRef };
 export type BoardCtx = ProjectCtx & { board: BoardRef };
-export type TicketCtx = BoardCtx & { ticket: TicketRef };
+/** `board` is nullable here precisely because an issue need not be on one. */
+export type TicketCtx = ProjectCtx & { ticket: TicketRef; board: BoardRef | null };
+export type CycleCtx = ProjectCtx & { cycle: CycleRef };
 export type CommentCtx = TicketCtx & { comment: CommentRef };
 
 /* -------------------------------------------------------------------------- */
@@ -88,14 +106,58 @@ export function isNextControlFlowError(e: unknown): boolean {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Row shapes returned by the upward-walk queries                              */
+/* Selection fragments                                                         */
+/*                                                                             */
+/* Written once so a loader cannot accidentally omit the membership predicate   */
+/* while looking like it has one.                                              */
 /* -------------------------------------------------------------------------- */
 
 type OrgRow = { id: string; name: string; slug: string; memberships: Array<{ role: Role }> };
 type ProjectRow = ProjectRef & { organization: OrgRow };
 type BoardRow = BoardRef & { project: ProjectRow };
-type TicketRow = TicketRef & { board: BoardRow };
+type TicketRow = TicketRef & { project: ProjectRow; board: BoardRef | null };
+type CycleRow = CycleRef & { project: ProjectRow };
 type CommentRow = CommentRef & { ticket: TicketRow };
+
+function orgSelect(userId: string) {
+  return {
+    id: true,
+    name: true,
+    slug: true,
+    memberships: { where: { userId }, select: { role: true }, take: 1 },
+  } as const;
+}
+
+function projectSelect(userId: string) {
+  return {
+    id: true,
+    name: true,
+    key: true,
+    description: true,
+    organization: { select: orgSelect(userId) },
+  } as const;
+}
+
+function ticketSelect(userId: string) {
+  return {
+    id: true,
+    number: true,
+    projectId: true,
+    boardId: true,
+    stateId: true,
+    cycleId: true,
+    parentId: true,
+    position: true,
+    title: true,
+    description: true,
+    createdById: true,
+    assigneeId: true,
+    startedAt: true,
+    completedAt: true,
+    board: { select: { id: true, name: true } },
+    project: { select: projectSelect(userId) },
+  } as const;
+}
 
 function toOrgCtx(user: SessionUser, row: OrgRow): OrgCtx {
   const role = row.memberships[0]?.role;
@@ -113,25 +175,41 @@ function toProjectCtx(user: SessionUser, row: ProjectRow): ProjectCtx {
 }
 
 function toBoardCtx(user: SessionUser, row: BoardRow): BoardCtx {
-  return {
-    ...toProjectCtx(user, row.project),
-    board: { id: row.id, name: row.name },
-  };
+  return { ...toProjectCtx(user, row.project), board: { id: row.id, name: row.name } };
 }
 
 function toTicketCtx(user: SessionUser, row: TicketRow): TicketCtx {
   return {
-    ...toBoardCtx(user, row.board),
+    ...toProjectCtx(user, row.project),
+    board: row.board ? { id: row.board.id, name: row.board.name } : null,
     ticket: {
       id: row.id,
       number: row.number,
+      projectId: row.projectId,
       boardId: row.boardId,
-      columnId: row.columnId,
+      stateId: row.stateId,
+      cycleId: row.cycleId,
+      parentId: row.parentId,
       position: row.position,
       title: row.title,
       description: row.description,
       createdById: row.createdById,
       assigneeId: row.assigneeId,
+      startedAt: row.startedAt,
+      completedAt: row.completedAt,
+    },
+  };
+}
+
+function toCycleCtx(user: SessionUser, row: CycleRow): CycleCtx {
+  return {
+    ...toProjectCtx(user, row.project),
+    cycle: {
+      id: row.id,
+      number: row.number,
+      name: row.name,
+      startsAt: row.startsAt,
+      endsAt: row.endsAt,
     },
   };
 }
@@ -237,12 +315,7 @@ export async function requireOrgBySlug(orgSlug: string): Promise<OrgCtx> {
       slug: orgSlug,
       memberships: { some: { userId: user.id } },
     },
-    select: {
-      id: true,
-      name: true,
-      slug: true,
-      memberships: { where: { userId: user.id }, select: { role: true }, take: 1 },
-    },
+    select: orgSelect(user.id),
   });
   if (!row) throw new AuthzError('NOT_FOUND');
   return toOrgCtx(user, row);
@@ -258,20 +331,7 @@ export async function requireProjectByKey(
       key: projectKey,
       organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
     },
-    select: {
-      id: true,
-      name: true,
-      key: true,
-      description: true,
-      organization: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          memberships: { where: { userId: user.id }, select: { role: true }, take: 1 },
-        },
-      },
-    },
+    select: projectSelect(user.id),
   });
   if (!row) throw new AuthzError('NOT_FOUND');
   return toProjectCtx(user, row);
@@ -291,86 +351,64 @@ export async function requireBoardInPath(
         organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
       },
     },
-    select: {
-      id: true,
-      name: true,
-      project: {
-        select: {
-          id: true,
-          name: true,
-          key: true,
-          description: true,
-          organization: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-              memberships: { where: { userId: user.id }, select: { role: true }, take: 1 },
-            },
-          },
-        },
-      },
-    },
+    select: { id: true, name: true, project: { select: projectSelect(user.id) } },
   });
   if (!row) throw new AuthzError('NOT_FOUND');
   return toBoardCtx(user, row);
 }
 
+/**
+ * An issue by its PROJECT-scoped number: `/orgs/acme/VED/issue/153`.
+ *
+ * The board is no longer part of the tuple. It could not be -- a board-less
+ * issue has no board segment to match, and requiring one would make those
+ * issues permanently unreachable.
+ */
 export async function requireTicketInPath(
   orgSlug: string,
   projectKey: string,
-  boardId: string,
   ticketNumber: number,
 ): Promise<TicketCtx> {
   const user = await requireUser();
   const row = await prisma.ticket.findFirst({
     where: {
       number: ticketNumber,
-      boardId,
-      board: {
-        id: boardId,
-        project: {
-          key: projectKey,
-          organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
-        },
+      project: {
+        key: projectKey,
+        organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+      },
+    },
+    select: ticketSelect(user.id),
+  });
+  if (!row) throw new AuthzError('NOT_FOUND');
+  return toTicketCtx(user, row);
+}
+
+export async function requireCycleInPath(
+  orgSlug: string,
+  projectKey: string,
+  cycleNumber: number,
+): Promise<CycleCtx> {
+  const user = await requireUser();
+  const row = await prisma.cycle.findFirst({
+    where: {
+      number: cycleNumber,
+      project: {
+        key: projectKey,
+        organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
       },
     },
     select: {
       id: true,
       number: true,
-      boardId: true,
-      columnId: true,
-      position: true,
-      title: true,
-      description: true,
-      createdById: true,
-      assigneeId: true,
-      board: {
-        select: {
-          id: true,
-          name: true,
-          project: {
-            select: {
-              id: true,
-              name: true,
-              key: true,
-              description: true,
-              organization: {
-                select: {
-                  id: true,
-                  name: true,
-                  slug: true,
-                  memberships: { where: { userId: user.id }, select: { role: true }, take: 1 },
-                },
-              },
-            },
-          },
-        },
-      },
+      name: true,
+      startsAt: true,
+      endsAt: true,
+      project: { select: projectSelect(user.id) },
     },
   });
   if (!row) throw new AuthzError('NOT_FOUND');
-  return toTicketCtx(user, row);
+  return toCycleCtx(user, row);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -380,6 +418,19 @@ export async function requireTicketInPath(
 /* so the caller never has to re-fetch an ancestor to build a revalidate path.  */
 /* -------------------------------------------------------------------------- */
 
+export async function requireProject(projectId: string): Promise<ProjectCtx> {
+  const user = await requireUser();
+  const row = await prisma.project.findFirst({
+    where: {
+      id: projectId,
+      organization: { memberships: { some: { userId: user.id } } },
+    },
+    select: projectSelect(user.id),
+  });
+  if (!row) throw new AuthzError('NOT_FOUND');
+  return toProjectCtx(user, row);
+}
+
 export async function requireBoard(boardId: string): Promise<BoardCtx> {
   const user = await requireUser();
   const row = await prisma.board.findFirst({
@@ -387,26 +438,7 @@ export async function requireBoard(boardId: string): Promise<BoardCtx> {
       id: boardId,
       project: { organization: { memberships: { some: { userId: user.id } } } },
     },
-    select: {
-      id: true,
-      name: true,
-      project: {
-        select: {
-          id: true,
-          name: true,
-          key: true,
-          description: true,
-          organization: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-              memberships: { where: { userId: user.id }, select: { role: true }, take: 1 },
-            },
-          },
-        },
-      },
-    },
+    select: { id: true, name: true, project: { select: projectSelect(user.id) } },
   });
   if (!row) throw new AuthzError('NOT_FOUND');
   return toBoardCtx(user, row);
@@ -417,41 +449,9 @@ export async function requireTicket(ticketId: string): Promise<TicketCtx> {
   const row = await prisma.ticket.findFirst({
     where: {
       id: ticketId,
-      board: { project: { organization: { memberships: { some: { userId: user.id } } } } },
+      project: { organization: { memberships: { some: { userId: user.id } } } },
     },
-    select: {
-      id: true,
-      number: true,
-      boardId: true,
-      columnId: true,
-      position: true,
-      title: true,
-      description: true,
-      createdById: true,
-      assigneeId: true,
-      board: {
-        select: {
-          id: true,
-          name: true,
-          project: {
-            select: {
-              id: true,
-              name: true,
-              key: true,
-              description: true,
-              organization: {
-                select: {
-                  id: true,
-                  name: true,
-                  slug: true,
-                  memberships: { where: { userId: user.id }, select: { role: true }, take: 1 },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
+    select: ticketSelect(user.id),
   });
   if (!row) throw new AuthzError('NOT_FOUND');
   return toTicketCtx(user, row);
@@ -462,54 +462,14 @@ export async function requireComment(commentId: string): Promise<CommentCtx> {
   const row = await prisma.comment.findFirst({
     where: {
       id: commentId,
-      ticket: {
-        board: { project: { organization: { memberships: { some: { userId: user.id } } } } },
-      },
+      ticket: { project: { organization: { memberships: { some: { userId: user.id } } } } },
     },
     select: {
       id: true,
       ticketId: true,
       authorId: true,
       body: true,
-      ticket: {
-        select: {
-          id: true,
-          number: true,
-          boardId: true,
-          columnId: true,
-          position: true,
-          title: true,
-          description: true,
-          createdById: true,
-          assigneeId: true,
-          board: {
-            select: {
-              id: true,
-              name: true,
-              project: {
-                select: {
-                  id: true,
-                  name: true,
-                  key: true,
-                  description: true,
-                  organization: {
-                    select: {
-                      id: true,
-                      name: true,
-                      slug: true,
-                      memberships: {
-                        where: { userId: user.id },
-                        select: { role: true },
-                        take: 1,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+      ticket: { select: ticketSelect(user.id) },
     },
   });
   if (!row) throw new AuthzError('NOT_FOUND');
@@ -518,26 +478,94 @@ export async function requireComment(commentId: string): Promise<CommentCtx> {
 
 /* -------------------------------------------------------------------------- */
 /* Intra-resource integrity guards                                             */
+/*                                                                             */
+/* Each of these takes an id that came from an AUTHORIZED context as its scope  */
+/* and a CLIENT-SUPPLIED id as its subject, and proves the second belongs to    */
+/* the first. Nothing in the schema forces the relationship; these are the only */
+/* thing standing between the app and a cross-project write.                    */
 /* -------------------------------------------------------------------------- */
 
 /**
- * MANDATORY before any write of `Ticket.columnId` (createTicket, moveTicket).
+ * MANDATORY before any write of `Ticket.stateId`.
  *
- * Nothing in the schema forces a column to belong to the board (SPEC 8.7); this
- * helper is the ONLY thing standing between the app and a ticket whose
- * `boardId` and `columnId` disagree. `boardId` must come from an already
- * authorized context, never from the form.
+ * The successor to `requireColumnInBoard`. A forged state id can no longer drop
+ * an issue into another board's column, because it would have to be a state of
+ * this PROJECT -- and the project id always comes from the upward walk.
  */
-export async function requireColumnInBoard(
-  boardId: string,
-  columnId: string,
-): Promise<{ id: string; boardId: string; name: string; position: number }> {
-  const column = await prisma.boardColumn.findFirst({
-    where: { id: columnId, boardId },
-    select: { id: true, boardId: true, name: true, position: true },
+export async function requireStateInProject(
+  projectId: string,
+  stateId: string,
+): Promise<StateRef> {
+  const state = await prisma.workflowState.findFirst({
+    where: { id: stateId, projectId },
+    select: { id: true, name: true, type: true, position: true },
   });
-  if (!column) throw new AuthzError('NOT_FOUND');
-  return column;
+  if (!state) throw new AuthzError('NOT_FOUND');
+  return state;
+}
+
+/** MANDATORY before any write of `Ticket.boardId` to a non-null value. */
+export async function requireBoardInProject(
+  projectId: string,
+  boardId: string,
+): Promise<BoardRef> {
+  const board = await prisma.board.findFirst({
+    where: { id: boardId, projectId },
+    select: { id: true, name: true },
+  });
+  if (!board) throw new AuthzError('NOT_FOUND');
+  return board;
+}
+
+/** MANDATORY before any write of `Ticket.cycleId` to a non-null value. */
+export async function requireCycleInProject(
+  projectId: string,
+  cycleId: string,
+): Promise<CycleRef> {
+  const cycle = await prisma.cycle.findFirst({
+    where: { id: cycleId, projectId },
+    select: { id: true, number: true, name: true, startsAt: true, endsAt: true },
+  });
+  if (!cycle) throw new AuthzError('NOT_FOUND');
+  return cycle;
+}
+
+/**
+ * MANDATORY before any write of `Ticket.parentId`.
+ *
+ * Refuses to make an issue its own parent, and refuses a parent that already
+ * has one -- Linear allows exactly one level of sub-issue, and a cycle in the
+ * parent chain would make the progress rollup below recurse forever.
+ */
+export async function requireParentInProject(
+  projectId: string,
+  childId: string,
+  parentId: string,
+): Promise<{ id: string; number: number }> {
+  if (childId === parentId) throw new AuthzError('NOT_FOUND');
+  const parent = await prisma.ticket.findFirst({
+    where: { id: parentId, projectId, parentId: null },
+    select: { id: true, number: true },
+  });
+  if (!parent) throw new AuthzError('NOT_FOUND');
+  return parent;
+}
+
+/**
+ * MANDATORY before writing a ticket's label set. Returns the ids that survived,
+ * so a forged one is dropped rather than rejected -- the caller has already
+ * decided the rest of the edit is valid.
+ */
+export async function filterLabelsInProject(
+  projectId: string,
+  labelIds: string[],
+): Promise<string[]> {
+  if (labelIds.length === 0) return [];
+  const rows = await prisma.label.findMany({
+    where: { projectId, id: { in: labelIds } },
+    select: { id: true },
+  });
+  return rows.map((row) => row.id);
 }
 
 /**
@@ -625,21 +653,65 @@ export function orgSettingsPath(org: OrgRef): string {
   return `${orgPath(org)}/settings`;
 }
 
+/** The project's home -- Linear's team overview. */
 export function projectPath(org: OrgRef, project: ProjectRef): string {
   return `${orgPath(org)}/${encodeURIComponent(project.key)}`;
 }
 
-export function boardPath(org: OrgRef, project: ProjectRef, board: BoardRef): string {
-  return `${projectPath(org, project)}/${encodeURIComponent(board.id)}`;
+export function issuesPath(org: OrgRef, project: ProjectRef): string {
+  return `${projectPath(org, project)}/issues`;
 }
 
-export function ticketPath(
-  org: OrgRef,
-  project: ProjectRef,
-  board: BoardRef,
-  ticketNumber: number,
-): string {
-  return `${boardPath(org, project, board)}/${ticketNumber}`;
+export function cyclesPath(org: OrgRef, project: ProjectRef): string {
+  return `${projectPath(org, project)}/cycles`;
+}
+
+export function cyclePath(org: OrgRef, project: ProjectRef, cycleNumber: number): string {
+  return `${cyclesPath(org, project)}/${cycleNumber}`;
+}
+
+export function boardsPath(org: OrgRef, project: ProjectRef): string {
+  return `${projectPath(org, project)}/boards`;
+}
+
+export function boardPath(org: OrgRef, project: ProjectRef, board: BoardRef): string {
+  return `${boardsPath(org, project)}/${encodeURIComponent(board.id)}`;
+}
+
+/** An issue lives at the PROJECT, not under a board. */
+export function ticketPath(org: OrgRef, project: ProjectRef, ticketNumber: number): string {
+  return `${projectPath(org, project)}/issue/${ticketNumber}`;
+}
+
+export function viewsPath(org: OrgRef, project: ProjectRef): string {
+  return `${projectPath(org, project)}/views`;
+}
+
+export function projectSettingsPath(org: OrgRef, project: ProjectRef): string {
+  return `${projectPath(org, project)}/settings`;
+}
+
+/**
+ * Every surface an issue can appear on, for revalidation after a write.
+ *
+ * Collected in one place because an issue is now visible from five routes at
+ * once: forgetting one leaves a stale list that looks like a lost write. The
+ * board path is included only when the issue is actually on a board.
+ */
+export function ticketSurfaces(ctx: {
+  org: OrgRef;
+  project: ProjectRef;
+  board: BoardRef | null;
+  ticket: { number: number };
+}): string[] {
+  const paths = [
+    projectPath(ctx.org, ctx.project),
+    issuesPath(ctx.org, ctx.project),
+    cyclesPath(ctx.org, ctx.project),
+    ticketPath(ctx.org, ctx.project, ctx.ticket.number),
+  ];
+  if (ctx.board) paths.push(boardPath(ctx.org, ctx.project, ctx.board));
+  return paths;
 }
 
 /* -------------------------------------------------------------------------- */

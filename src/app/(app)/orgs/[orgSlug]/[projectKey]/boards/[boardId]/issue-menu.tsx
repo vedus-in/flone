@@ -1,11 +1,11 @@
 'use client';
 
 /**
- * Card actions, so the common edits do not require opening the ticket.
+ * Card actions, so the common edits do not require opening the issue.
  *
  * Exposed two ways over ONE set of items:
- *   - `TicketContextMenu` wraps the card for right-click (desktop).
- *   - `TicketMenuButton` is an explicit trigger, which is what touch gets.
+ *   - `IssueContextMenu` wraps the card for right-click (desktop).
+ *   - `IssueMenuButton` is an explicit trigger, which is what touch gets.
  *
  * Touch needs its own affordance because there is no right-click, and because
  * long-press is already taken: the board's TouchSensor activates a drag after
@@ -19,7 +19,7 @@
  * verbatim rather than duplicated.
  *
  * Every item calls a Server Action that re-derives the session and re-resolves
- * the ticket by walking up to its organization. The menu decides what to OFFER,
+ * the issue by walking up to its organization. The menu decides what to OFFER,
  * never what is permitted.
  */
 
@@ -29,32 +29,37 @@ import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import { Priority } from '@prisma/client';
 
-import type { BoardColumnData, BoardTicket } from './board-view';
+import { PRIORITY_LABEL, PRIORITY_ORDER, colorClass } from '@/lib/model';
+import { cx } from '@/lib/utils/cx';
+
+import type { BoardIssue, BoardStateColumn } from './board-view';
 import {
-  assignTicketFromBoard,
-  deleteTicketFromBoard,
-  moveTicketToBoard,
-  placeTicket,
-  setTicketDueDate,
-  setTicketPriority,
-} from './actions';
+  deleteIssue,
+  setIssueAssignee,
+  setIssueBoard,
+  setIssueCycle,
+  setIssueDueDate,
+  setIssueLabels,
+  setIssuePriority,
+  placeIssue,
+} from '../../issue-actions';
 
 export type BoardMember = { id: string; name: string };
-export type SiblingBoard = { id: string; name: string };
+export type BoardOption = { id: string; name: string };
+export type MenuLabel = { id: string; name: string; color: string };
+export type MenuCycle = { id: string; number: number; name: string | null };
 
 type MenuData = {
-  ticket: BoardTicket;
-  columns: BoardColumnData[];
+  issue: BoardIssue;
+  columns: BoardStateColumn[];
   members: BoardMember[];
-  boards: SiblingBoard[];
+  boards: BoardOption[];
+  labels: MenuLabel[];
+  cycles: MenuCycle[];
+  boardId: string;
   projectKey: string;
-  boardHref: string;
   onError: (message: string | null) => void;
 };
-
-function cx(...values: Array<string | false | null | undefined>): string {
-  return values.filter(Boolean).join(' ');
-}
 
 /* -------------------------------------------------------------------------- */
 /* Presentation                                                                */
@@ -70,23 +75,13 @@ const ITEM =
 const DANGER =
   'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-error-primary outline-none data-[highlighted]:bg-error-primary md:py-1.5';
 
-const LABEL = 'px-2.5 pt-1.5 pb-1 text-[0.6875rem] font-medium tracking-wider text-tertiary uppercase';
+const LABEL =
+  'px-2.5 pt-1.5 pb-1 text-[0.6875rem] font-medium tracking-wider text-tertiary uppercase';
 
 function Icon({ d, className }: { d: string; className?: string }) {
   return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-      className={cx('size-4 shrink-0', className)}
-    >
-      <path
-        d={d}
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className={cx('size-4 shrink-0', className)}>
+      <path d={d} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -97,6 +92,8 @@ const I_PERSON = 'M8 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3 13.5a5 5 0 0 1 10 
 const I_CALENDAR = 'M3 4.5h10v9H3zM3 7h10M6 2.5v3M10 2.5v3';
 const I_COPY = 'M5.5 5.5h7v7h-7zM10.5 5.5v-2h-7v7h2';
 const I_MOVE = 'M8 2.5v11M2.5 8h11M8 2.5 5.5 5M8 2.5 10.5 5M8 13.5 5.5 11M8 13.5l2.5-2.5';
+const I_TAG = 'M2.5 7.5V3a.5.5 0 0 1 .5-.5h4.5L13.5 9 9 13.5zM5 5.5h.01';
+const I_CYCLE = 'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 4.5v3.7l2.2 1.6';
 const I_OPEN = 'M9.5 2.5h4v4M13.5 2.5 8 8M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3';
 const I_TRASH = 'M2.5 4h11M6 4V2.5h4V4M12 4v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4M6.5 7v4M9.5 7v4';
 const I_CHEVRON = 'M6 3.5 10.5 8 6 12.5';
@@ -132,13 +129,13 @@ function Tick({ on }: { on: boolean }) {
   );
 }
 
-const PRIORITIES: Array<{ value: Priority; label: string; className: string }> = [
-  { value: Priority.URGENT, label: 'Urgent', className: 'text-error-primary' },
-  { value: Priority.HIGH, label: 'High', className: 'text-warning-primary' },
-  { value: Priority.MEDIUM, label: 'Medium', className: 'text-primary' },
-  { value: Priority.LOW, label: 'Low', className: 'text-tertiary' },
-  { value: Priority.NONE, label: 'No priority', className: 'text-tertiary' },
-];
+const PRIORITY_CLASS: Record<Priority, string> = {
+  [Priority.URGENT]: 'text-error-primary',
+  [Priority.HIGH]: 'text-warning-primary',
+  [Priority.MEDIUM]: 'text-primary',
+  [Priority.LOW]: 'text-tertiary',
+  [Priority.NONE]: 'text-tertiary',
+};
 
 /** Local calendar day, offset by `days`, as YYYY-MM-DD. */
 function isoDay(days: number): string {
@@ -153,22 +150,24 @@ function isoDay(days: number): string {
 /* The shared item list                                                        */
 /* -------------------------------------------------------------------------- */
 
-function TicketMenuItems({
-  ticket,
+function IssueMenuItems({
+  issue,
   columns,
   members,
   boards,
+  labels,
+  cycles,
+  boardId,
   projectKey,
-  boardHref,
   onError,
 }: MenuData) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [copied, setCopied] = useState<string | null>(null);
 
-  const ticketHref = `${boardHref}/${ticket.number}`;
-  const ticketKey = `${projectKey}-${ticket.number}`;
-  const currentColumn = columns.find((column) => column.tickets.some((t) => t.id === ticket.id));
+  const issueKey = `${projectKey}-${issue.number}`;
+  const currentColumn = columns.find((column) => column.issues.some((i) => i.id === issue.id));
+  const labelIds = new Set(issue.labels.map((label) => label.id));
 
   function run(action: () => Promise<{ ok: boolean; error?: string }>) {
     startTransition(async () => {
@@ -190,7 +189,7 @@ function TicketMenuItems({
   return (
     <>
       <Menu.Group>
-        <Menu.GroupLabel className={LABEL}>{ticketKey}</Menu.GroupLabel>
+        <Menu.GroupLabel className={LABEL}>{issueKey}</Menu.GroupLabel>
 
         <Menu.SubmenuRoot>
           <SubTrigger icon={I_STATUS}>Status</SubTrigger>
@@ -201,11 +200,12 @@ function TicketMenuItems({
                 className={ITEM}
                 onClick={() =>
                   run(() =>
-                    placeTicket({
-                      ticketId: ticket.id,
-                      toColumnId: column.id,
+                    placeIssue({
+                      ticketId: issue.id,
+                      toStateId: column.id,
                       // Append; a precise index is what dragging is for.
-                      toIndex: column.tickets.length,
+                      toIndex: column.issues.length,
+                      visibleIds: column.issues.map((i) => i.id).filter((id) => id !== issue.id),
                     }),
                   )
                 }
@@ -220,16 +220,14 @@ function TicketMenuItems({
         <Menu.SubmenuRoot>
           <SubTrigger icon={I_PRIORITY}>Priority</SubTrigger>
           <Submenu>
-            {PRIORITIES.map((option) => (
+            {PRIORITY_ORDER.map((value) => (
               <Menu.Item
-                key={option.value}
+                key={value}
                 className={ITEM}
-                onClick={() =>
-                  run(() => setTicketPriority({ ticketId: ticket.id, priority: option.value }))
-                }
+                onClick={() => run(() => setIssuePriority({ ticketId: issue.id, priority: value }))}
               >
-                <Tick on={ticket.priority === option.value} />
-                <span className={option.className}>{option.label}</span>
+                <Tick on={issue.priority === value} />
+                <span className={PRIORITY_CLASS[value]}>{PRIORITY_LABEL[value]}</span>
               </Menu.Item>
             ))}
           </Submenu>
@@ -240,11 +238,9 @@ function TicketMenuItems({
           <Submenu>
             <Menu.Item
               className={ITEM}
-              onClick={() =>
-                run(() => assignTicketFromBoard({ ticketId: ticket.id, assigneeId: '' }))
-              }
+              onClick={() => run(() => setIssueAssignee({ ticketId: issue.id, assigneeId: '' }))}
             >
-              <Tick on={ticket.assigneeName === null} />
+              <Tick on={issue.assigneeName === null} />
               <span className="text-tertiary">Unassigned</span>
             </Menu.Item>
             {members.map((member) => (
@@ -252,15 +248,75 @@ function TicketMenuItems({
                 key={member.id}
                 className={ITEM}
                 onClick={() =>
-                  run(() => assignTicketFromBoard({ ticketId: ticket.id, assigneeId: member.id }))
+                  run(() => setIssueAssignee({ ticketId: issue.id, assigneeId: member.id }))
                 }
               >
-                <Tick on={ticket.assigneeName === member.name} />
+                <Tick on={issue.assigneeName === member.name} />
                 {member.name}
               </Menu.Item>
             ))}
           </Submenu>
         </Menu.SubmenuRoot>
+
+        {labels.length > 0 ? (
+          <Menu.SubmenuRoot>
+            <SubTrigger icon={I_TAG}>Labels</SubTrigger>
+            <Submenu>
+              {labels.map((label) => {
+                const on = labelIds.has(label.id);
+                return (
+                  <Menu.Item
+                    key={label.id}
+                    className={ITEM}
+                    closeOnClick={false}
+                    onClick={() =>
+                      run(() =>
+                        setIssueLabels({
+                          ticketId: issue.id,
+                          labelIds: on
+                            ? [...labelIds].filter((id) => id !== label.id)
+                            : [...labelIds, label.id],
+                        }),
+                      )
+                    }
+                  >
+                    <Tick on={on} />
+                    <span
+                      aria-hidden="true"
+                      className={cx('size-2 shrink-0 rounded-full', colorClass(label.color).dot)}
+                    />
+                    {label.name}
+                  </Menu.Item>
+                );
+              })}
+            </Submenu>
+          </Menu.SubmenuRoot>
+        ) : null}
+
+        {cycles.length > 0 ? (
+          <Menu.SubmenuRoot>
+            <SubTrigger icon={I_CYCLE}>Cycle</SubTrigger>
+            <Submenu>
+              <Menu.Item
+                className={ITEM}
+                onClick={() => run(() => setIssueCycle({ ticketId: issue.id, cycleId: '' }))}
+              >
+                <Tick on={issue.cycleId === null} />
+                <span className="text-tertiary">No cycle</span>
+              </Menu.Item>
+              {cycles.map((cycle) => (
+                <Menu.Item
+                  key={cycle.id}
+                  className={ITEM}
+                  onClick={() => run(() => setIssueCycle({ ticketId: issue.id, cycleId: cycle.id }))}
+                >
+                  <Tick on={issue.cycleId === cycle.id} />
+                  {cycle.name ?? `Cycle ${cycle.number}`}
+                </Menu.Item>
+              ))}
+            </Submenu>
+          </Menu.SubmenuRoot>
+        ) : null}
 
         <Menu.SubmenuRoot>
           <SubTrigger icon={I_CALENDAR}>Due date</SubTrigger>
@@ -274,7 +330,7 @@ function TicketMenuItems({
                 key={option.label}
                 className={ITEM}
                 onClick={() =>
-                  run(() => setTicketDueDate({ ticketId: ticket.id, dueDate: isoDay(option.days) }))
+                  run(() => setIssueDueDate({ ticketId: issue.id, dueDate: isoDay(option.days) }))
                 }
               >
                 <Tick on={false} />
@@ -284,8 +340,8 @@ function TicketMenuItems({
             <Menu.Separator className="my-1 h-px bg-border-secondary" />
             <Menu.Item
               className={ITEM}
-              disabled={ticket.dueDateLabel === null}
-              onClick={() => run(() => setTicketDueDate({ ticketId: ticket.id, dueDate: null }))}
+              disabled={issue.dueDateLabel === null}
+              onClick={() => run(() => setIssueDueDate({ ticketId: issue.id, dueDate: null }))}
             >
               <Tick on={false} />
               <span className="text-tertiary">Clear due date</span>
@@ -302,23 +358,19 @@ function TicketMenuItems({
           <Menu.Item
             className={ITEM}
             closeOnClick={false}
-            onClick={() => void copy(`${window.location.origin}${ticketHref}`, 'link')}
+            onClick={() => void copy(`${window.location.origin}${issue.href}`, 'link')}
           >
             <Tick on={copied === 'link'} />
             Copy link
           </Menu.Item>
-          <Menu.Item
-            className={ITEM}
-            closeOnClick={false}
-            onClick={() => void copy(ticketKey, 'id')}
-          >
+          <Menu.Item className={ITEM} closeOnClick={false} onClick={() => void copy(issueKey, 'id')}>
             <Tick on={copied === 'id'} />
             Copy ID
           </Menu.Item>
           <Menu.Item
             className={ITEM}
             closeOnClick={false}
-            onClick={() => void copy(ticket.title, 'title')}
+            onClick={() => void copy(issue.title, 'title')}
           >
             <Tick on={copied === 'title'} />
             Copy title
@@ -326,37 +378,42 @@ function TicketMenuItems({
         </Submenu>
       </Menu.SubmenuRoot>
 
-      {boards.length > 1 ? (
-        <Menu.SubmenuRoot>
-          <SubTrigger icon={I_MOVE}>Move to board</SubTrigger>
-          <Submenu>
-            {boards.map((board) => (
-              <Menu.Item
-                key={board.id}
-                className={ITEM}
-                disabled={boardHref.endsWith(board.id)}
-                onClick={() =>
-                  run(() => moveTicketToBoard({ ticketId: ticket.id, toBoardId: board.id }))
-                }
-              >
-                <Tick on={boardHref.endsWith(board.id)} />
-                {board.name}
-              </Menu.Item>
-            ))}
-          </Submenu>
-        </Menu.SubmenuRoot>
-      ) : null}
+      {/* "Move to board" is now just setting a field, and the field is nullable:
+          an issue can legitimately belong to no board at all. */}
+      <Menu.SubmenuRoot>
+        <SubTrigger icon={I_MOVE}>Board</SubTrigger>
+        <Submenu>
+          <Menu.Item
+            className={ITEM}
+            onClick={() => run(() => setIssueBoard({ ticketId: issue.id, boardId: '' }))}
+          >
+            <Tick on={false} />
+            <span className="text-tertiary">No board</span>
+          </Menu.Item>
+          {boards.map((board) => (
+            <Menu.Item
+              key={board.id}
+              className={ITEM}
+              disabled={board.id === boardId}
+              onClick={() => run(() => setIssueBoard({ ticketId: issue.id, boardId: board.id }))}
+            >
+              <Tick on={board.id === boardId} />
+              {board.name}
+            </Menu.Item>
+          ))}
+        </Submenu>
+      </Menu.SubmenuRoot>
 
       <Menu.SubmenuRoot>
         <SubTrigger icon={I_OPEN}>Open in</SubTrigger>
         <Submenu>
-          <Menu.Item className={ITEM} onClick={() => router.push(ticketHref)}>
+          <Menu.Item className={ITEM} onClick={() => router.push(issue.href)}>
             <Tick on={false} />
             This tab
           </Menu.Item>
           <Menu.Item
             className={ITEM}
-            onClick={() => window.open(ticketHref, '_blank', 'noopener,noreferrer')}
+            onClick={() => window.open(issue.href, '_blank', 'noopener,noreferrer')}
           >
             <Tick on={false} />
             New tab
@@ -365,15 +422,12 @@ function TicketMenuItems({
       </Menu.SubmenuRoot>
 
       {/* Author, ADMIN or OWNER only -- the flag is computed on the server and
-          `deleteTicketFromBoard` enforces the same rule again. */}
-      {ticket.canDelete ? (
+          `deleteIssue` enforces the same rule again. */}
+      {issue.canDelete ? (
         <>
           <Menu.Separator className="my-1 h-px bg-border-secondary" />
 
-          <Menu.Item
-            className={DANGER}
-            onClick={() => run(() => deleteTicketFromBoard({ ticketId: ticket.id }))}
-          >
+          <Menu.Item className={DANGER} onClick={() => run(() => deleteFromMenu(issue.id))}>
             <Icon d={I_TRASH} />
             <span className="flex-1">Delete</span>
             <kbd className="hidden font-mono text-[0.6875rem] text-tertiary md:inline">Ctrl Del</kbd>
@@ -382,18 +436,30 @@ function TicketMenuItems({
       ) : null}
 
       <div className="mt-1 border-t border-secondary px-2.5 pt-2 pb-1 text-[0.6875rem] text-tertiary">
-        Updated {ticket.updatedAtLabel}
-        {ticket.dueDateLabel ? <> &middot; due {ticket.dueDateLabel}</> : null}
+        Updated {issue.updatedAtLabel}
+        {issue.dueDateLabel ? <> &middot; due {issue.dueDateLabel}</> : null}
       </div>
     </>
   );
+}
+
+/**
+ * `deleteIssue` takes FormData and redirects on success. From the board that
+ * redirect is unwanted -- the card simply disappears -- but a Server Action's
+ * `redirect()` throws, and React swallows it as a navigation rather than an
+ * error, so the call is fire-and-forget with the result mapped back.
+ */
+async function deleteFromMenu(ticketId: string): Promise<{ ok: boolean; error?: string }> {
+  const data = new FormData();
+  data.set('ticketId', ticketId);
+  return deleteIssue(null, data);
 }
 
 /* -------------------------------------------------------------------------- */
 /* Right-click (pointer devices)                                               */
 /* -------------------------------------------------------------------------- */
 
-export function TicketContextMenu({ children, ...data }: MenuData & { children: ReactNode }) {
+export function IssueContextMenu({ children, ...data }: MenuData & { children: ReactNode }) {
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger className="outline-none">{children}</ContextMenu.Trigger>
@@ -406,14 +472,14 @@ export function TicketContextMenu({ children, ...data }: MenuData & { children: 
               // Delete press while merely browsing the menu.
               if (event.key === 'Delete' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();
-                if (!data.ticket.canDelete) return;
-                void deleteTicketFromBoard({ ticketId: data.ticket.id }).then((result) => {
-                  data.onError(result.ok ? null : result.error);
+                if (!data.issue.canDelete) return;
+                void deleteFromMenu(data.issue.id).then((result) => {
+                  data.onError(result.ok ? null : (result.error ?? 'Something went wrong.'));
                 });
               }
             }}
           >
-            <TicketMenuItems {...data} />
+            <IssueMenuItems {...data} />
           </ContextMenu.Popup>
         </ContextMenu.Positioner>
       </ContextMenu.Portal>
@@ -425,11 +491,11 @@ export function TicketContextMenu({ children, ...data }: MenuData & { children: 
 /* Explicit trigger (touch, and handy with a mouse)                            */
 /* -------------------------------------------------------------------------- */
 
-export function TicketMenuButton(data: MenuData) {
+export function IssueMenuButton(data: MenuData) {
   return (
     <Menu.Root>
       <Menu.Trigger
-        aria-label={`Actions for ${data.projectKey}-${data.ticket.number}`}
+        aria-label={`Actions for ${data.projectKey}-${data.issue.number}`}
         // Keep the press off the drag sensor, or opening the menu would start a
         // drag on the card underneath.
         onPointerDown={(event) => event.stopPropagation()}
@@ -442,7 +508,7 @@ export function TicketMenuButton(data: MenuData) {
       <Menu.Portal>
         <Menu.Positioner side="bottom" align="end" sideOffset={4} className="z-50 outline-none">
           <Menu.Popup className={POPUP}>
-            <TicketMenuItems {...data} />
+            <IssueMenuItems {...data} />
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

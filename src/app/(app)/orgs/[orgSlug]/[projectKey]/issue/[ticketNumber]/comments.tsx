@@ -39,21 +39,15 @@ import {
   Textarea,
 } from '@/components/ui';
 import type { ActionResult } from '@/lib/result';
-import { moveTicket } from '../actions';
-import {
-  assignTicket,
-  createComment,
-  deleteComment,
-  deleteTicket,
-  updateComment,
-  updateTicket,
-} from './actions';
+// Issue writes live at PROJECT scope now; only the comment actions are local.
+import { assignIssue, deleteIssue, moveIssue, updateIssue } from '../../issue-actions';
+import { createComment, deleteComment, updateComment } from './actions';
 
 /* -------------------------------------------------------------------------- */
 /* Shared shapes                                                               */
 /* -------------------------------------------------------------------------- */
 
-export type ColumnOption = { id: string; name: string };
+export type StateOption = { id: string; name: string };
 export type MemberOption = { id: string; name: string };
 
 export type CommentItem = {
@@ -185,7 +179,7 @@ type TicketEditFormProps = {
 };
 
 export function TicketEditForm({ ticketId, title, description }: TicketEditFormProps) {
-  const [state, action] = useActionState(updateTicket, null);
+  const [state, action] = useActionState(updateIssue, null);
   const errors = fieldErrorsOf(state);
 
   return (
@@ -234,33 +228,40 @@ export function TicketEditForm({ ticketId, title, description }: TicketEditFormP
 }
 
 /* -------------------------------------------------------------------------- */
-/* Column (move)                                                               */
+/* Status                                                                      */
 /* -------------------------------------------------------------------------- */
 
-type TicketMoveFormProps = {
+type TicketStateFormProps = {
   ticketId: string;
-  columnId: string;
-  columns: ColumnOption[];
+  stateId: string;
+  states: StateOption[];
 };
 
-export function TicketMoveForm({ ticketId, columnId, columns }: TicketMoveFormProps) {
-  const [state, action] = useActionState(moveTicket, null);
+/**
+ * The issue's status.
+ *
+ * These are the PROJECT's workflow states, not a board's columns -- an issue has
+ * exactly one status wherever it is looked at from, which is why this control
+ * exists on an issue that is on no board at all.
+ */
+export function TicketStateForm({ ticketId, stateId, states }: TicketStateFormProps) {
+  const [state, action] = useActionState(moveIssue, null);
 
   return (
     <form action={action} className="flex flex-col gap-2">
       <input type="hidden" name="ticketId" value={ticketId} />
 
-      <Field htmlFor="ticket-column" label="Column">
+      <Field htmlFor="ticket-state" label="Status">
         <div className="flex items-center gap-2">
           <select
-            id="ticket-column"
+            id="ticket-state"
             className={SELECT_CLASS}
-            name="toColumnId"
-            defaultValue={columnId}
+            name="toStateId"
+            defaultValue={stateId}
           >
-            {columns.map((column) => (
-              <option key={column.id} value={column.id}>
-                {column.name}
+            {states.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
               </option>
             ))}
           </select>
@@ -286,7 +287,7 @@ type TicketAssignFormProps = {
 };
 
 export function TicketAssignForm({ ticketId, assigneeId, members }: TicketAssignFormProps) {
-  const [state, action] = useActionState(assignTicket, null);
+  const [state, action] = useActionState(assignIssue, null);
 
   return (
     <form action={action} className="flex flex-col gap-2">
@@ -325,18 +326,19 @@ export function TicketAssignForm({ ticketId, assigneeId, members }: TicketAssign
 /* -------------------------------------------------------------------------- */
 
 export function TicketDeleteForm({ ticketId }: { ticketId: string }) {
-  const [state, action] = useActionState(deleteTicket, null);
+  const [state, action] = useActionState(deleteIssue, null);
 
   return (
-    <Collapsible summary="Delete this ticket" tone="danger">
+    <Collapsible summary="Delete this issue" tone="danger">
       <form action={action} className="flex flex-col gap-3">
         <input type="hidden" name="ticketId" value={ticketId} />
         <p className="text-sm text-tertiary">
-          This permanently deletes the ticket and all of its comments. This cannot be undone.
+          This permanently deletes the issue and all of its comments. Any sub-issues survive and
+          simply lose their parent. This cannot be undone.
         </p>
         <div className="flex">
           <SubmitButton color="primary-destructive" size="sm" pendingLabel="Deleting...">
-            Yes, delete this ticket
+            Yes, delete this issue
           </SubmitButton>
         </div>
         <FormError>{resultError(state)}</FormError>

@@ -4,19 +4,24 @@ import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/authz';
 
 /**
- * The navigation tree behind the sidebar: the caller's organizations, each with
- * its projects, each with its boards.
+ * The navigation tree behind the sidebar: the caller's organizations and the
+ * projects inside them.
+ *
+ * Boards are deliberately NOT loaded any more. A project row now expands to a
+ * fixed set of destinations -- Home, Issues, Cycles, Boards, Views -- so the
+ * sidebar no longer needs, or wants, a per-project board list: on a workspace
+ * with a few dozen boards that query ran on every single page render to build a
+ * tree nobody navigates by.
  *
  * Scoped by MEMBERSHIP at the root of the query -- every organization returned
- * is one the acting user belongs to, and projects/boards come back only as
- * nested relations of those rows. Nothing here is ever keyed off a
- * client-supplied id, so this cannot be turned into a cross-tenant read.
+ * is one the acting user belongs to, and projects come back only as nested
+ * relations of those rows. Nothing here is ever keyed off a client-supplied id,
+ * so this cannot be turned into a cross-tenant read.
  *
  * The user id comes from the session via `requireUser()`, never from an argument.
  */
 
-export type NavBoard = { id: string; name: string };
-export type NavProject = { id: string; key: string; name: string; boards: NavBoard[] };
+export type NavProject = { id: string; key: string; name: string };
 export type NavOrg = {
   id: string;
   name: string;
@@ -40,15 +45,7 @@ export async function listNavTree(): Promise<NavOrg[]> {
           slug: true,
           projects: {
             orderBy: [{ name: 'asc' }, { id: 'asc' }],
-            select: {
-              id: true,
-              key: true,
-              name: true,
-              boards: {
-                orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-                select: { id: true, name: true },
-              },
-            },
+            select: { id: true, key: true, name: true },
           },
         },
       },
@@ -64,7 +61,6 @@ export async function listNavTree(): Promise<NavOrg[]> {
       id: project.id,
       key: project.key,
       name: project.name,
-      boards: project.boards.map((board) => ({ id: board.id, name: board.name })),
     })),
   }));
 }

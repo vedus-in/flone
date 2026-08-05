@@ -50,11 +50,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           key: project.key,
           name: project.name,
           href: projectHref,
-          boards: project.boards.map((board) => ({
-            id: board.id,
-            name: board.name,
-            href: `${projectHref}/${encodeURIComponent(board.id)}`,
-          })),
+          issuesHref: `${projectHref}/issues`,
+          cyclesHref: `${projectHref}/cycles`,
+          currentCycleHref: `${projectHref}/cycles/current`,
+          upcomingCyclesHref: `${projectHref}/cycles/upcoming`,
+          boardsHref: `${projectHref}/boards`,
+          viewsHref: `${projectHref}/views`,
         };
       }),
     };

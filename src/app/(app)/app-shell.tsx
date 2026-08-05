@@ -29,13 +29,22 @@ import { Dropdown } from '@/components/base/dropdown/dropdown';
 
 import { signOut } from './actions';
 
-export type ShellBoard = { id: string; name: string; href: string };
+/**
+ * The fixed destinations under a project. Built on the SERVER (`@/lib/authz` is
+ * `server-only`), so hrefs arrive already made -- this module never constructs
+ * a path from a slug it was handed.
+ */
 export type ShellProject = {
   id: string;
   key: string;
   name: string;
   href: string;
-  boards: ShellBoard[];
+  issuesHref: string;
+  cyclesHref: string;
+  currentCycleHref: string;
+  upcomingCyclesHref: string;
+  boardsHref: string;
+  viewsHref: string;
 };
 export type ShellOrg = {
   id: string;
@@ -102,6 +111,10 @@ const I_MENU = 'M2.5 4.5h11M2.5 8h11M2.5 11.5h11';
 const I_CHEVRON = 'M6 3.5 10.5 8 6 12.5';
 const I_CARET = 'm4.5 6.5 3.5 3.5 3.5-3.5';
 const I_SWITCH = 'M4 6.5 8 3l4 3.5M12 9.5 8 13l-4-3.5';
+const I_HOME = 'M2.5 6.75 8 2.5l5.5 4.25v6.25h-11zM6.25 13v-4h3.5v4';
+const I_ISSUES = 'M2.5 4h11M2.5 8h11M2.5 12h7';
+const I_CYCLE = 'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 4.5v3.7l2.2 1.6';
+const I_VIEWS = 'M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8ZM8 9.75a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Z';
 
 /* -------------------------------------------------------------------------- */
 
@@ -379,29 +392,103 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                         </span>
                       </div>
 
-                      {/* The rule is the indent guide: it ties a board back to
-                          the project it hangs off, which plain padding does not. */}
+                      {/* The rule is the indent guide: it ties a destination
+                          back to the project it hangs off, which plain padding
+                          does not.
+
+                          A fixed list, not the project's boards. Every project
+                          has exactly these five places, and a board list here
+                          meant a query on every render to build a tree nobody
+                          navigated by -- Boards is one of the five. */}
                       {isOpen ? (
                         <ul className="ms-3.5 flex flex-col gap-px border-s border-secondary ps-1">
-                          {project.boards.length === 0 ? (
-                            <li className="ps-2 py-1 text-xs text-tertiary">No boards</li>
-                          ) : (
-                            project.boards.map((board) => (
-                              <li key={board.id}>
+                          <li>
+                            <NavRow
+                              href={project.href}
+                              active={pathname === project.href}
+                              onNavigate={closeDrawer}
+                              icon={I_HOME}
+                              indented
+                            >
+                              Home
+                            </NavRow>
+                          </li>
+                          <li>
+                            <NavRow
+                              href={project.issuesHref}
+                              active={pathname === project.issuesHref}
+                              onNavigate={closeDrawer}
+                              icon={I_ISSUES}
+                              indented
+                            >
+                              Issues
+                            </NavRow>
+                          </li>
+                          <li>
+                            <NavRow
+                              href={project.cyclesHref}
+                              // The cycle DETAIL pages live under this path too,
+                              // so the row stays lit while you are inside one.
+                              active={
+                                pathname === project.cyclesHref ||
+                                pathname.startsWith(`${project.cyclesHref}/`)
+                              }
+                              onNavigate={closeDrawer}
+                              icon={I_CYCLE}
+                              indented
+                            >
+                              Cycles
+                            </NavRow>
+                          </li>
+                          <li>
+                            <ul className="ms-4 flex flex-col gap-px">
+                              <li>
                                 <NavRow
-                                  href={board.href}
-                                  active={
-                                    pathname === board.href || pathname.startsWith(`${board.href}/`)
-                                  }
+                                  href={project.currentCycleHref}
+                                  active={pathname === project.currentCycleHref}
                                   onNavigate={closeDrawer}
-                                  icon={I_BOARD}
                                   indented
                                 >
-                                  {board.name}
+                                  Current
                                 </NavRow>
                               </li>
-                            ))
-                          )}
+                              <li>
+                                <NavRow
+                                  href={project.upcomingCyclesHref}
+                                  active={pathname === project.upcomingCyclesHref}
+                                  onNavigate={closeDrawer}
+                                  indented
+                                >
+                                  Upcoming
+                                </NavRow>
+                              </li>
+                            </ul>
+                          </li>
+                          <li>
+                            <NavRow
+                              href={project.boardsHref}
+                              active={
+                                pathname === project.boardsHref ||
+                                pathname.startsWith(`${project.boardsHref}/`)
+                              }
+                              onNavigate={closeDrawer}
+                              icon={I_BOARD}
+                              indented
+                            >
+                              Boards
+                            </NavRow>
+                          </li>
+                          <li>
+                            <NavRow
+                              href={project.viewsHref}
+                              active={pathname === project.viewsHref}
+                              onNavigate={closeDrawer}
+                              icon={I_VIEWS}
+                              indented
+                            >
+                              Views
+                            </NavRow>
+                          </li>
                         </ul>
                       ) : null}
                     </li>

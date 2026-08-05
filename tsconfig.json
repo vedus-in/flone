@@ -11,6 +11,11 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    // `scripts/check-model.ts` runs on plain Node, which strips types but does
+    // NOT resolve extensionless relative imports, so it has to say `.ts`.
+    // Permitted rather than excluding scripts/ from the project, so the check
+    // script keeps being typechecked like everything else. Safe with noEmit.
+    "allowImportingTsExtensions": true,
     "jsx": "preserve",
     "incremental": true,
     "forceConsistentCasingInFileNames": true,

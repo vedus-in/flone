@@ -1,7 +1,8 @@
 import 'server-only';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { Role } from '@prisma/client';
+import { BoardStatus, Role, WorkflowStateType } from '@prisma/client';
+import { COLOR_TOKENS, ISSUE_TABS } from '@/lib/model';
 
 /**
  * SPEC 4.5 + 4.10 -- shared validation primitives.
@@ -36,12 +37,29 @@ export const RESERVED_SLUGS = new Set([
   'health',
 ]);
 
-/** Every board is seeded with exactly these three columns. Column CRUD is cut. */
-export const DEFAULT_COLUMNS = [
-  { name: 'To Do', position: 0 },
-  { name: 'In Progress', position: 1 },
-  { name: 'Done', position: 2 },
-] as const;
+/**
+ * The issue model's vocabulary lives in `@/lib/model`, which is import-free
+ * enough for client modules and the check script to share it. Re-exported here
+ * so server call sites keep one import site.
+ */
+export {
+  COLOR_TOKENS,
+  DEFAULT_STATES,
+  ISSUE_TABS,
+  PRIORITY_LABEL,
+  PRIORITY_ORDER,
+  STATE_GROUP_RANK,
+  TAB_LABEL,
+  TAB_STATE_TYPES,
+  inferStateType,
+  isAbandoned,
+  isDone,
+  isOpen,
+  sortStatesForBoard,
+  sortStatesForList,
+  type ColorToken,
+  type IssueTab,
+} from '@/lib/model';
 
 /**
  * Canonical read order everywhere (SPEC 6.10). Duplicate positions therefore
@@ -53,8 +71,10 @@ export const TICKET_ORDER = [
   { id: 'asc' as const },
 ];
 
-/** Columns use the same scheme; the seeded three are fixed at 0, 1, 2. */
-export const COLUMN_ORDER = [{ position: 'asc' as const }, { id: 'asc' as const }];
+/** Workflow states use the same scheme. */
+export const STATE_ORDER = [{ position: 'asc' as const }, { id: 'asc' as const }];
+
+export const CYCLE_ORDER = [{ number: 'asc' as const }];
 
 /* -------------------------------------------------------------------------- */
 /* Text primitives                                                             */
@@ -152,6 +172,27 @@ export const projectKeySchema = z
 export const ticketNumberSchema = z.coerce.number().int().positive().max(2147483647);
 
 export const roleSchema = z.nativeEnum(Role);
+export const stateTypeSchema = z.nativeEnum(WorkflowStateType);
+export const boardStatusSchema = z.nativeEnum(BoardStatus);
+export const colorTokenSchema = z.enum(COLOR_TOKENS);
+export const issueTabSchema = z.enum(ISSUE_TABS);
+
+/** Cycle numbers share the ticket-number bound: both are Postgres `Int`. */
+export const cycleNumberSchema = ticketNumberSchema;
+
+/**
+ * `YYYY-MM-DD`, parsed as UTC midnight so the stored instant does not drift a
+ * day depending on where the server happens to be running. Rejects a
+ * well-formed but impossible date like 2026-02-31, which `new Date()` would
+ * silently roll forward into March.
+ */
+export const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the format YYYY-MM-DD.')
+  .refine((value) => {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }, 'That is not a real date.');
 
 /** The roles an ADMIN is allowed to hand out. Granting OWNER is OWNER-only. */
 export const assignableRoleSchema = z.enum(['ADMIN', 'MEMBER']);
@@ -165,9 +206,41 @@ export const orgNameSchema = safeText(2, 60);
 export const projectNameSchema = safeText(1, 80);
 export const projectDescriptionSchema = safeMultiline(0, 2000);
 export const boardNameSchema = safeText(1, 80);
+export const boardDescriptionSchema = safeMultiline(0, 2000);
 export const ticketTitleSchema = safeText(1, 200);
 export const ticketDescriptionSchema = safeMultiline(0, 10000);
 export const commentBodySchema = safeMultiline(1, 5000);
+export const stateNameSchema = safeText(1, 40);
+export const labelNameSchema = safeText(1, 40);
+export const cycleNameSchema = safeText(0, 60);
+export const viewNameSchema = safeText(1, 60);
+
+/**
+ * A saved view's stored query string.
+ *
+ * Capped and control-char-free like any other stored text, and additionally
+ * forbidden from containing anything but a query: no `?`, no `#`, no scheme.
+ * That is what stops a "view" being saved that navigates somewhere else
+ * entirely when it is turned back into a link.
+ */
+export const viewQuerySchema = safeText(0, 500).refine(
+  (value) => !/[?#]/.test(value) && !value.includes('//'),
+  'That is not a valid filter.',
+);
+
+/* -------------------------------------------------------------------------- */
+/* Cycle cadence                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Bounded hard on purpose. `cycleWeeks` feeds a loop that materializes cycles
+ * on read, and `upcomingCycles` decides how many it writes; leaving either
+ * open would let a settings form turn one page view into thousands of inserts.
+ */
+export const cycleWeeksSchema = z.coerce.number().int().min(1).max(8);
+/** ISO weekday: 1 = Monday .. 7 = Sunday. */
+export const cycleStartDaySchema = z.coerce.number().int().min(1).max(7);
+export const upcomingCyclesSchema = z.coerce.number().int().min(1).max(12);
 
 /* -------------------------------------------------------------------------- */
 /* Derivation helpers                                                          */

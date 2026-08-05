@@ -5,7 +5,9 @@ import { Priority, Role } from '@prisma/client';
 import {
   AuthzError,
   boardPath,
+  cyclesPath,
   isNextControlFlowError,
+  issuesPath,
   orgPath,
   projectPath,
   requireAdmin,
@@ -18,10 +20,12 @@ import {
   type BoardCtx,
 } from '@/lib/authz';
 import { prisma } from '@/lib/db';
+import { ensureCycles } from '@/lib/cycles';
 import { listNavTree } from '@/lib/nav';
 import type { ActionResult } from '@/lib/result';
 import { getAppSettings, isRegistrationOpen } from '@/lib/settings';
-import { COLUMN_ORDER, TICKET_ORDER, cuid } from '@/lib/validation';
+import { listStates } from '@/lib/states';
+import { STATE_ORDER, TICKET_ORDER, cuid } from '@/lib/validation';
 
 import { setRegistration, setUserAdmin } from '@/app/(app)/admin/actions';
 import { createOrganization } from '@/app/(app)/orgs/new/actions';
@@ -41,35 +45,43 @@ import {
   updateProject,
 } from '@/app/(app)/orgs/[orgSlug]/[projectKey]/actions';
 import {
-  createTicket,
-  moveTicketToBoard,
-  placeTicket,
-  setTicketDueDate,
-  setTicketPriority,
-} from '@/app/(app)/orgs/[orgSlug]/[projectKey]/[boardId]/actions';
+  createIssue,
+  deleteIssue,
+  placeIssue,
+  setIssueAssignee,
+  setIssueBoard,
+  setIssueCycle,
+  setIssueDueDate,
+  setIssueLabels,
+  setIssueParent,
+  setIssuePriority,
+  updateIssue,
+} from '@/app/(app)/orgs/[orgSlug]/[projectKey]/issue-actions';
 import {
-  assignTicket,
   createComment,
   deleteComment,
-  deleteTicket,
   updateComment,
-  updateTicket,
-} from '@/app/(app)/orgs/[orgSlug]/[projectKey]/[boardId]/[ticketNumber]/actions';
+} from '@/app/(app)/orgs/[orgSlug]/[projectKey]/issue/[ticketNumber]/actions';
 
 /**
  * The MCP tool surface (transport lives in `src/app/api/mcp/route.ts`).
  *
- * It covers the whole application: organizations, members, projects, boards,
- * tickets, comments and site administration. Everything the web UI can do, a
- * model can do — under exactly the same rules.
+ * It covers the whole application: organizations, members, projects, workflow
+ * states, labels, cycles, boards, issues, comments and site administration.
+ * Everything the web UI can do, a model can do — under exactly the same rules.
  *
  * THIS FILE ADDS NO AUTHORIZATION OF ITS OWN, and that is the point. Every read
  * goes through a `require*` helper from `@/lib/authz` or is a nested/rooted
  * select under an id that helper already proved the caller may see; every write
  * is delegated to the SAME Server Action the web UI submits, so the zod parse,
  * the membership walk, the role checks, the last-owner and last-admin locks,
- * the `requireColumnInBoard` guard and the `revalidatePath` calls all still
- * happen exactly once, in one place.
+ * the `require*InProject` guards and the `revalidatePath` calls all still happen
+ * exactly once, in one place.
+ *
+ * The vocabulary here still says "ticket" where the UI says "issue": the tool
+ * NAMES are a wire contract that existing MCP clients call by string, so they
+ * are left alone even though the model beneath them has moved. The descriptions
+ * carry the new meaning.
  *
  * Identity arrives as a bearer session token (see `presentedToken()` in
  * `@/lib/session`), so an MCP client is precisely as privileged as the person
@@ -202,32 +214,77 @@ function tailOf(path: string | null): string | null {
 /* Shared shaping                                                              */
 /* -------------------------------------------------------------------------- */
 
-/** Date-only, UTC — matching how `setTicketDueDate` stores it. */
+/** Date-only, UTC — matching how `setIssueDueDate` stores it. */
 function isoDate(value: Date | null): string | null {
   return value ? value.toISOString().slice(0, 10) : null;
 }
 
 /**
- * Columns are addressed by NAME ("In Progress") as well as by id, because a
- * model reasons in names. `boardId` must come from an authorized context: the
- * lookup below is the only thing scoping this query.
+ * States are addressed by NAME ("In Progress") as well as by id, because a model
+ * reasons in names. `projectId` must come from an authorized context: the lookup
+ * below is the only thing scoping this query.
+ *
+ * The successor to `resolveColumn`. Workflow states belong to the PROJECT now,
+ * so the same name resolves identically from any board in it — which is the
+ * whole reason a board and the issue list can no longer disagree about status.
  */
-async function resolveColumn(boardId: string, needle: string) {
-  const columns = await prisma.boardColumn.findMany({
-    where: { boardId },
-    orderBy: COLUMN_ORDER,
+async function resolveState(projectId: string, needle: string) {
+  const states = await prisma.workflowState.findMany({
+    where: { projectId },
+    orderBy: STATE_ORDER,
+    select: { id: true, name: true, type: true },
+  });
+  const wanted = needle.trim().toLowerCase();
+  const match =
+    states.find((state) => state.id === needle) ??
+    states.find((state) => state.name.toLowerCase() === wanted);
+  if (!match) {
+    throw new ToolError(
+      `No status "${needle}" in this project. Available: ${states.map((s) => s.name).join(', ')}.`,
+    );
+  }
+  return match;
+}
+
+/** Boards are addressed by name or id, and the empty string means "no board". */
+async function resolveBoard(projectId: string, needle: string): Promise<string> {
+  if (needle.trim() === '') return '';
+  const boards = await prisma.board.findMany({
+    where: { projectId },
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
     select: { id: true, name: true },
   });
   const wanted = needle.trim().toLowerCase();
   const match =
-    columns.find((column) => column.id === needle) ??
-    columns.find((column) => column.name.toLowerCase() === wanted);
+    boards.find((board) => board.id === needle) ??
+    boards.find((board) => board.name.toLowerCase() === wanted);
   if (!match) {
     throw new ToolError(
-      `No column "${needle}" on this board. Available: ${columns.map((c) => c.name).join(', ')}.`,
+      `No board "${needle}" in this project. Available: ${boards.map((b) => b.name).join(', ') || 'none'}.`,
     );
   }
-  return match;
+  return match.id;
+}
+
+/** Labels are addressed by name or id. Unknown names are an error, not a silent drop. */
+async function resolveLabels(projectId: string, names: string[]): Promise<string[]> {
+  if (names.length === 0) return [];
+  const labels = await prisma.label.findMany({
+    where: { projectId },
+    select: { id: true, name: true },
+  });
+  return names.map((needle) => {
+    const wanted = needle.trim().toLowerCase();
+    const match =
+      labels.find((label) => label.id === needle) ??
+      labels.find((label) => label.name.toLowerCase() === wanted);
+    if (!match) {
+      throw new ToolError(
+        `No label "${needle}" in this project. Available: ${labels.map((l) => l.name).join(', ') || 'none'}.`,
+      );
+    }
+    return match.id;
+  });
 }
 
 /** People are addressed by email or id; never by display name, which is ambiguous. */
@@ -372,7 +429,7 @@ export const TOOLS: Tool[] = [
     name: 'get_board',
     title: 'Read a board',
     description:
-      'Columns of a board with the tickets in each, in board order, plus the organization members who can be assigned work.',
+      "A board's issues, grouped by the PROJECT's workflow states in board order, plus the organization members who can be assigned work. A board owns no columns of its own.",
     inputSchema: {
       type: 'object',
       properties: { boardId: { ...STRING, description: 'From list_boards.' } },
@@ -383,51 +440,52 @@ export const TOOLS: Tool[] = [
     run: async (args) => {
       const ctx = await requireBoard(requiredId(args, 'boardId'));
 
-      const columns = await prisma.boardColumn.findMany({
-        where: { boardId: ctx.board.id },
-        orderBy: COLUMN_ORDER,
-        select: {
-          id: true,
-          name: true,
-          tickets: {
-            // Belt and braces against a divergent boardId/columnId pair (SPEC §8.7).
-            where: { boardId: ctx.board.id },
-            orderBy: TICKET_ORDER,
-            select: {
-              id: true,
-              number: true,
-              title: true,
-              priority: true,
-              dueDate: true,
-              updatedAt: true,
-              assignee: { select: { id: true, name: true } },
-              _count: { select: { comments: true } },
-            },
+      // The columns are the PROJECT's workflow states, in board order. A board
+      // owns none of its own; it shows a filtered slice of each state.
+      const [states, tickets, members] = await Promise.all([
+        listStates(ctx.project.id),
+        prisma.ticket.findMany({
+          where: { projectId: ctx.project.id, boardId: ctx.board.id },
+          orderBy: TICKET_ORDER,
+          select: {
+            id: true,
+            number: true,
+            title: true,
+            priority: true,
+            dueDate: true,
+            updatedAt: true,
+            stateId: true,
+            assignee: { select: { id: true, name: true } },
+            labels: { select: { name: true } },
+            _count: { select: { comments: true } },
           },
-        },
-      });
-
-      const members = await prisma.membership.findMany({
-        where: { organizationId: ctx.org.id },
-        orderBy: [{ user: { name: 'asc' } }, { userId: 'asc' }],
-        select: { role: true, user: { select: { id: true, name: true, email: true } } },
-      });
+        }),
+        prisma.membership.findMany({
+          where: { organizationId: ctx.org.id },
+          orderBy: [{ user: { name: 'asc' } }, { userId: 'asc' }],
+          select: { role: true, user: { select: { id: true, name: true, email: true } } },
+        }),
+      ]);
 
       return {
         ...boardSummary(ctx),
-        columns: columns.map((column) => ({
-          name: column.name,
-          columnId: column.id,
-          tickets: column.tickets.map((ticket) => ({
-            ticketId: ticket.id,
-            ref: `${ctx.project.key}-${ticket.number}`,
-            title: ticket.title,
-            priority: ticket.priority,
-            dueDate: isoDate(ticket.dueDate),
-            assignee: ticket.assignee?.name ?? null,
-            comments: ticket._count.comments,
-            updatedAt: ticket.updatedAt.toISOString(),
-          })),
+        columns: states.map((state) => ({
+          name: state.name,
+          stateId: state.id,
+          type: state.type,
+          tickets: tickets
+            .filter((ticket) => ticket.stateId === state.id)
+            .map((ticket) => ({
+              ticketId: ticket.id,
+              ref: `${ctx.project.key}-${ticket.number}`,
+              title: ticket.title,
+              priority: ticket.priority,
+              dueDate: isoDate(ticket.dueDate),
+              assignee: ticket.assignee?.name ?? null,
+              labels: ticket.labels.map((label) => label.name),
+              comments: ticket._count.comments,
+              updatedAt: ticket.updatedAt.toISOString(),
+            })),
         })),
         members: members.map((row) => ({
           userId: row.user.id,
@@ -454,15 +512,30 @@ export const TOOLS: Tool[] = [
     run: async (args) => {
       const ctx = await requireTicket(requiredId(args, 'ticketId'));
 
-      // Rooted at ids the walk above already authorized.
+      // Rooted at an id the walk above already authorized.
       const detail = await prisma.ticket.findFirst({
-        where: { id: ctx.ticket.id, boardId: ctx.board.id },
+        where: { id: ctx.ticket.id, projectId: ctx.project.id },
         select: {
           priority: true,
           dueDate: true,
+          startedAt: true,
+          completedAt: true,
           createdAt: true,
           updatedAt: true,
-          column: { select: { name: true } },
+          state: { select: { id: true, name: true, type: true } },
+          board: { select: { id: true, name: true } },
+          cycle: { select: { number: true, name: true } },
+          parent: { select: { id: true, number: true, title: true } },
+          labels: { orderBy: [{ name: 'asc' }], select: { name: true } },
+          children: {
+            orderBy: [{ number: 'asc' }],
+            select: {
+              id: true,
+              number: true,
+              title: true,
+              state: { select: { name: true, type: true } },
+            },
+          },
           createdBy: { select: { name: true } },
           assignee: { select: { id: true, name: true, email: true } },
           comments: {
@@ -483,15 +556,36 @@ export const TOOLS: Tool[] = [
         ref: `${ctx.project.key}-${ctx.ticket.number}`,
         title: ctx.ticket.title,
         description: ctx.ticket.description,
-        column: detail.column.name,
+        status: detail.state.name,
+        statusType: detail.state.type,
         priority: detail.priority,
         dueDate: isoDate(detail.dueDate),
         assignee: detail.assignee,
+        // Null is a legitimate answer for both: an issue need not be on a board
+        // and need not be in a cycle.
+        board: detail.board?.name ?? null,
+        boardId: detail.board?.id ?? null,
+        cycle: detail.cycle ? (detail.cycle.name ?? `Cycle ${detail.cycle.number}`) : null,
+        labels: detail.labels.map((label) => label.name),
+        parent: detail.parent
+          ? {
+              ticketId: detail.parent.id,
+              ref: `${ctx.project.key}-${detail.parent.number}`,
+              title: detail.parent.title,
+            }
+          : null,
+        subIssues: detail.children.map((child) => ({
+          ticketId: child.id,
+          ref: `${ctx.project.key}-${child.number}`,
+          title: child.title,
+          status: child.state.name,
+        })),
         createdBy: detail.createdBy.name,
         createdAt: detail.createdAt.toISOString(),
+        startedAt: detail.startedAt?.toISOString() ?? null,
+        completedAt: detail.completedAt?.toISOString() ?? null,
         updatedAt: detail.updatedAt.toISOString(),
-        url: ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number),
-        boardId: ctx.board.id,
+        url: ticketPath(ctx.org, ctx.project, ctx.ticket.number),
         comments: detail.comments.map((comment) => ({
           commentId: comment.id,
           author: comment.author.name,
@@ -524,9 +618,11 @@ export const TOOLS: Tool[] = [
 
       // The membership predicate is part of the lookup, exactly as in @/lib/authz:
       // a ticket in another tenant is not "forbidden", it simply does not match.
+      // Rooted at the PROJECT, not the board: an issue on no board is still an
+      // issue, and walking through the board would have hidden every one of them.
       const rows = await prisma.ticket.findMany({
         where: {
-          board: { project: { organization: { memberships: { some: { userId: user.id } } } } },
+          project: { organization: { memberships: { some: { userId: user.id } } } },
           OR: [
             { title: { contains: query, mode: 'insensitive' } },
             { description: { contains: query, mode: 'insensitive' } },
@@ -541,11 +637,12 @@ export const TOOLS: Tool[] = [
           priority: true,
           dueDate: true,
           updatedAt: true,
-          column: { select: { name: true } },
+          state: { select: { name: true, type: true } },
           assignee: { select: { name: true } },
-          board: {
-            select: { id: true, name: true, project: { select: { key: true, name: true } } },
-          },
+          board: { select: { id: true, name: true } },
+          cycle: { select: { number: true } },
+          labels: { select: { name: true } },
+          project: { select: { key: true, name: true } },
         },
       });
 
@@ -554,16 +651,100 @@ export const TOOLS: Tool[] = [
         count: rows.length,
         tickets: rows.map((ticket) => ({
           ticketId: ticket.id,
-          ref: `${ticket.board.project.key}-${ticket.number}`,
+          ref: `${ticket.project.key}-${ticket.number}`,
           title: ticket.title,
-          column: ticket.column.name,
+          status: ticket.state.name,
+          statusType: ticket.state.type,
           priority: ticket.priority,
           dueDate: isoDate(ticket.dueDate),
           assignee: ticket.assignee?.name ?? null,
-          board: ticket.board.name,
-          boardId: ticket.board.id,
-          project: ticket.board.project.name,
+          board: ticket.board?.name ?? null,
+          boardId: ticket.board?.id ?? null,
+          cycle: ticket.cycle?.number ?? null,
+          labels: ticket.labels.map((label) => label.name),
+          project: ticket.project.name,
           updatedAt: ticket.updatedAt.toISOString(),
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'get_project',
+    title: 'Read a project',
+    description:
+      'A project (the team) and everything an issue can be set to: its workflow states with their types, its labels, its cycles and its boards. Read this before creating or moving issues.',
+    inputSchema: {
+      type: 'object',
+      properties: { orgSlug: ORG_SLUG, projectKey: PROJECT_KEY },
+      required: ['orgSlug', 'projectKey'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    run: async (args) => {
+      const ctx = await requireProjectByKey(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
+
+      // Materializes the current and upcoming cycles, exactly as the pages do,
+      // so a model sees the same cycle numbers a person would.
+      const cycleState = await ensureCycles(ctx.project.id);
+
+      const [states, labels, boards, cycles] = await Promise.all([
+        listStates(ctx.project.id),
+        prisma.label.findMany({
+          where: { projectId: ctx.project.id },
+          orderBy: [{ name: 'asc' }, { id: 'asc' }],
+          select: { id: true, name: true, color: true },
+        }),
+        prisma.board.findMany({
+          where: { projectId: ctx.project.id },
+          orderBy: [{ name: 'asc' }, { id: 'asc' }],
+          select: { id: true, name: true, status: true, _count: { select: { tickets: true } } },
+        }),
+        prisma.cycle.findMany({
+          where: {
+            projectId: ctx.project.id,
+            ...(cycleState ? { number: { gte: cycleState.current } } : {}),
+          },
+          orderBy: { number: 'asc' },
+          select: { id: true, number: true, name: true, startsAt: true, endsAt: true },
+        }),
+      ]);
+
+      return {
+        project: ctx.project.name,
+        projectKey: ctx.project.key,
+        description: ctx.project.description,
+        organization: ctx.org.name,
+        orgSlug: ctx.org.slug,
+        yourRole: ctx.role,
+        url: projectPath(ctx.org, ctx.project),
+        issuesUrl: issuesPath(ctx.org, ctx.project),
+        cyclesUrl: cyclesPath(ctx.org, ctx.project),
+        // `type` is what the app reasons about, not the name: it decides which
+        // tab an issue falls under and whether it counts as done.
+        states: states.map((state) => ({
+          stateId: state.id,
+          name: state.name,
+          type: state.type,
+        })),
+        labels: labels.map((label) => ({ labelId: label.id, name: label.name })),
+        boards: boards.map((board) => ({
+          boardId: board.id,
+          name: board.name,
+          status: board.status,
+          tickets: board._count.tickets,
+        })),
+        currentCycle: cycleState?.current ?? null,
+        cycles: cycles.map((cycle) => ({
+          cycleId: cycle.id,
+          number: cycle.number,
+          name: cycle.name,
+          startsAt: cycle.startsAt.toISOString(),
+          endsAt: cycle.endsAt.toISOString(),
+          current: cycle.number === cycleState?.current,
         })),
       };
     },
@@ -864,7 +1045,7 @@ export const TOOLS: Tool[] = [
     name: 'create_board',
     title: 'Create a board',
     description:
-      'Create a board in a project, seeded with the three columns To Do, In Progress and Done. ADMIN or OWNER.',
+      'Create a board in a project. A board is a named grouping of issues (Linear calls it a project) and owns no columns of its own — its columns are the project\'s workflow states. ADMIN or OWNER.',
     inputSchema: {
       type: 'object',
       properties: { orgSlug: ORG_SLUG, projectKey: PROJECT_KEY, name: STRING },
@@ -912,7 +1093,7 @@ export const TOOLS: Tool[] = [
     name: 'delete_board',
     title: 'Delete a board',
     description:
-      'Permanently delete a board with its columns, tickets and comments. ADMIN or OWNER — ask the user before calling this.',
+      'Delete a board. Its issues SURVIVE — they simply lose the board and stay in the project. ADMIN or OWNER — ask the user before calling this.',
     inputSchema: {
       type: 'object',
       properties: { boardId: STRING },
@@ -933,51 +1114,93 @@ export const TOOLS: Tool[] = [
 
   {
     name: 'create_ticket',
-    title: 'Create a ticket',
-    description: 'Add a ticket to a board. It lands at the bottom of the named column.',
+    title: 'Create an issue',
+    description:
+      'Create an issue in a project. The board is OPTIONAL — an issue can belong to no board. Call get_project first for the available statuses, labels, boards and cycles.',
     inputSchema: {
       type: 'object',
       properties: {
-        boardId: { ...STRING, description: 'From list_boards.' },
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
         title: STRING,
         description: STRING,
-        column: { ...STRING, description: 'Column name or id. Defaults to the first column.' },
+        status: { ...STRING, description: 'Workflow state name or id. Defaults to the first non-backlog state.' },
+        board: { ...STRING, description: 'Board name or id. Omit to file it under no board.' },
+        cycle: { type: 'integer', minimum: 1, description: 'Cycle number, from get_project.' },
+        priority: { type: 'string', enum: PRIORITIES },
+        assignee: { ...STRING, description: 'Member email or userId.' },
+        labels: { type: 'array', items: STRING, description: 'Label names or ids.' },
       },
-      required: ['boardId', 'title'],
+      required: ['orgSlug', 'projectKey', 'title'],
       additionalProperties: false,
     },
     run: async (args) => {
       const user = await requireUser();
-      const ctx = await requireBoard(requiredId(args, 'boardId'));
+      const ctx = await requireProjectByKey(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
       const title = requiredString(args, 'title');
-      const wanted = optionalString(args, 'column');
 
-      const column = wanted
-        ? await resolveColumn(ctx.board.id, wanted)
-        : ((await prisma.boardColumn.findFirst({
-            where: { boardId: ctx.board.id },
-            orderBy: COLUMN_ORDER,
-            select: { id: true, name: true },
-          })) ?? (() => { throw new ToolError('That board has no columns.'); })());
+      const wantedStatus = optionalString(args, 'status');
+      const states = await listStates(ctx.project.id);
+      const state = wantedStatus
+        ? await resolveState(ctx.project.id, wantedStatus)
+        : (states.find((candidate) => candidate.type !== 'BACKLOG') ??
+          states[0] ??
+          (() => {
+            throw new ToolError('That project has no workflow states.');
+          })());
 
-      must(
-        await createTicket(
-          null,
-          form({
-            boardId: ctx.board.id,
-            columnId: column.id,
-            title,
-            description: optionalString(args, 'description') ?? '',
-          }),
-        ),
+      const boardName = optionalString(args, 'board');
+      const boardId = boardName ? await resolveBoard(ctx.project.id, boardName) : '';
+
+      const cycleNumber = optionalInt(args, 'cycle');
+      let cycleId = '';
+      if (cycleNumber !== undefined) {
+        const cycle = await prisma.cycle.findFirst({
+          where: { projectId: ctx.project.id, number: cycleNumber },
+          select: { id: true },
+        });
+        if (!cycle) throw new ToolError(`No cycle ${cycleNumber} in this project.`);
+        cycleId = cycle.id;
+      }
+
+      const assignee = optionalString(args, 'assignee');
+      const assigneeId =
+        assignee && assignee.trim() !== '' ? await resolveMember(ctx.org.id, assignee) : '';
+
+      const rawLabels = args.labels;
+      if (rawLabels !== undefined && !Array.isArray(rawLabels)) {
+        throw new ToolError('"labels" must be an array of strings.');
+      }
+      const labelIds = await resolveLabels(
+        ctx.project.id,
+        (rawLabels ?? []).map((value) => String(value)),
       );
 
+      const priority = optionalString(args, 'priority');
+
+      const formData = form({
+        projectId: ctx.project.id,
+        stateId: state.id,
+        title,
+        description: optionalString(args, 'description') ?? '',
+        boardId,
+        cycleId,
+        assigneeId,
+        ...(priority ? { priority: enumOf(PRIORITIES, 'priority', priority) } : {}),
+      });
+      for (const id of labelIds) formData.append('labelIds', id);
+
+      must(await createIssue(null, formData));
+
       // ponytail: the action returns no id, so the new row is found by
-      // (board, creator, title) newest-first. Two identical titles created by the
-      // same person in the same instant would return the newer of the two.
-      // Upgrade path: have createTicket return the created id.
+      // (project, creator, title) newest-first. Two identical titles created by
+      // the same person in the same instant would return the newer of the two.
+      // Upgrade path: have createIssue return the created id.
       const created = await prisma.ticket.findFirst({
-        where: { boardId: ctx.board.id, createdById: user.id, title },
+        where: { projectId: ctx.project.id, createdById: user.id, title },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: { id: true, number: true },
       });
@@ -986,19 +1209,19 @@ export const TOOLS: Tool[] = [
         ok: true,
         ticketId: created?.id ?? null,
         ref: created ? `${ctx.project.key}-${created.number}` : null,
-        column: column.name,
+        status: state.name,
         url: created
-          ? ticketPath(ctx.org, ctx.project, ctx.board, created.number)
-          : boardPath(ctx.org, ctx.project, ctx.board),
+          ? ticketPath(ctx.org, ctx.project, created.number)
+          : issuesPath(ctx.org, ctx.project),
       };
     },
   },
 
   {
     name: 'update_ticket',
-    title: 'Update a ticket',
+    title: 'Update an issue',
     description:
-      'Change any combination of title, description, priority, due date and assignee. Omitted fields are left alone. Any member may edit any ticket.',
+      'Change any combination of title, description, priority, due date, assignee, board, cycle, labels and parent. Omitted fields are left alone; an empty string clears the ones that are nullable. Any member may edit any issue.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1008,6 +1231,20 @@ export const TOOLS: Tool[] = [
         priority: { type: 'string', enum: PRIORITIES },
         dueDate: { ...STRING, description: 'YYYY-MM-DD, or an empty string to clear it.' },
         assignee: { ...STRING, description: 'Member email or userId; empty string unassigns.' },
+        board: { ...STRING, description: 'Board name or id; empty string files it under no board.' },
+        cycle: {
+          ...STRING,
+          description: 'Cycle number as a string; empty string removes it from its cycle.',
+        },
+        labels: {
+          type: 'array',
+          items: STRING,
+          description: 'Label names or ids. REPLACES the whole set; pass [] to clear.',
+        },
+        parent: {
+          ...STRING,
+          description: 'Parent issue id, making this a sub-issue; empty string detaches it.',
+        },
       },
       required: ['ticketId'],
       additionalProperties: false,
@@ -1016,19 +1253,24 @@ export const TOOLS: Tool[] = [
     run: async (args) => {
       const ctx = await requireTicket(requiredId(args, 'ticketId'));
       const ticketId = ctx.ticket.id;
+      const projectId = ctx.ticket.projectId;
 
       const title = optionalString(args, 'title');
       const description = optionalString(args, 'description');
       const priority = optionalString(args, 'priority');
       const dueDate = optionalString(args, 'dueDate');
       const assignee = optionalString(args, 'assignee');
+      const board = optionalString(args, 'board');
+      const cycle = optionalString(args, 'cycle');
+      const parent = optionalString(args, 'parent');
+      const rawLabels = args.labels;
 
       const changed: string[] = [];
 
       if (title !== undefined || description !== undefined) {
-        // updateTicket writes both fields, so the untouched one is re-sent as-is.
+        // updateIssue writes both fields, so the untouched one is re-sent as-is.
         must(
-          await updateTicket(
+          await updateIssue(
             null,
             form({
               ticketId,
@@ -1042,23 +1284,57 @@ export const TOOLS: Tool[] = [
       }
 
       if (priority !== undefined) {
-        must(
-          await setTicketPriority({ ticketId, priority: enumOf(PRIORITIES, 'priority', priority) }),
-        );
+        must(await setIssuePriority({ ticketId, priority: enumOf(PRIORITIES, 'priority', priority) }));
         changed.push('priority');
       }
 
       if (dueDate !== undefined) {
-        must(
-          await setTicketDueDate({ ticketId, dueDate: dueDate.trim() === '' ? null : dueDate.trim() }),
-        );
+        must(await setIssueDueDate({ ticketId, dueDate: dueDate.trim() === '' ? null : dueDate.trim() }));
         changed.push('dueDate');
       }
 
       if (assignee !== undefined) {
         const assigneeId = assignee.trim() === '' ? '' : await resolveMember(ctx.org.id, assignee);
-        must(await assignTicket(null, form({ ticketId, assigneeId })));
+        must(await setIssueAssignee({ ticketId, assigneeId }));
         changed.push('assignee');
+      }
+
+      if (board !== undefined) {
+        must(await setIssueBoard({ ticketId, boardId: await resolveBoard(projectId, board) }));
+        changed.push('board');
+      }
+
+      if (cycle !== undefined) {
+        let cycleId = '';
+        if (cycle.trim() !== '') {
+          const number = Number.parseInt(cycle.trim(), 10);
+          if (!Number.isInteger(number) || number < 1) {
+            throw new ToolError('"cycle" must be a cycle number, or an empty string to clear it.');
+          }
+          const row = await prisma.cycle.findFirst({
+            where: { projectId, number },
+            select: { id: true },
+          });
+          if (!row) throw new ToolError(`No cycle ${number} in this project.`);
+          cycleId = row.id;
+        }
+        must(await setIssueCycle({ ticketId, cycleId }));
+        changed.push('cycle');
+      }
+
+      if (rawLabels !== undefined) {
+        if (!Array.isArray(rawLabels)) throw new ToolError('"labels" must be an array of strings.');
+        const labelIds = await resolveLabels(
+          projectId,
+          rawLabels.map((value) => String(value)),
+        );
+        must(await setIssueLabels({ ticketId, labelIds }));
+        changed.push('labels');
+      }
+
+      if (parent !== undefined) {
+        must(await setIssueParent({ ticketId, parentId: parent.trim() }));
+        changed.push('parent');
       }
 
       if (changed.length === 0) throw new ToolError('Nothing to update — pass at least one field.');
@@ -1068,37 +1344,39 @@ export const TOOLS: Tool[] = [
         ticketId,
         ref: `${ctx.project.key}-${ctx.ticket.number}`,
         updated: changed,
-        url: ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number),
+        url: ticketPath(ctx.org, ctx.project, ctx.ticket.number),
       };
     },
   },
 
   {
     name: 'move_ticket',
-    title: 'Move a ticket',
+    title: 'Set an issue status',
     description:
-      'Move a ticket to another column of its own board, optionally to a specific 0-based position. Appends when position is omitted.',
+      "Move an issue to another workflow state of its own project, optionally to a specific 0-based position. Appends when position is omitted. This is the ONE status an issue has — every board and list reflects it immediately.",
     inputSchema: {
       type: 'object',
       properties: {
         ticketId: STRING,
-        column: { ...STRING, description: 'Target column name or id.' },
+        status: { ...STRING, description: 'Target workflow state name or id, from get_project.' },
         position: { type: 'integer', minimum: 0, description: '0 puts it at the top.' },
       },
-      required: ['ticketId', 'column'],
+      required: ['ticketId', 'status'],
       additionalProperties: false,
     },
     annotations: { idempotentHint: true },
     run: async (args) => {
       const ctx = await requireTicket(requiredId(args, 'ticketId'));
-      // The ticket's OWN board, from the authorized row — never a client id.
-      const column = await resolveColumn(ctx.ticket.boardId, requiredString(args, 'column'));
+      // The issue's OWN project, from the authorized row — never a client id.
+      const state = await resolveState(ctx.ticket.projectId, requiredString(args, 'status'));
 
-      // placeTicket clamps to the end of the column, so the cap doubles as "append".
+      // placeIssue clamps to the end of the state, so the cap doubles as "append".
+      // No `visibleIds`: a tool call has no viewport, so the index is an index
+      // into the real set rather than into a filtered slice.
       must(
-        await placeTicket({
+        await placeIssue({
           ticketId: ctx.ticket.id,
-          toColumnId: column.id,
+          toStateId: state.id,
           toIndex: optionalInt(args, 'position') ?? 10_000,
         }),
       );
@@ -1107,43 +1385,49 @@ export const TOOLS: Tool[] = [
         ok: true,
         ticketId: ctx.ticket.id,
         ref: `${ctx.project.key}-${ctx.ticket.number}`,
-        column: column.name,
+        status: state.name,
+        statusType: state.type,
       };
     },
   },
 
   {
     name: 'move_ticket_to_board',
-    title: 'Move a ticket to another board',
+    title: 'Set an issue board',
     description:
-      'Move a ticket to a different board in the SAME project. It lands in that board\'s first column and is renumbered, so its ref changes.',
+      "File an issue under a different board of the SAME project, or under none. The issue keeps its ref and its status — a board is a grouping, not a container. Pass an empty string to remove it from every board.",
     inputSchema: {
       type: 'object',
-      properties: { ticketId: STRING, toBoardId: { ...STRING, description: 'From list_boards.' } },
-      required: ['ticketId', 'toBoardId'],
+      properties: {
+        ticketId: STRING,
+        board: { ...STRING, description: 'Board name or id; empty string for no board.' },
+      },
+      required: ['ticketId', 'board'],
       additionalProperties: false,
     },
+    annotations: { idempotentHint: true },
     run: async (args) => {
-      const ticketId = requiredId(args, 'ticketId');
-      must(await moveTicketToBoard({ ticketId, toBoardId: requiredId(args, 'toBoardId') }));
+      const ctx = await requireTicket(requiredId(args, 'ticketId'));
+      const boardId = await resolveBoard(ctx.ticket.projectId, requiredString(args, 'board'));
+      must(await setIssueBoard({ ticketId: ctx.ticket.id, boardId }));
 
-      // Re-read through the authorized walk so the caller gets the NEW ref.
-      const ctx = await requireTicket(ticketId);
+      // Re-read through the authorized walk so the caller sees the new board.
+      const after = await requireTicket(ctx.ticket.id);
       return {
         ok: true,
-        ticketId,
-        ref: `${ctx.project.key}-${ctx.ticket.number}`,
-        board: ctx.board.name,
-        url: ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number),
+        ticketId: after.ticket.id,
+        ref: `${after.project.key}-${after.ticket.number}`,
+        board: after.board?.name ?? null,
+        url: ticketPath(after.org, after.project, after.ticket.number),
       };
     },
   },
 
   {
     name: 'delete_ticket',
-    title: 'Delete a ticket',
+    title: 'Delete an issue',
     description:
-      'Permanently delete a ticket and its comments. The ticket author, or an ADMIN or OWNER — ask the user before calling this.',
+      'Permanently delete an issue and its comments. Any sub-issues survive and simply lose their parent. The issue author, or an ADMIN or OWNER — ask the user before calling this.',
     inputSchema: {
       type: 'object',
       properties: { ticketId: STRING },
@@ -1154,7 +1438,7 @@ export const TOOLS: Tool[] = [
     run: async (args) => {
       const ctx = await requireTicket(requiredId(args, 'ticketId'));
       const ref = `${ctx.project.key}-${ctx.ticket.number}`;
-      await runNavigating(() => deleteTicket(null, form({ ticketId: ctx.ticket.id })));
+      await runNavigating(() => deleteIssue(null, form({ ticketId: ctx.ticket.id })));
       return { ok: true, deleted: ref };
     },
   },
@@ -1184,7 +1468,7 @@ export const TOOLS: Tool[] = [
       return {
         ok: true,
         ref: `${ctx.project.key}-${ctx.ticket.number}`,
-        url: ticketPath(ctx.org, ctx.project, ctx.board, ctx.ticket.number),
+        url: ticketPath(ctx.org, ctx.project, ctx.ticket.number),
       };
     },
   },

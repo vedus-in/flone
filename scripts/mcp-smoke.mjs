@@ -114,6 +114,7 @@ assert.deepEqual(names, [
   'delete_ticket',
   'get_board',
   'get_organization',
+  'get_project',
   'get_ticket',
   'list_boards',
   'move_ticket',
@@ -183,26 +184,55 @@ try {
   const spare = await call('create_board', { orgSlug, projectKey, name: 'Spare' });
   step(`create_board -> ${board.boardId}, ${spare.boardId}`);
 
+  /* -- the project owns the workflow, not the board ------------------------ */
+
+  const projectData = await call('get_project', { orgSlug, projectKey });
+  assert.deepEqual(
+    projectData.states.map((state) => state.name),
+    ['Backlog', 'Todo', 'In Progress', 'In Review', 'Done', 'Canceled'],
+    'a new project is seeded with the default workflow states',
+  );
+  assert.ok(
+    projectData.states.some((state) => state.type === 'COMPLETED'),
+    'the workflow needs a COMPLETED state or nothing can ever be done',
+  );
+  assert.equal(projectData.boards.length, 2, 'both boards belong to the project');
+  step(`get_project -> ${projectData.states.length} states, ${projectData.boards.length} boards`);
+
   const boardData = await call('get_board', { boardId: board.boardId });
   assert.deepEqual(
     boardData.columns.map((column) => column.name),
-    ['To Do', 'In Progress', 'Done'],
-    'a new board is seeded with three columns',
+    projectData.states.map((state) => state.name),
+    "a board's columns ARE the project's workflow states",
   );
-  step('get_board -> To Do / In Progress / Done');
+  step('get_board -> columns mirror the project workflow');
 
-  /* -- ticket lifecycle ---------------------------------------------------- */
+  /* -- issue lifecycle ----------------------------------------------------- */
 
   const title = `smoke ticket ${stamp}`;
   const ticket = await call('create_ticket', {
-    boardId: board.boardId,
+    orgSlug,
+    projectKey,
     title,
     description: 'Safe to delete.',
-    column: 'In Progress',
+    status: 'In Progress',
+    board: 'Main',
   });
   assert.ok(ticket.ticketId, 'create_ticket must return the new ticket id');
-  assert.equal(ticket.column, 'In Progress', 'column must be addressable by name');
-  step(`create_ticket -> ${ticket.ref} in ${ticket.column}`);
+  assert.equal(ticket.status, 'In Progress', 'status must be addressable by name');
+  step(`create_ticket -> ${ticket.ref} in ${ticket.status}`);
+
+  // An issue with no board at all is legal, and is the case a board-shaped
+  // model would quietly lose.
+  const loose = await call('create_ticket', {
+    orgSlug,
+    projectKey,
+    title: `smoke loose ${stamp}`,
+  });
+  assert.ok(loose.ticketId, 'an issue must be creatable with no board');
+  const looseDetail = await call('get_ticket', { ticketId: loose.ticketId });
+  assert.equal(looseDetail.board, null, 'a board-less issue reports board: null');
+  step('create_ticket with no board ok');
 
   const me = detail.members[0];
   const updated = await call('update_ticket', {
@@ -213,7 +243,7 @@ try {
   });
   assert.deepEqual(updated.updated, ['priority', 'dueDate', 'assignee']);
 
-  await call('move_ticket', { ticketId: ticket.ticketId, column: 'Done', position: 0 });
+  await call('move_ticket', { ticketId: ticket.ticketId, status: 'Done', position: 0 });
 
   const comment = await call('create_comment', { ticketId: ticket.ticketId, body: 'first' });
   assert.equal(comment.ok, true);
@@ -221,10 +251,20 @@ try {
   const withComment = await call('get_ticket', { ticketId: ticket.ticketId });
   assert.equal(withComment.priority, 'HIGH');
   assert.equal(withComment.dueDate, '2030-01-01');
-  assert.equal(withComment.column, 'Done');
+  assert.equal(withComment.status, 'Done');
+  assert.equal(withComment.statusType, 'COMPLETED');
+  // Moving into a COMPLETED state must stamp the instant the burndown reads.
+  assert.ok(withComment.completedAt, 'entering a COMPLETED state stamps completedAt');
   assert.equal(withComment.assignee.email, me.email);
   assert.equal(withComment.comments.length, 1);
-  step('update + move + assign + comment ok');
+  step('update + move + assign + comment ok, completedAt stamped');
+
+  // Back out of Done: the completion must be withdrawn, not left behind.
+  await call('move_ticket', { ticketId: ticket.ticketId, status: 'In Progress' });
+  const reopened = await call('get_ticket', { ticketId: ticket.ticketId });
+  assert.equal(reopened.completedAt, null, 'leaving a COMPLETED state clears completedAt');
+  assert.ok(reopened.startedAt, 'a STARTED state keeps startedAt');
+  step('reopen clears completedAt');
 
   const commentId = withComment.comments[0].commentId;
   await call('update_comment', { commentId, body: 'edited' });
@@ -242,12 +282,20 @@ try {
   );
   step('search_tickets ok');
 
+  // The ref must SURVIVE the move: numbering is per project now, so filing an
+  // issue under a different board no longer renumbers it.
   const moved = await call('move_ticket_to_board', {
     ticketId: ticket.ticketId,
-    toBoardId: spare.boardId,
+    board: 'Spare',
   });
   assert.equal(moved.board, 'Spare');
+  assert.equal(moved.ref, ticket.ref, 'moving between boards must not change the ref');
   step(`move_ticket_to_board -> ${moved.ref} on ${moved.board}`);
+
+  const unfiled = await call('move_ticket_to_board', { ticketId: ticket.ticketId, board: '' });
+  assert.equal(unfiled.board, null, 'an empty board removes the issue from every board');
+  await call('move_ticket_to_board', { ticketId: ticket.ticketId, board: 'Spare' });
+  step('move_ticket_to_board -> no board, and back');
 
   /* -- renames ------------------------------------------------------------- */
 
@@ -278,8 +326,16 @@ try {
 
   /* -- teardown of the inner resources ------------------------------------- */
 
-  await call('delete_ticket', { ticketId: ticket.ticketId });
+  // Deleting a board must NOT take its issues with it — that changed with the
+  // Linear rework, and it is the kind of change that only shows up as data loss.
   await call('delete_board', { boardId: spare.boardId });
+  const survivor = await call('get_ticket', { ticketId: ticket.ticketId });
+  assert.equal(survivor.board, null, 'deleting a board leaves its issues, minus the board');
+  assert.equal(survivor.ref, ticket.ref, 'and does not renumber them');
+  step('delete_board leaves its issues intact');
+
+  await call('delete_ticket', { ticketId: ticket.ticketId });
+  await call('delete_ticket', { ticketId: loose.ticketId });
   await call('delete_project', { orgSlug, projectKey, confirmKey: projectKey });
   step('delete ticket + board + project ok');
 

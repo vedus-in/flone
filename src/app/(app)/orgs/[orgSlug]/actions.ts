@@ -15,7 +15,7 @@ import {
 } from '@/lib/authz';
 import { fail, ok, type ActionResult } from '@/lib/result';
 import {
-  DEFAULT_COLUMNS,
+  DEFAULT_STATES,
   deriveProjectKey,
   projectDescriptionSchema,
   projectKeySchema,
@@ -81,25 +81,20 @@ export async function createProject(
     const description = parsed.data.description ?? null;
 
     try {
-      // One nested write, so a project can never exist without a board and its
-      // three seeded columns. Prisma wraps nested creates in a transaction.
+      // One nested write, so a project can never exist without its workflow
+      // states. Prisma wraps nested creates in a transaction.
+      //
+      // The states hang off the PROJECT now, not off a board -- and no board is
+      // created here at all. A board is Linear's "project": an optional grouping
+      // you make when you have something to group, not a container every issue
+      // has to be filed into on day one.
       const project = await prisma.project.create({
         data: {
           organizationId: ctx.org.id,
           name,
           key,
           description,
-          boards: {
-            create: {
-              name: 'Main',
-              columns: {
-                create: DEFAULT_COLUMNS.map((column) => ({
-                  name: column.name,
-                  position: column.position,
-                })),
-              },
-            },
-          },
+          states: { create: DEFAULT_STATES.map((state) => ({ ...state })) },
         },
         select: { id: true, name: true, key: true, description: true },
       });
