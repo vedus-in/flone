@@ -144,6 +144,19 @@ export const emailSchema = z.string().max(254).trim().toLowerCase().pipe(z.strin
 /** Never `.trim()` a password. NFKC happens inside hashPassword/verifyPassword only. */
 export const passwordSchema = z.string().min(12).max(200);
 
+/**
+ * A one-time token from an emailed link: `randomBytes(32).toString('base64url')`,
+ * so 43 characters from the base64url alphabet. Bounded and character-checked
+ * before it reaches a query, exactly like every other id in this file -- an
+ * unbounded string here would be hashed and looked up on every crafted request.
+ */
+export const emailTokenSchema = z
+  .string()
+  .trim()
+  .min(20)
+  .max(200)
+  .regex(/^[A-Za-z0-9_-]+$/);
+
 /** Login accepts any non-empty password so a short one still fails as a credential error. */
 export const loginPasswordSchema = z.string().min(1).max(200);
 

@@ -37,11 +37,15 @@ import {
   requireTicket,
   requireUser,
   runAction,
+  ticketPath,
   ticketSurfaces,
+  type ProjectCtx,
   type StateRef,
   type TicketCtx,
 } from '@/lib/authz';
 import { prisma } from '@/lib/db';
+import { appUrl } from '@/lib/email';
+import { notifyIssueAssigned, type IssueContext } from '@/lib/mailer';
 import { stampsFor } from '@/lib/model';
 import { fail, ok, type ActionResult } from '@/lib/result';
 import { INVALID_INPUT, field, fieldErrorsOf, fieldList } from '@/lib/action-input';
@@ -95,6 +99,24 @@ function isTicketNumberConflict(e: unknown): boolean {
 /** Every surface the issue appears on, plus the project's issue list. */
 function revalidateIssue(ctx: TicketCtx, extra: string[] = []): void {
   for (const path of [...ticketSurfaces(ctx), ...extra]) revalidatePath(path);
+}
+
+/**
+ * What an email needs to name an issue. Built from the already-authorized
+ * context, so nothing here is a second read and nothing is client-supplied.
+ *
+ * `number` and `title` are passed rather than read off `ctx.ticket` because
+ * `createIssue` has neither until its transaction returns -- it holds a
+ * `ProjectCtx`, not a `TicketCtx`. One builder either way keeps the link
+ * construction in a single place.
+ */
+function issueContext(ctx: ProjectCtx, number: number, title: string): IssueContext {
+  return {
+    issueKey: `${ctx.project.key}-${number}`,
+    issueTitle: title,
+    projectName: ctx.project.name,
+    url: appUrl(ticketPath(ctx.org, ctx.project, number)),
+  };
 }
 
 /** Append to the end of a state's column, in the issue's own project. */
@@ -220,6 +242,19 @@ export async function createIssue(
         if (attempt < 2 && isTicketNumberConflict(e)) continue;
         throw e;
       }
+    }
+
+    // The other of the two `assigneeId` write points. Filing an issue already
+    // assigned to someone notifies them exactly as reassigning one does; the
+    // rule that the actor is never mailed lives in `notifyIssueAssigned`, so
+    // assigning yourself on creation stays silent.
+    if (created && parsed.data.assigneeId !== '') {
+      await notifyIssueAssigned({
+        assigneeId: parsed.data.assigneeId,
+        actorId: user.id,
+        actorName: user.name,
+        issue: issueContext(ctx, created.number, parsed.data.title),
+      });
     }
 
     revalidatePath(projectPath(ctx.org, ctx.project));
@@ -590,10 +625,23 @@ export async function setIssueAssignee(input: {
       return fail(NOT_A_MEMBER);
     }
 
+    const assigneeId = parsed.data.assigneeId === '' ? null : parsed.data.assigneeId;
+
     await prisma.ticket.update({
       where: { id: ctx.ticket.id },
-      data: { assigneeId: parsed.data.assigneeId === '' ? null : parsed.data.assigneeId },
+      data: { assigneeId },
     });
+
+    // Only on an actual change. Re-submitting the same assignee -- which the
+    // board menu does readily -- must not re-send the mail.
+    if (assigneeId !== ctx.ticket.assigneeId) {
+      await notifyIssueAssigned({
+        assigneeId,
+        actorId: ctx.user.id,
+        actorName: ctx.user.name,
+        issue: issueContext(ctx, ctx.ticket.number, ctx.ticket.title),
+      });
+    }
 
     revalidateIssue(ctx);
     return ok();

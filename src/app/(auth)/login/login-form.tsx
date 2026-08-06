@@ -86,6 +86,17 @@ export function LoginForm() {
           <SubmitButton className="w-full" pendingLabel="Signing in...">
             Sign in
           </SubmitButton>
+
+          {/*
+           * Under the button rather than beside the password label: this is the
+           * escape hatch you reach for after a failed attempt, so it belongs
+           * where your eyes already are when the banner appears.
+           */}
+          <div className="text-center text-sm text-tertiary">
+            <Link href="/reset" className={LINK}>
+              Forgot your password?
+            </Link>
+          </div>
         </form>
       </Card.Content>
 

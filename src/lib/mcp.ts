@@ -835,7 +835,7 @@ export const TOOLS: Tool[] = [
     name: 'add_member',
     title: 'Add a member',
     description:
-      'Add an existing account to an organization by email. There is no invitation email — the person must already have registered. ADMIN or OWNER.',
+      'Add someone to an organization by email. If they already have an account they are added immediately; if not, they are emailed an invitation that expires in 7 days and the membership is created when they accept. ADMIN or OWNER.',
     inputSchema: {
       type: 'object',
       properties: {

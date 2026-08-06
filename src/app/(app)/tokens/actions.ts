@@ -14,6 +14,7 @@ import { z } from 'zod';
 
 import { requireUser, runAction } from '@/lib/authz';
 import { prisma } from '@/lib/db';
+import { sendMcpTokenCreatedMail } from '@/lib/mailer';
 import { fail, ok, type ActionResult } from '@/lib/result';
 import { createSession } from '@/lib/session';
 import { cuid } from '@/lib/validation';
@@ -32,6 +33,16 @@ export async function createMcpToken(
   return runAction(async () => {
     const user = await requireUser();
     const { token } = await createSession(user.id);
+
+    // Security notice, and deliberately NOT behind any notification preference:
+    // a token carries this account's full access to every organization it
+    // belongs to, so minting one is exactly the event a compromised user needs
+    // to hear about. Someone who muted notifications did not consent to that.
+    //
+    // The token itself is never in the mail -- only the fact that one was made,
+    // and a link to the page that revokes it.
+    sendMcpTokenCreatedMail(user);
+
     revalidatePath('/tokens');
     // The ONLY time the raw token exists outside the client's keeping: the
     // database holds sha256(token) and nothing else, so it cannot be shown twice.

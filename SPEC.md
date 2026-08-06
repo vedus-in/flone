@@ -24,11 +24,16 @@ document disagree, this document wins. If something is not in this document, it 
 
 ### Explicitly OUT of scope — do not build any of these
 
-File uploads · notifications · email sending of any kind · password reset · password change ·
-OAuth/SSO · labels · due dates · priorities · search · filtering · activity feeds · websockets ·
-realtime · drag-and-drop · admin panel · billing · dark-mode toggle · i18n · analytics ·
-markdown/rich text rendering · avatars · REST/JSON API · route handlers (`route.ts`) ·
-`middleware.ts` · tests beyond what is explicitly asked for.
+File uploads · in-app notifications · password change while signed in · OAuth/SSO · MFA ·
+@mentions · due-date reminders · digest email · labels · due dates · priorities · search ·
+filtering · activity feeds · websockets · realtime · drag-and-drop · admin panel · billing ·
+dark-mode toggle · i18n · analytics · markdown/rich text rendering · avatars · REST/JSON API ·
+route handlers (`route.ts`) · `middleware.ts` · tests beyond what is explicitly asked for.
+
+> **AMENDED 2026-08-06.** Email sending, email verification and password reset were on this list
+> and have been built — see `docs/superpowers/specs/2026-08-06-email-design.md`, which supersedes
+> this section, §4.4 and §7.20, and items 2 and 3 of §8. Reminders and digests stay out for a
+> single shared reason: both need a scheduler, and the app deliberately has none.
 
 ### Additionally CUT during reconciliation (a lens proposed it; it is out)
 
@@ -509,10 +514,22 @@ rejection, unknown email, wrong password, corrupt hash — returns the identical
 `ERRORS.INVALID_CREDENTIALS = 'Invalid email or password.'`. The login form never surfaces per-field
 zod messages; they are collapsed into that one string.
 
-**Registration enumeration is accepted, not solved.** Hiding it requires the "we sent you an email"
+~~**Registration enumeration is accepted, not solved.** Hiding it requires the "we sent you an email"
 pattern and email is out of scope. Registration returns a clear
 `'An account with that email already exists.'` (mapped from Prisma `P2002` as well as the pre-check,
-because the race is real), bounded by 5 registrations per IP per hour.
+because the race is real), bounded by 5 registrations per IP per hour.~~
+
+> **CLOSED 2026-08-06.** The "we sent you an email" pattern is now implemented, so registration no
+> longer discloses anything. Both branches send exactly one message — a confirmation link to a free
+> address, a "you already have an account" notice to a taken one — return the identical result, and
+> spend the same scrypt time: the taken branch hashes the submitted password and discards it, the
+> same device `signIn` uses with `DUMMY_HASH`. That discarded hash is load-bearing; without it the
+> branches differ by ~250 ms and timing alone re-opens the oracle. The IP bucket is unchanged.
+>
+> Registration also no longer creates a session. `signIn` refuses an account whose `emailVerified`
+> is null, and that check sits **after** the password comparison — telling an unauthenticated
+> caller that an address needs confirming would be a perfect oracle, telling someone who just
+> proved the password tells them nothing new.
 
 ### 4.5 Email normalization
 
@@ -1054,14 +1071,29 @@ L2 said 10 000, L3 said 20 000. **Resolved: 10 000.** Arbitrary either way; the 
 better default with a 512 kB action body limit, and it comes from the lens that reasoned about
 request-body sizing.
 
-### 7.20 `addMember` enumeration message — **specific message kept**
+### 7.20 `addMember` enumeration message — ~~**specific message kept**~~ **superseded**
 
-L1 recommended a generic message on add-member to avoid an account-existence oracle; L2 and L3
+~~L1 recommended a generic message on add-member to avoid an account-existence oracle; L2 and L3
 accepted the specific one. **Resolved: keep the specific message**
 (`'No account with that email. Ask them to sign up first.'`). Because there is no email/invite flow,
 a generic message makes the feature genuinely unusable — the admin would have no way to know why
 nothing happened. The oracle is gated behind ADMIN membership in some organization, and registration
-already leaks the same fact to anonymous users, so the marginal disclosure is zero.
+already leaks the same fact to anonymous users, so the marginal disclosure is zero.~~
+
+> **SUPERSEDED 2026-08-06.** The premise — "there is no email/invite flow" — no longer holds, and
+> with it the reasoning collapses: the argument for the specific message was that a generic one made
+> the feature unusable, and the argument that the disclosure was free was that registration leaked
+> the same fact anyway. Neither is true now.
+>
+> `NO_ACCOUNT` is deleted. An address with an account is added immediately; one without is emailed
+> an invitation. Both answer that something happened, so the branches are no longer
+> distinguishable, and the admin is never left wondering why nothing did.
+>
+> Accepting an invitation is bound to the invited address, not to whoever opens the link: a signed-in
+> caller whose session email differs is refused rather than silently granted membership. Without
+> that, any forwarded or leaked invitation would admit its finder. The role comes from the token,
+> never from the accept form. Acceptance bypasses `isRegistrationOpen()` — an admin naming one
+> address is an explicit per-address grant, and it is the only way a closed instance can onboard.
 
 ---
 
@@ -1077,12 +1109,25 @@ Each of these is a conscious trade, not an oversight. The trigger to revisit is 
    **Revisit when:** scaling past one replica — at which point every limit silently multiplies by N
    and counters must move to a Postgres `LoginAttempt` table.
 
-2. **Registration reveals whether an email is already registered.** Unavoidable without email
-   sending, which is out of scope. Bounded at 5 registrations per IP per hour; login stays fully
-   generic because login is what credential-stuffing bots actually spray.
+2. ~~**Registration reveals whether an email is already registered.**~~ **CLOSED 2026-08-06** — see
+   the amendment to §4.4. Both branches send one message and return one result.
 
-3. **`addMember` is an account-existence oracle** for anyone holding ADMIN in any organization.
-   Accepted (§7.20) — it is the price of an invite flow with no email.
+3. ~~**`addMember` is an account-existence oracle**~~ **CLOSED 2026-08-06** — see the amendment to
+   §7.20. Unknown addresses are invited rather than refused.
+
+3a. **Email delivery is best-effort, unretried, and unverified.** Sending happens in an `after()`
+   callback and every failure is a log line, never a raised error — an issue that was assigned stays
+   assigned whether or not Resend was reachable. *Accepted* because every message is re-requestable
+   by the user: a lost confirmation or reset link is recovered by asking for another, which is
+   cheaper than a queue, a worker and a retry policy nobody would tune. **Revisit when:** a message
+   appears that the user cannot ask for again.
+
+3b. **A mailbox is a trust boundary this app does not control.** Anyone with read access to an
+   invited address can accept its invitation, and anyone with read access to a registered address
+   can reset that password. *Accepted* — this is true of every password-reset flow that exists, and
+   the mitigations are the usual ones: one hour for a reset, single use, all sessions revoked on
+   completion, and an unsuppressable notice to the owner. **Revisit when:** MFA is on the table,
+   which is the only real answer.
 
 4. **`x-forwarded-for` is client-controllable** if the proxy appends rather than replaces, so IP
    buckets can be rotated away. Mitigated by preferring `x-real-ip` and by treating the

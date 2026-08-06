@@ -2,9 +2,11 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { Prisma, Role } from '@prisma/client';
+import { EmailTokenPurpose, Prisma, Role } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
+import { revokeInvite } from '@/lib/email-token';
+import { notifyAddedToOrg, sendInviteMail } from '@/lib/mailer';
 import {
   AuthzError,
   orgPath,
@@ -15,7 +17,7 @@ import {
   requireUser,
   runAction,
 } from '@/lib/authz';
-import { fail, ok, type ActionResult } from '@/lib/result';
+import { ERRORS, fail, ok, type ActionResult } from '@/lib/result';
 import {
   assignableRoleSchema,
   cuid,
@@ -36,8 +38,9 @@ import {
  */
 
 const INVALID_INPUT = 'Check the highlighted fields.';
-const NO_ACCOUNT = 'No account with that email. Ask them to sign up first.';
 const ALREADY_MEMBER = 'Already a member.';
+const INVITE_SENT = 'Invitation sent.';
+const MEMBER_ADDED = 'Member added.';
 const LAST_OWNER = 'An organization must have at least one owner.';
 const SELF_ROLE = 'You cannot change your own role.';
 const SELF_REMOVE = 'You cannot remove yourself.';
@@ -83,13 +86,33 @@ export async function addMember(
     requireRole(ctx, Role.ADMIN);
 
     // `User` is not a tenant-scoped model, so a lookup by unique email is legal
-    // here. SPEC 7.20 keeps the specific message: with no invite email, a generic
-    // one makes the feature unusable, and the oracle is gated behind ADMIN.
+    // here.
+    //
+    // SPEC 7.20's `NO_ACCOUNT` literal is GONE, and with it the oracle it
+    // documented. The two branches below are no longer distinguishable from
+    // outside: an address with an account is added, an address without one is
+    // invited, and either way an admin is told something happened.
     const target = await prisma.user.findUnique({
       where: { email: parsed.data.email },
       select: { id: true },
     });
-    if (!target) return fail(NO_ACCOUNT, { email: NO_ACCOUNT });
+
+    if (!target) {
+      // Nobody by that address yet. Issue an invitation carrying the role, so
+      // accepting it grants exactly what the admin chose here -- the accept form
+      // never reads a role from its own input.
+      await sendInviteMail({
+        email: parsed.data.email,
+        orgName: ctx.org.name,
+        inviterName: ctx.user.name,
+        role: parsed.data.role,
+        organizationId: ctx.org.id,
+        invitedById: ctx.user.id,
+      });
+
+      revalidatePath(orgSettingsPath(ctx.org));
+      return ok(INVITE_SENT);
+    }
 
     try {
       await prisma.membership.create({
@@ -108,9 +131,105 @@ export async function addMember(
       throw e;
     }
 
+    await notifyAddedToOrg({
+      userId: target.id,
+      orgName: ctx.org.name,
+      orgSlug: ctx.org.slug,
+      inviterName: ctx.user.name,
+      role: parsed.data.role,
+    });
+
     revalidatePath(orgSettingsPath(ctx.org));
     revalidatePath('/', 'layout');
-    return ok('Member added.');
+    return ok(MEMBER_ADDED);
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* revokeInvitation / resendInvitation                                         */
+/* -------------------------------------------------------------------------- */
+
+const invitationSchema = z.object({
+  orgSlug: slugSchema,
+  tokenId: cuid,
+});
+
+/**
+ * Revoking is a delete. There is nothing to keep: an unaccepted invitation has
+ * no history worth reading and a revoked-but-present row is one `where` clause
+ * away from being honoured by mistake.
+ *
+ * `tokenId` is a lookup key only -- `revokeInvite` scopes it to the
+ * already-authorized organization, so an id from another tenant is
+ * indistinguishable from one that does not exist.
+ */
+export async function revokeInvitation(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = invitationSchema.safeParse({
+      orgSlug: formData.get('orgSlug'),
+      tokenId: formData.get('tokenId'),
+    });
+    if (!parsed.success) return fail(INVALID_INPUT, fieldMessages(parsed.error));
+
+    const ctx = await requireOrgBySlug(parsed.data.orgSlug);
+    requireRole(ctx, Role.ADMIN);
+
+    await revokeInvite(ctx.org.id, parsed.data.tokenId);
+
+    revalidatePath(orgSettingsPath(ctx.org));
+    return ok('Invitation revoked.');
+  });
+}
+
+/**
+ * Sending again mints a NEW token and retires the old one (`issueToken`
+ * supersedes by address and organization), so a resend is not a second live
+ * credential in the same mailbox.
+ */
+export async function resendInvitation(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = invitationSchema.safeParse({
+      orgSlug: formData.get('orgSlug'),
+      tokenId: formData.get('tokenId'),
+    });
+    if (!parsed.success) return fail(INVALID_INPUT, fieldMessages(parsed.error));
+
+    const ctx = await requireOrgBySlug(parsed.data.orgSlug);
+    requireRole(ctx, Role.ADMIN);
+
+    // Scoped to this organization, so the id cannot name another tenant's row.
+    const existing = await prisma.emailToken.findFirst({
+      where: {
+        id: parsed.data.tokenId,
+        organizationId: ctx.org.id,
+        purpose: EmailTokenPurpose.INVITE,
+        usedAt: null,
+      },
+      select: { email: true, role: true },
+    });
+    if (!existing?.role) return fail(ERRORS.NOT_FOUND);
+
+    await sendInviteMail({
+      email: existing.email,
+      orgName: ctx.org.name,
+      inviterName: ctx.user.name,
+      role: existing.role,
+      organizationId: ctx.org.id,
+      invitedById: ctx.user.id,
+    });
+
+    revalidatePath(orgSettingsPath(ctx.org));
+    return ok(INVITE_SENT);
   });
 }
 

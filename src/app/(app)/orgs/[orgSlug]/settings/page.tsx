@@ -28,6 +28,7 @@ import {
   PageHeader,
   SubmitButton,
 } from '@/components/ui';
+import { pendingInvites } from '@/lib/email-token';
 import { ActionForm } from '../../../action-form';
 import {
   addMember,
@@ -35,6 +36,8 @@ import {
   deleteOrganization,
   removeMember,
   renameOrganization,
+  resendInvitation,
+  revokeInvitation,
 } from './actions';
 
 const ROLE_LABEL: Record<Role, string> = {
@@ -113,6 +116,11 @@ export default async function OrganizationSettingsPage({
   });
 
   const canManage = atLeast(ctx.role, Role.ADMIN);
+
+  // Only admins can act on invitations, so only admins are shown them. The read
+  // is skipped entirely for everyone else rather than fetched and hidden.
+  const invites = canManage ? await pendingInvites(ctx.org.id) : [];
+
   const isOwner = ctx.role === Role.OWNER;
   const ownerCount = members.filter((member) => member.role === Role.OWNER).length;
   const assignableRoles: Role[] = isOwner
@@ -316,7 +324,8 @@ export default async function OrganizationSettingsPage({
                 Add a member
               </Card.Title>
               <Card.Description>
-                The person needs an account already. There is no invitation email.
+                If they already have an account they are added straight away. If not, we email
+                them an invitation that expires in 7 days.
               </Card.Description>
             </Card.Header>
 
@@ -360,6 +369,90 @@ export default async function OrganizationSettingsPage({
               </div>
             </ActionForm>
           </Card>
+        </section>
+      ) : null}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Pending invitations                                                 */}
+      {/* ------------------------------------------------------------------ */}
+      {/*
+       * Admins only, and hidden entirely when there are none -- an empty table
+       * on every settings page would be pure furniture. These are addresses that
+       * have been offered access but do not yet correspond to any account, so
+       * they are not part of the member roster above.
+       */}
+      {canManage && invites.length > 0 ? (
+        <section className="flex flex-col gap-4" aria-labelledby="invites-heading">
+          <h2 id="invites-heading" className="text-sm font-medium text-primary">
+            Pending invitations
+          </h2>
+
+          <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
+            <TableRoot size="sm" aria-label="Pending invitations">
+              <TableHeader>
+                <TableHead isRowHeader className="w-full">
+                  Email
+                </TableHead>
+                <TableHead className="whitespace-nowrap">Role</TableHead>
+                <TableHead className="whitespace-nowrap">Expires</TableHead>
+                <TableHead className="whitespace-nowrap text-end">Manage</TableHead>
+              </TableHeader>
+
+              <TableBody>
+                {invites.map((invite) => (
+                  <TableRow key={invite.id} id={invite.id}>
+                    <TableCell>
+                      <span className="text-sm text-primary">{invite.email}</span>
+                    </TableCell>
+
+                    <TableCell className="whitespace-nowrap align-top">
+                      <Badge tone="neutral">
+                        {invite.role ? ROLE_LABEL[invite.role] : ROLE_LABEL.MEMBER}
+                      </Badge>
+                    </TableCell>
+
+                    <TableCell className="whitespace-nowrap align-top">
+                      <span className="text-sm text-tertiary">
+                        {invite.expiresAt.toISOString().slice(0, 10)}
+                      </span>
+                    </TableCell>
+
+                    <TableCell className="align-top">
+                      <div className="flex flex-wrap items-start justify-end gap-2">
+                        <ActionForm
+                          action={resendInvitation}
+                          className="flex flex-col items-end gap-2"
+                          aria-label={`Resend the invitation to ${invite.email}`}
+                        >
+                          <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                          <input type="hidden" name="tokenId" value={invite.id} />
+                          <SubmitButton color="secondary" size="sm" pendingLabel="Sending...">
+                            Resend
+                          </SubmitButton>
+                        </ActionForm>
+
+                        <ActionForm
+                          action={revokeInvitation}
+                          className="flex flex-col items-end gap-2"
+                          aria-label={`Revoke the invitation to ${invite.email}`}
+                        >
+                          <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                          <input type="hidden" name="tokenId" value={invite.id} />
+                          <SubmitButton
+                            color="secondary-destructive"
+                            size="sm"
+                            pendingLabel="Revoking..."
+                          >
+                            Revoke
+                          </SubmitButton>
+                        </ActionForm>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </TableRoot>
+          </div>
         </section>
       ) : null}
 

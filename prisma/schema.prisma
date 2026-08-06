@@ -54,8 +54,23 @@ model User {
   /// admin governs the instance (registration, other admins), NOT tenant data.
   /// Being an admin grants NO access to any organization's boards or tickets.
   isAdmin      Boolean  @default(false)
+  /// Null means the address has never been confirmed. `signIn` refuses to mint
+  /// a session for such an account, so the migration that adds this column MUST
+  /// backfill every pre-existing row or the deploy locks out every user.
+  ///
+  /// Set three ways: clicking a verification link, clicking a password-reset
+  /// link, and accepting an invitation -- all three prove the address receives
+  /// mail, which is the whole claim the column makes.
+  emailVerified DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  /// Per-type notification preferences. These gate NOTIFICATIONS only; security
+  /// mail (password changed, MCP token created) ignores them, because a user who
+  /// has muted notifications has not consented to silent account takeover.
+  notifyAssigned      Boolean @default(true)
+  notifyComments      Boolean @default(true)
+  notifyOrgMembership Boolean @default(true)
 
   sessions        Session[]
   memberships     Membership[]
@@ -64,8 +79,59 @@ model User {
   comments        Comment[]
   ledBoards       Board[]      @relation("BoardLead")
   savedViews      SavedView[]
+  emailTokens     EmailToken[]
 
   @@index([isAdmin])
+}
+
+/// Purpose of a one-time emailed link. Part of the `where` clause on every
+/// consume, so a token minted for one flow cannot be presented to another.
+enum EmailTokenPurpose {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+  INVITE
+}
+
+/// A one-time credential delivered by email.
+///
+/// Constructed exactly like `Session` and for the same reasons: 256 bits from
+/// `randomBytes`, only `sha256(token)` stored under a unique index, so
+/// verification is a lookup by key and a database leak yields nothing usable.
+/// SHA-256 rather than scrypt is right here for the same reason it is right for
+/// sessions -- a uniformly random 256-bit value has no dictionary.
+///
+/// INVITE is the only purpose that populates `organizationId`, `role` and
+/// `invitedById`, and it is the only purpose whose `userId` is null (the invitee
+/// has no account yet). That invariant is held by `src/lib/email-token.ts`, not
+/// by the schema: expressing it in SQL costs three partial constraints to
+/// prevent a shape only this app's own code can produce.
+model EmailToken {
+  id             String            @id @default(cuid())
+  tokenHash      String            @unique
+  purpose        EmailTokenPurpose
+  /// The address the link was sent to. For INVITE there may be no `User` yet,
+  /// which is why the address is stored here rather than read through `userId`.
+  email          String
+  userId         String?
+  user           User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String?
+  organization   Organization?     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// The role the invitation grants on acceptance. Never read from the accept
+  /// form -- an invitee must not be able to choose their own role.
+  role           Role?
+  invitedById    String?
+  expiresAt      DateTime
+  /// Stamped by the single atomic `updateMany` that consumes the token. Non-null
+  /// means spent; there is no delete-on-use, so a second click can be told the
+  /// link was already used rather than that it never existed.
+  usedAt         DateTime?
+  createdAt      DateTime          @default(now())
+
+  /// Drives "invalidate this user's other tokens of this purpose" on issue, and
+  /// the pending-invitation list on the organization settings page.
+  @@index([email, purpose])
+  @@index([organizationId, purpose])
+  @@index([expiresAt])
 }
 
 /// Single-row table holding instance-wide settings. The id is pinned to
@@ -98,6 +164,7 @@ model Organization {
 
   memberships Membership[]
   projects    Project[]
+  emailTokens EmailToken[]
 }
 
 model Membership {

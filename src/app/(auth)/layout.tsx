@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { redirect } from 'next/navigation';
+import { AuthShell } from '@/components/auth-shell';
 import { readSession } from '@/lib/session';
 
 /**
@@ -26,28 +27,5 @@ export default async function AuthLayout({ children }: { children: ReactNode }) 
   const session = await readSession();
   if (session) redirect('/');
 
-  return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-8 px-4 py-12 sm:py-16">
-      <header className="flex flex-col items-center gap-3 text-center">
-        {/*
-         * A letter mark, not an icon font and not an emoji: one element, no
-         * network request, and it inherits the theme's accent tokens in both
-         * light and dark. `aria-hidden` because the wordmark beneath it already
-         * says the name.
-         */}
-        <span
-          aria-hidden="true"
-          className="grid size-10 place-items-center rounded-xl bg-brand-solid text-base font-semibold text-white"
-        >
-          K
-        </span>
-        <div className="flex flex-col gap-1">
-          <span className="text-base font-semibold tracking-tight text-primary">Flone</span>
-          <p className="text-sm text-tertiary">A simple, secure board for small teams.</p>
-        </div>
-      </header>
-
-      <main className="w-full max-w-[26rem]">{children}</main>
-    </div>
-  );
+  return <AuthShell>{children}</AuthShell>;
 }

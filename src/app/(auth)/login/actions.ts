@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import { isNextControlFlowError } from '@/lib/authz';
 import { prisma } from '@/lib/db';
+import { sendVerificationMail } from '@/lib/mailer';
 import { DUMMY_HASH, hashPassword, needsRehash, verifyPassword } from '@/lib/password';
 import { LIMITS, clientIp, consume, loginEmailKey, loginIpKey, reset } from '@/lib/rate-limit';
 import { ERRORS, type ActionResult } from '@/lib/result';
@@ -47,6 +48,13 @@ function invalidCredentials(): ActionResult {
   return { ok: false, error: ERRORS.INVALID_CREDENTIALS };
 }
 
+/**
+ * The one message in this file that is NOT `INVALID_CREDENTIALS`. Reachable
+ * only after the password has been verified -- see the comment at the branch.
+ */
+const UNVERIFIED =
+  'Confirm your email address to sign in. We have sent you a new link.';
+
 async function attemptSignIn(formData: FormData): Promise<ActionResult> {
   // Limits are consumed BEFORE any hashing, so a throttled request costs
   // microseconds instead of ~250 ms of CPU (SPEC 4.3).
@@ -72,7 +80,7 @@ async function attemptSignIn(formData: FormData): Promise<ActionResult> {
 
   const user = await prisma.user.findUnique({
     where: { email },
-    select: { id: true, passwordHash: true },
+    select: { id: true, name: true, passwordHash: true, emailVerified: true },
   });
 
   let verified = false;
@@ -85,6 +93,25 @@ async function attemptSignIn(formData: FormData): Promise<ActionResult> {
   }
 
   if (!user || !verified) return invalidCredentials();
+
+  /*
+   * The verification gate, and its POSITION IS THE DESIGN: it sits AFTER the
+   * password check, never before.
+   *
+   * Answering "confirm your email" to anyone who merely typed an address would
+   * be a perfect account oracle. Answering it to someone who has just proved
+   * they know the password tells them nothing they did not already know, so
+   * this branch is safe here and would not be one line earlier.
+   *
+   * A fresh link is sent on every attempt -- the common case is someone who
+   * lost the first one -- and `issueToken` retires the previous token, so a
+   * mailbox cannot accumulate live credentials. The email bucket consumed above
+   * is what bounds this.
+   */
+  if (user.emailVerified === null) {
+    await sendVerificationMail({ id: user.id, name: user.name, email });
+    return { ok: false, error: UNVERIFIED };
+  }
 
   // Transparent parameter upgrade on a successful login (SPEC 4.1). Best effort:
   // a failed re-hash must never cost the user their sign-in.

@@ -525,6 +525,9 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                   </span>
                 </Dropdown.Item>
               </Dropdown.Section>
+              <Dropdown.Item id="account" href="/account" textValue="Account">
+                Account
+              </Dropdown.Item>
               <Dropdown.Item id="tokens" href="/tokens" textValue="MCP access">
                 MCP access
               </Dropdown.Item>

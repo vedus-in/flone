@@ -12,8 +12,10 @@
     "db:deploy": "prisma migrate deploy",
     "typecheck": "tsc --noEmit",
     "mcp:smoke": "node scripts/mcp-smoke.mjs",
+    "email:dev": "email dev --dir src/emails",
     "check:boundary": "node scripts/check-client-boundary.mjs",
-    "check:model": "node scripts/check-model.ts"
+    "check:model": "node scripts/check-model.ts",
+    "check:email": "bun scripts/check-email.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -29,6 +31,7 @@
     "react": "^19.2.0",
     "react-aria-components": "^1.20.0",
     "react-dom": "^19.2.0",
+    "react-email": "^6.9.1",
     "server-only": "^0.0.1",
     "tailwind-merge": "^3.6.0",
     "zod": "^3.25.76"

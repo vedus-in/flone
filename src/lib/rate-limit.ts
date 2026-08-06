@@ -76,6 +76,21 @@ export const LIMITS = {
   LOGIN_IP: { limit: 30, windowMs: FIFTEEN_MINUTES },
   LOGIN_EMAIL: { limit: 10, windowMs: FIFTEEN_MINUTES },
   REGISTER_IP: { limit: 5, windowMs: ONE_HOUR },
+
+  /**
+   * Email-sending buckets.
+   *
+   * These throttle a mailbox as much as a database: without them, anyone can
+   * point the reset form at someone else's address and flood their inbox on
+   * demand, which is harassment and gets the sending domain blocked. Both the
+   * address and the origin are limited, because either alone is trivially
+   * sidestepped -- one attacker, many victims is caught by the IP bucket; many
+   * attackers, one victim by the email bucket.
+   */
+  RESET_EMAIL: { limit: 3, windowMs: ONE_HOUR },
+  RESET_IP: { limit: 10, windowMs: ONE_HOUR },
+  VERIFY_EMAIL: { limit: 3, windowMs: ONE_HOUR },
+  VERIFY_IP: { limit: 10, windowMs: ONE_HOUR },
 } as const;
 
 export function loginIpKey(ip: string): string {
@@ -89,6 +104,27 @@ export function loginEmailKey(normalizedEmail: string): string {
 
 export function registerIpKey(ip: string): string {
   return `register:ip:${ip}`;
+}
+
+/**
+ * Consumed on the NORMALIZED email whether or not an account exists -- the
+ * throttle message must not become the oracle the generic response exists to
+ * close.
+ */
+export function resetEmailKey(normalizedEmail: string): string {
+  return `reset:email:${normalizedEmail}`;
+}
+
+export function resetIpKey(ip: string): string {
+  return `reset:ip:${ip}`;
+}
+
+export function verifyEmailKey(normalizedEmail: string): string {
+  return `verify:email:${normalizedEmail}`;
+}
+
+export function verifyIpKey(ip: string): string {
+  return `verify:ip:${ip}`;
 }
 
 /* -------------------------------------------------------------------------- */

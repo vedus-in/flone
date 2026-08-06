@@ -1,16 +1,15 @@
 'use server';
 
 import { randomUUID } from 'node:crypto';
-import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { isNextControlFlowError } from '@/lib/authz';
 import { prisma } from '@/lib/db';
+import { sendAccountExistsMail, sendVerificationMail } from '@/lib/mailer';
 import { hashPassword } from '@/lib/password';
 import { LIMITS, clientIp, consume, registerIpKey } from '@/lib/rate-limit';
-import { ERRORS, type ActionResult } from '@/lib/result';
-import { createSession, rotatePresentedSession, setSessionCookie } from '@/lib/session';
+import { ERRORS, ok, type ActionResult } from '@/lib/result';
+import { rotatePresentedSession } from '@/lib/session';
 import { isRegistrationOpen } from '@/lib/settings';
 import { emailSchema, passwordSchema, userNameSchema } from '@/lib/validation';
 
@@ -28,18 +27,36 @@ import { emailSchema, passwordSchema, userNameSchema } from '@/lib/validation';
  * that cannot work, but that is cosmetic: a Server Action is a directly
  * addressable POST endpoint and is reachable whatever the page rendered.
  *
- * ACCEPTED RISK (SPEC 4.4 / 8.2): registration reveals whether an email is
- * already registered. Hiding it requires the "we sent you an email" pattern and
- * email sending is out of scope. The disclosure is bounded at 5 registrations
- * per IP per hour; login stays fully generic because login is what
- * credential-stuffing bots actually spray.
+ * ENUMERATION (was SPEC 4.4 / 8.2, now closed). This action used to answer "an
+ * account with that email already exists", which made it an oracle for whether
+ * any address had an account. It no longer does. BOTH branches now:
+ *
+ *   1. send exactly one email -- a verification link to a new address, a "you
+ *      already have an account" notice to an existing one;
+ *   2. spend roughly the same CPU, because the taken branch runs a scrypt hash
+ *      it throws away;
+ *   3. return the IDENTICAL `ok()` result, which renders the same "check your
+ *      inbox" screen.
+ *
+ * All three are load-bearing. A difference in ANY of them -- including latency
+ * -- reopens the oracle, which is why the discarded hash below must not be
+ * removed however dead it looks.
+ *
+ * NO SESSION IS CREATED HERE. Registering is a claim to own an address, not
+ * proof of it; the session is minted by `/verify` once the emailed link is
+ * clicked. `signIn` refuses to sign in an account whose `emailVerified` is null.
  *
  * Nothing here is ever logged: not the password, not the hash, not the token.
  */
 
-const EMAIL_TAKEN = 'An account with that email already exists.';
 const CHECK_FIELDS = 'Please check the highlighted fields.';
 const REGISTRATION_CLOSED = 'Registration is currently closed.';
+
+/**
+ * The single success literal, returned whether or not the address was free.
+ * Deliberately says nothing about which branch ran.
+ */
+const CHECK_INBOX = 'Check your inbox for a link to confirm your email address.';
 
 /**
  * Closed literals. zod's own messages are never surfaced, so no schema internal
@@ -90,9 +107,31 @@ function isUniqueViolation(e: unknown): boolean {
   );
 }
 
-function emailTaken(): ActionResult {
-  return { ok: false, error: EMAIL_TAKEN };
+/**
+ * The "this address already has an account" branch, returning the same literal
+ * as the success path.
+ *
+ * `password` is hashed and the result THROWN AWAY. That call is the entire
+ * point of this function and MUST NOT be removed: the free-address branch
+ * spends ~250 ms in scrypt, and without a matching cost here the taken branch
+ * answers a quarter of a second sooner. The response bodies would be identical
+ * and the timing alone would still enumerate every account on the instance.
+ * This is the same device `signIn` uses with `DUMMY_HASH`.
+ *
+ * Pass `null` when a hash has already been paid for on this request.
+ */
+async function accountAlreadyExists(
+  email: string,
+  password: string | null,
+): Promise<ActionResult> {
+  if (password !== null) {
+    await hashPassword(password);
+  }
+
+  sendAccountExistsMail(email);
+  return ok(CHECK_INBOX);
 }
+
 
 async function attemptRegister(formData: FormData): Promise<ActionResult> {
   // FIRST, before the rate limiter and long before any scrypt work: a closed
@@ -129,7 +168,7 @@ async function attemptRegister(formData: FormData): Promise<ActionResult> {
   // Pre-check for the common case; the `P2002` branch below covers the race
   // between this read and the insert, which is real rather than theoretical.
   const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-  if (existing) return emailTaken();
+  if (existing) return await accountAlreadyExists(email, password);
 
   // ~250 ms of CPU, gated by the semaphore inside `hashPassword`.
   const passwordHash = await hashPassword(password);
@@ -157,38 +196,38 @@ async function attemptRegister(formData: FormData): Promise<ActionResult> {
     });
     userId = created.id;
   } catch (e) {
-    if (isUniqueViolation(e)) return emailTaken();
+    // The race: someone else inserted this address between the read above and
+    // this write. The hash is already spent, so pass `null` rather than burning
+    // a second one -- the CPU the branch exists to match has been paid.
+    if (isUniqueViolation(e)) return await accountAlreadyExists(email, null);
     throw e;
   }
 
   // Registration is not an authentication of an existing identity, but a
-  // request may still arrive carrying a stale cookie. Drop it before minting a
-  // new token so no fixated session can survive.
+  // request may still arrive carrying a stale cookie. Drop it before the user
+  // goes to their inbox, so no fixated session survives the flow.
   await rotatePresentedSession();
 
-  const { token, expiresAt } = await createSession(userId);
-  await setSessionCookie(token, expiresAt);
+  await sendVerificationMail({ id: userId, name, email });
 
-  revalidatePath('/', 'layout');
-  return { ok: true };
+  // NO SESSION. `/verify` mints it once the emailed link is clicked.
+  return ok(CHECK_INBOX);
 }
 
 export async function register(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
-  let outcome: ActionResult;
-
   try {
-    outcome = await attemptRegister(formData);
+    // No `redirect()` any more, so there is no success path to keep outside the
+    // try/catch: registering ends on the same page with the "check your inbox"
+    // panel. Redirecting instead would have to redirect BOTH branches to the
+    // same URL to stay non-enumerable, and a URL is a weaker guarantee of that
+    // than one shared return.
+    return await attemptRegister(formData);
   } catch (e) {
     if (isNextControlFlowError(e)) throw e;
     console.error(`[register] unexpected_failure ref=${randomUUID().slice(0, 8)}`);
     return { ok: false, error: ERRORS.UNEXPECTED };
   }
-
-  // After the try/catch closes, success path only (SPEC 6.1 rule 7).
-  // `/` then dispatches the brand-new zero-org user to `/orgs/new`.
-  if (outcome.ok) redirect('/');
-  return outcome;
 }

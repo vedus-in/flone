@@ -51,6 +51,43 @@ export function RegisterForm() {
   const failure = state && !state.ok ? state : null;
   const fieldErrors = failure?.fieldErrors;
 
+  /*
+   * Success no longer redirects: `register` mints no session, so there is
+   * nowhere signed-in to go. It renders this panel instead.
+   *
+   * The panel is IDENTICAL whether the address was free or already had an
+   * account -- that is the whole point of the change, and the reason the email
+   * is not echoed back here either. Naming the address would not leak anything
+   * on its own, but it invites a future edit that says "we sent a link to" on
+   * one branch and something else on the other.
+   */
+  if (state?.ok) {
+    return (
+      <Card className="gap-6 p-6 sm:p-7">
+        <Card.Header className="gap-1.5">
+          <h1 className="text-lg leading-6 font-semibold text-primary">Check your inbox</h1>
+          <Card.Description>{state.message}</Card.Description>
+        </Card.Header>
+
+        <Card.Content>
+          <p className="text-sm text-tertiary">
+            The link works once and expires in 24 hours. If it does not arrive, check your spam
+            folder, then request another one.
+          </p>
+        </Card.Content>
+
+        <Card.Footer className="flex-col gap-3">
+          <Link href="/verify" className={LINK}>
+            Send another link
+          </Link>
+          <Link href="/login" className={LINK}>
+            Back to sign in
+          </Link>
+        </Card.Footer>
+      </Card>
+    );
+  }
+
   return (
     <Card className="gap-6 p-6 sm:p-7">
       <Card.Header className="gap-1.5">

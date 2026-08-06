@@ -26,9 +26,12 @@ import {
   requireTicket,
   requireUser,
   runAction,
+  ticketPath,
   ticketSurfaces,
 } from '@/lib/authz';
 import { prisma } from '@/lib/db';
+import { appUrl } from '@/lib/email';
+import { notifyNewComment } from '@/lib/mailer';
 import { fail, ok, type ActionResult } from '@/lib/result';
 import { INVALID_INPUT, field, fieldErrorsOf } from '@/lib/action-input';
 import { commentBodySchema, cuid } from '@/lib/validation';
@@ -63,6 +66,23 @@ export async function createComment(
         // Authorship comes from the session, never from the form.
         authorId: user.id,
         body: parsed.data.body,
+      },
+    });
+
+    // The thread: whoever filed it, whoever owns it, everyone who has already
+    // commented. `notifyNewComment` resolves and deduplicates that set, drops
+    // the author, and drops anyone who has muted comment mail -- so a
+    // self-comment on your own issue sends nothing.
+    await notifyNewComment({
+      ticketId: ctx.ticket.id,
+      actorId: user.id,
+      actorName: user.name,
+      body: parsed.data.body,
+      issue: {
+        issueKey: `${ctx.project.key}-${ctx.ticket.number}`,
+        issueTitle: ctx.ticket.title,
+        projectName: ctx.project.name,
+        url: appUrl(ticketPath(ctx.org, ctx.project, ctx.ticket.number)),
       },
     });
 
