@@ -30,7 +30,9 @@ File uploads, notifications, email of any kind, password reset, password change,
 | **Bun** | Package manager and runtime, for install and boot speed; there is no Node-specific dependency in the tree. |
 | **zod** | Every Server Action re-parses its own `FormData`, without exception, before anything reaches the database. |
 | **node:crypto** | Password hashing (scrypt) and session tokens use the runtime's own crypto — no native build steps, so deploys cannot break on a compiler toolchain. |
-| **Plain CSS** | One `globals.css` with custom properties. No Tailwind, no component library, no CSS-in-JS, nothing to keep up to date. |
+| **Tailwind CSS v4** | `globals.css` is the entrypoint and the whole configuration — no `tailwind.config`, tokens declared in `src/styles/theme.css`, layout written as utilities at the call site. |
+| **Untitled UI** | The design system. Components are source in `src/components/`, not an imported package, so one is edited in place rather than overridden; `@untitledui/icons` and `tailwind-merge` come along with it. |
+| **React Aria Components + Base UI** | The unstyled primitives under those components — focus management, keyboard behaviour and ARIA wiring that is not worth hand-rolling twice. |
 
 ## Local development
 

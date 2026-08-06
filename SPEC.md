@@ -656,7 +656,7 @@ prisma/
 
 src/
 ├─ app/
-│  ├─ globals.css                    single stylesheet, CSS custom properties, no Tailwind
+│  ├─ globals.css                    Tailwind v4 entrypoint: imports ../styles/theme.css, custom variants
 │  ├─ layout.tsx                     <html>/<body>, imports globals.css, metadata
 │  ├─ error.tsx                      'use client' — fixed generic copy; never renders message or digest
 │  ├─ not-found.tsx                  "Not found." + link home (also serves "not yours")
@@ -1122,7 +1122,8 @@ Each of these is a conscious trade, not an oversight. The trigger to revisit is 
     truth anyway); for auth and create forms the failure modes are re-derivable server-side.
 
 11. **`style-src 'unsafe-inline'` remains** as a concession to Next's inlined critical CSS. There is
-    no user-controlled styling anywhere in scope (plain `globals.css`, no CSS-in-JS, no themes), so
+    no user-controlled styling anywhere in scope (authored Tailwind utilities and theme tokens only —
+    no CSS-in-JS, no runtime-computed styles, nothing derived from user input), so
     the exploitable surface requires an HTML injection that React's escaping already prevents.
 
 12. **`script-src` is not XSS protection** (§7.9). The compensating controls are: React escaping,
