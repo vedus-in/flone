@@ -31,8 +31,8 @@ const SUPPORTED_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '
 const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
 
 const SERVER_INFO = {
-  name: 'kanban',
-  title: 'Kanban',
+  name: 'flone',
+  title: 'Flone',
   version: '0.1.0',
 };
 
@@ -93,7 +93,7 @@ export async function POST(request: Request): Promise<Response> {
       { jsonrpc: '2.0', id, error: { code: -32001, message: ERRORS.UNAUTHENTICATED } },
       {
         status: 401,
-        headers: { ...NO_STORE, 'WWW-Authenticate': 'Bearer realm="kanban"' },
+        headers: { ...NO_STORE, 'WWW-Authenticate': 'Bearer realm="flone"' },
       },
     );
   }

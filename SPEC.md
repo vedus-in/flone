@@ -1,4 +1,4 @@
-# Kanban — Canonical Implementation Spec
+# Flone — Canonical Implementation Spec
 
 This document is the single source of truth. Three design lenses (data/authz, security,
 UI/routing) were reconciled here. Where they disagreed, §7 records the conflict and the

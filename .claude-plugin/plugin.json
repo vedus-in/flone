@@ -1,7 +1,7 @@
 {
-  "name": "kanban",
-  "displayName": "Kanban",
-  "description": "Read and update your Kanban boards, tickets and comments from any MCP client.",
+  "name": "flone",
+  "displayName": "Flone",
+  "description": "Read and update your Flone boards, tickets and comments from any MCP client.",
   "version": "0.1.0",
   "keywords": ["kanban", "tickets", "project-management", "mcp"],
   "skills": "./skills/",

@@ -91,7 +91,7 @@ export default async function TokensPage() {
             One command in Claude Code, with the token you just copied:
           </p>
           <pre className="overflow-x-auto rounded-lg bg-secondary p-4 text-xs">
-            <code>{`claude mcp add --transport http kanban ${endpoint} \\\n  --header "Authorization: Bearer <your-token>"`}</code>
+            <code>{`claude mcp add --transport http flone ${endpoint} \\\n  --header "Authorization: Bearer <your-token>"`}</code>
           </pre>
 
           <p className="text-sm text-tertiary">
@@ -100,7 +100,7 @@ export default async function TokensPage() {
           <pre className="overflow-x-auto rounded-lg bg-secondary p-4 text-xs">
             <code>{`{
   "mcpServers": {
-    "kanban": {
+    "flone": {
       "type": "http",
       "url": "${endpoint}",
       "headers": { "Authorization": "Bearer <your-token>" }

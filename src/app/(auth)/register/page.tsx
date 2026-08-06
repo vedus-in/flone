@@ -40,7 +40,7 @@ export default async function RegisterPage() {
       <Card.Header className="gap-1.5">
         <h1 className="text-lg leading-6 font-semibold text-primary">Registration is closed</h1>
         <Card.Description>
-          This Kanban instance is not accepting new accounts right now.
+          This Flone instance is not accepting new accounts right now.
         </Card.Description>
       </Card.Header>
 

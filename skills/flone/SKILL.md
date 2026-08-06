@@ -1,11 +1,11 @@
 ---
-name: kanban
-description: Read and update Kanban boards, tickets and comments through the kanban MCP server. Use when the user mentions their board, a ticket, a ticket ref like PROJ-12, a backlog, a sprint column, or asks to file, move, assign, prioritise, comment on or close work items.
+name: flone
+description: Read and update Flone boards, tickets and comments through the flone MCP server. Use when the user mentions their board, a ticket, a ticket ref like PROJ-12, a backlog, a sprint column, or asks to file, move, assign, prioritise, comment on or close work items.
 ---
 
-# Kanban
+# Flone
 
-The `kanban` MCP server exposes one person's boards. Every call acts as the
+The `flone` MCP server exposes one person's boards. Every call acts as the
 owner of the token and can only reach organizations they belong to — there is no
 admin mode and no way to see another tenant.
 
@@ -14,8 +14,8 @@ admin mode and no way to see another tenant.
 The server needs two environment variables where the client runs:
 
 ```bash
-export KANBAN_URL=https://your-kanban.example.com   # defaults to http://localhost:3000
-export KANBAN_MCP_TOKEN=<token from the app>
+export FLONE_URL=https://your-flone.example.com   # defaults to http://localhost:3000
+export FLONE_MCP_TOKEN=<token from the app>
 ```
 
 Get the token from the running app: account menu (bottom of the sidebar) →
@@ -49,7 +49,7 @@ Then act. Everything the web app can do is here:
 ## Conventions
 
 - A ticket's human-facing name is its `ref`, e.g. `PROJ-12`. Say that to the user, not the id.
-- Every result carries a `url` — a path on the Kanban app. Offer it when reporting what changed.
+- Every result carries a `url` — a path on the Flone app. Offer it when reporting what changed.
 - **Ask before deleting anything.** Deletes cascade: a board takes its tickets, a project takes its boards, an organization takes everything. `delete_project` and `delete_organization` also require you to echo the key or name exactly — that guardrail is there to make the deletion deliberate, so treat needing it as a reason to confirm with the user, not a puzzle to solve.
 - Making several changes to one ticket? One `update_ticket` call, not four.
 - Columns are fixed: every board is seeded with *To Do*, *In Progress*, *Done*, and there is no tool to add, rename or delete a column. That is a deliberate limit of the app, not a gap here.

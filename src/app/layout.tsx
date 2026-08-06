@@ -17,8 +17,8 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Kanban',
-    template: '%s | Kanban',
+    default: 'Flone',
+    template: '%s | Flone',
   },
   description: 'A simple, secure Kanban board for small teams.',
   robots: { index: false, follow: false },

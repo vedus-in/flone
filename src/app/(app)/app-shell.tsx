@@ -279,7 +279,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                   {initials(activeOrg?.name ?? 'K')}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium text-primary">
-                  {activeOrg?.name ?? 'Kanban'}
+                  {activeOrg?.name ?? 'Flone'}
                 </span>
                 <Icon d={I_CARET} className="size-3 text-tertiary" />
               </AriaButton>

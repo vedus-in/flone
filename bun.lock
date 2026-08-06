@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "kanban",
+      "name": "flone",
       "dependencies": {
         "@base-ui/react": "^1.6.0",
         "@dnd-kit/core": "^6.3.1",

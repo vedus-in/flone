@@ -9,7 +9,7 @@
 @custom-variant focus-input-within (&:has(input:focus));
 
 /* ==========================================================================
-   Kanban -- app-specific additions only.
+   Flone -- app-specific additions only.
 
    Untitled UI IS the design system: components live under `src/components/`,
    and every colour, radius, shadow and font token comes from

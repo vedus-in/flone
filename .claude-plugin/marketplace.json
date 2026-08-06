@@ -1,13 +1,13 @@
 {
-  "name": "kanban",
+  "name": "flone",
   "owner": {
-    "name": "Kanban"
+    "name": "Flone"
   },
   "plugins": [
     {
-      "name": "kanban",
+      "name": "flone",
       "source": "./",
-      "description": "Read and update your Kanban boards, tickets and comments from any MCP client."
+      "description": "Read and update your Flone boards, tickets and comments from any MCP client."
     }
   ]
 }

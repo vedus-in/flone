@@ -1,4 +1,4 @@
-// Kanban — canonical Prisma schema.
+// Flone — canonical Prisma schema.
 //
 // SPEC §2 as amended by docs/superpowers/specs/2026-08-05-linear-project-workspace-design.md.
 // The Project is the team: it owns the key, the workflow states, the labels and

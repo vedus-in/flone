@@ -42,7 +42,7 @@ export default async function AuthLayout({ children }: { children: ReactNode }) 
           K
         </span>
         <div className="flex flex-col gap-1">
-          <span className="text-base font-semibold tracking-tight text-primary">Kanban</span>
+          <span className="text-base font-semibold tracking-tight text-primary">Flone</span>
           <p className="text-sm text-tertiary">A simple, secure board for small teams.</p>
         </div>
       </header>

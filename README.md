@@ -1,4 +1,4 @@
-# Kanban
+# Flone
 
 A small, multi-tenant Kanban application. People sign up with an email address and a password, create or join an organization, and work inside it: an organization holds projects, a project holds boards, a board holds three fixed columns (To Do, In Progress, Done), and tickets move between those columns and carry a comment thread. The organization is the tenant boundary, and it is enforced on every single read and write by walking up from the resource to its organization inside the database query itself — there is no place where one tenant can observe another. It is deliberately small: a handful of pages, no third-party services, and one API endpoint — an MCP server that speaks to the same authorization layer as everything else.
 
@@ -79,7 +79,7 @@ Register an account at `/register`, and you will be sent straight to the organiz
 | `bun run db:migrate` | `prisma migrate dev` — creates and applies a migration from schema changes. Local only. |
 | `bun run db:deploy` | `prisma migrate deploy` — applies existing migrations. Used in production. |
 | `bun run typecheck` | `tsc --noEmit`. |
-| `bun run mcp:smoke` | End-to-end check of `/api/mcp` against a running server. Needs `KANBAN_MCP_TOKEN`. |
+| `bun run mcp:smoke` | End-to-end check of `/api/mcp` against a running server. Needs `FLONE_MCP_TOKEN`. |
 
 ## MCP access
 
@@ -94,7 +94,7 @@ A token *is* a session — the same `Session` row a browser sign-in creates, wit
 ### Connect a client
 
 ```bash
-claude mcp add --transport http kanban https://your-kanban.example.com/api/mcp \
+claude mcp add --transport http flone https://your-flone.example.com/api/mcp \
   --header "Authorization: Bearer <your-token>"
 ```
 
@@ -102,14 +102,14 @@ Or install this repository as a plugin, which brings the server and a skill that
 
 ```bash
 claude plugin marketplace add <this-repo>
-claude plugin install kanban@kanban
+claude plugin install flone@flone
 ```
 
 The plugin's `.mcp.json` reads two environment variables:
 
 ```bash
-export KANBAN_URL=https://your-kanban.example.com   # defaults to http://localhost:3000
-export KANBAN_MCP_TOKEN=<your-token>
+export FLONE_URL=https://your-flone.example.com   # defaults to http://localhost:3000
+export FLONE_MCP_TOKEN=<your-token>
 ```
 
 Any other MCP client works the same way — point it at the endpoint with that one header.
@@ -136,7 +136,7 @@ Two things are deliberately absent. Signing out would revoke the very token maki
 ### Verifying it
 
 ```bash
-KANBAN_MCP_TOKEN=<token> bun run mcp:smoke
+FLONE_MCP_TOKEN=<token> bun run mcp:smoke
 ```
 
 It checks the handshake, that an unauthenticated call is a 401, and that a bad argument comes back as a tool error rather than a transport error. Then it builds a **throwaway organization of its own** — project, two boards, a ticket, a comment — exercises every tool against it, and deletes the organization in a `finally`. Your real boards are never touched, so it is safe to point at production. The three `admin_*` tools are skipped, not failed, when the token does not belong to a site administrator.

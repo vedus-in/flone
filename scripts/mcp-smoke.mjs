@@ -2,8 +2,8 @@
 /**
  * End-to-end check of /api/mcp against a RUNNING server.
  *
- *   KANBAN_MCP_TOKEN=<token> bun run mcp:smoke
- *   KANBAN_URL=https://kanban.example.com KANBAN_MCP_TOKEN=... bun run mcp:smoke
+ *   FLONE_MCP_TOKEN=<token> bun run mcp:smoke
+ *   FLONE_URL=https://flone.example.com FLONE_MCP_TOKEN=... bun run mcp:smoke
  *
  * It builds a THROWAWAY organization of its own — project, two boards, a ticket,
  * a comment — exercises every tool against it, then deletes the organization in
@@ -16,12 +16,12 @@
 
 import assert from 'node:assert/strict';
 
-const BASE = (process.env.KANBAN_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+const BASE = (process.env.FLONE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
 const ENDPOINT = `${BASE}/api/mcp`;
-const TOKEN = process.env.KANBAN_MCP_TOKEN;
+const TOKEN = process.env.FLONE_MCP_TOKEN;
 
 if (!TOKEN) {
-  console.error('KANBAN_MCP_TOKEN is not set. Create one in the app: account menu -> MCP access.');
+  console.error('FLONE_MCP_TOKEN is not set. Create one in the app: account menu -> MCP access.');
   process.exit(2);
 }
 
@@ -70,7 +70,7 @@ const init = await rpc('initialize', {
   clientInfo: { name: 'mcp-smoke', version: '0' },
 });
 assert.equal(init.status, 200, `initialize returned ${init.status}`);
-assert.equal(init.body.result.serverInfo.name, 'kanban');
+assert.equal(init.body.result.serverInfo.name, 'flone');
 assert.equal(init.body.result.protocolVersion, '2025-06-18');
 assert.ok(init.body.result.capabilities.tools);
 step(`initialize ok (protocol ${init.body.result.protocolVersion})`);
