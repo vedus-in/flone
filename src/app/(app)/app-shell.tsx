@@ -518,7 +518,15 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
           <Dropdown.Popover placement="top start" className="min-w-56">
             <Dropdown.Menu aria-label="Account">
               <Dropdown.Section>
-                <Dropdown.Item id="account" textValue={userEmail} isDisabled>
+                {/*
+                 * `id` is the React Aria COLLECTION KEY, not a DOM id, and it
+                 * must be unique across the whole menu. Two items sharing one
+                 * key makes the collection builder render the entire menu
+                 * twice -- every entry duplicated, not just the clashing pair.
+                 * This one is the identity header, hence `identity`; the link
+                 * to /account below is what deserves `account`.
+                 */}
+                <Dropdown.Item id="identity" textValue={userEmail} isDisabled>
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate text-sm">{userName}</span>
                     <span className="truncate text-xs text-tertiary">{userEmail}</span>
