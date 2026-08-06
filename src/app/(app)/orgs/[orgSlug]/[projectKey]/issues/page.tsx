@@ -9,6 +9,7 @@ import { loadWorkspace } from '@/lib/workspace';
 import { cx } from '@/lib/utils/cx';
 
 import { IssueComposer } from '../issue-composer';
+import { RowBoardMenu } from '../row-board-menu';
 import { SaveViewForm } from '../views/save-view-form';
 
 /**
@@ -171,6 +172,14 @@ export default async function IssuesPage({
 
       <IssueListView
         groups={groups}
+        renderAction={(row) => (
+          <RowBoardMenu
+            ticketId={row.id}
+            issueLabel={row.label}
+            boardId={row.board?.id ?? null}
+            boards={workspace.boards}
+          />
+        )}
         emptyMessage={
           hasActiveFilter(filters)
             ? 'No issues match those filters.'

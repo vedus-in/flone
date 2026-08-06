@@ -40,7 +40,7 @@ import {
 } from '@/components/ui';
 import type { ActionResult } from '@/lib/result';
 // Issue writes live at PROJECT scope now; only the comment actions are local.
-import { assignIssue, deleteIssue, moveIssue, updateIssue } from '../../issue-actions';
+import { assignIssue, boardIssue, deleteIssue, moveIssue, updateIssue } from '../../issue-actions';
 import { createComment, deleteComment, updateComment } from './actions';
 
 /* -------------------------------------------------------------------------- */
@@ -49,6 +49,7 @@ import { createComment, deleteComment, updateComment } from './actions';
 
 export type StateOption = { id: string; name: string };
 export type MemberOption = { id: string; name: string };
+export type BoardOption = { id: string; name: string };
 
 export type CommentItem = {
   id: string;
@@ -305,6 +306,54 @@ export function TicketAssignForm({ ticketId, assigneeId, members }: TicketAssign
             {members.map((member) => (
               <option key={member.id} value={member.id}>
                 {member.name}
+              </option>
+            ))}
+          </select>
+          <SubmitButton color="secondary" size="sm" pendingLabel="Saving...">
+            Save
+          </SubmitButton>
+        </div>
+      </Field>
+
+      <StatusNote>{resultMessage(state)}</StatusNote>
+
+      <FormError>{resultError(state)}</FormError>
+    </form>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Board                                                                       */
+/* -------------------------------------------------------------------------- */
+
+type TicketBoardFormProps = {
+  ticketId: string;
+  boardId: string | null;
+  boards: BoardOption[];
+};
+
+/**
+ * Which board the issue is filed under, or none.
+ *
+ * The board card menu could already do this; the issue page could not, which
+ * left an issue on no board -- or on the wrong one -- with nowhere to fix it.
+ * "No board" submits the empty string, the exact value `setIssueBoard` accepts
+ * to clear the field.
+ */
+export function TicketBoardForm({ ticketId, boardId, boards }: TicketBoardFormProps) {
+  const [state, action] = useActionState(boardIssue, null);
+
+  return (
+    <form action={action} className="flex flex-col gap-2">
+      <input type="hidden" name="ticketId" value={ticketId} />
+
+      <Field htmlFor="ticket-board" label="Board">
+        <div className="flex items-center gap-2">
+          <select id="ticket-board" className={SELECT_CLASS} name="boardId" defaultValue={boardId ?? ''}>
+            <option value="">No board</option>
+            {boards.map((board) => (
+              <option key={board.id} value={board.id}>
+                {board.name}
               </option>
             ))}
           </select>

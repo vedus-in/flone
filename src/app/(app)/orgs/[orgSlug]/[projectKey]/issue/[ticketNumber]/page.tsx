@@ -23,6 +23,7 @@ import { cx } from '@/lib/utils/cx';
 import {
   CommentThread,
   TicketAssignForm,
+  TicketBoardForm,
   TicketDeleteForm,
   TicketEditForm,
   TicketStateForm,
@@ -309,6 +310,12 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
                 ticketId={ctx.ticket.id}
                 assigneeId={detail.assignee?.id ?? null}
                 members={workspace.members}
+              />
+
+              <TicketBoardForm
+                ticketId={ctx.ticket.id}
+                boardId={detail.board?.id ?? null}
+                boards={workspace.boards}
               />
 
               <Separator />

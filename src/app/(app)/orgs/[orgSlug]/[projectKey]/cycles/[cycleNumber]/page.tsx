@@ -12,6 +12,7 @@ import { cycleNumberSchema } from '@/lib/validation';
 import { loadWorkspace } from '@/lib/workspace';
 
 import { IssueComposer } from '../../issue-composer';
+import { RowBoardMenu } from '../../row-board-menu';
 
 /**
  * One cycle: its issues grouped by state, and a progress panel beside them.
@@ -129,6 +130,14 @@ export default async function CyclePage({
         <div className="min-w-0">
           <IssueListView
             groups={loaded.groups}
+            renderAction={(row) => (
+              <RowBoardMenu
+                ticketId={row.id}
+                issueLabel={row.label}
+                boardId={row.board?.id ?? null}
+                boards={workspace.boards}
+              />
+            )}
             emptyMessage="No issues in this cycle yet."
           />
         </div>

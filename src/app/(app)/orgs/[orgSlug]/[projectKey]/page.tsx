@@ -21,6 +21,7 @@ import { defaultComposeState } from '@/lib/states';
 import { loadWorkspace } from '@/lib/workspace';
 
 import { IssueComposer } from './issue-composer';
+import { RowBoardMenu } from './row-board-menu';
 
 /**
  * The project overview -- Linear's team home.
@@ -136,6 +137,14 @@ export default async function ProjectPage({ params }: { params: Promise<Params> 
 
           <IssueListView
             groups={inFlight.groups}
+            renderAction={(row) => (
+              <RowBoardMenu
+                ticketId={row.id}
+                issueLabel={row.label}
+                boardId={row.board?.id ?? null}
+                boards={workspace.boards}
+              />
+            )}
             emptyMessage={
               current
                 ? 'Nothing active in this cycle yet.'

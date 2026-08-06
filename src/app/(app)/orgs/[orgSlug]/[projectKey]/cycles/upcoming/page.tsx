@@ -4,6 +4,9 @@ import { IssueListView } from '@/components/issue-row';
 import { cyclePath, cyclesPath, loadPage, requireProjectByKey } from '@/lib/authz';
 import { ensureCycles, listCycles } from '@/lib/cycles';
 import { loadIssues, parseIssueFilters } from '@/lib/issues';
+import { loadWorkspace } from '@/lib/workspace';
+
+import { RowBoardMenu } from '../../row-board-menu';
 
 /**
  * Everything queued behind the current cycle.
@@ -36,12 +39,15 @@ export default async function UpcomingCyclesPage({ params }: { params: Promise<P
   const cycles = (await listCycles(ctx.project.id, state.current + 1)).slice(0, 6);
   const filters = parseIssueFilters({}, 'all');
 
-  const sections = await Promise.all(
-    cycles.map(async (cycle) => ({
-      cycle,
-      loaded: await loadIssues(ctx, { filters, scope: { cycleId: cycle.id } }),
-    })),
-  );
+  const [workspace, sections] = await Promise.all([
+    loadWorkspace(ctx),
+    Promise.all(
+      cycles.map(async (cycle) => ({
+        cycle,
+        loaded: await loadIssues(ctx, { filters, scope: { cycleId: cycle.id } }),
+      })),
+    ),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -76,7 +82,18 @@ export default async function UpcomingCyclesPage({ params }: { params: Promise<P
                 {loaded.total} {loaded.total === 1 ? 'issue' : 'issues'}
               </span>
             </header>
-            <IssueListView groups={loaded.groups} emptyMessage="Nothing planned for this cycle yet." />
+            <IssueListView
+              groups={loaded.groups}
+              renderAction={(row) => (
+                <RowBoardMenu
+                  ticketId={row.id}
+                  issueLabel={row.label}
+                  boardId={row.board?.id ?? null}
+                  boards={workspace.boards}
+                />
+              )}
+              emptyMessage="Nothing planned for this cycle yet."
+            />
           </section>
         ))
       )}

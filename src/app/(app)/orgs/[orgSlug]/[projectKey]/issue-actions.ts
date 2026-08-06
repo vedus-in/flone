@@ -25,6 +25,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import {
+  boardPath,
   filterLabelsInProject,
   issuesPath,
   projectPath,
@@ -416,6 +417,16 @@ export async function assignIssue(
   });
 }
 
+export async function boardIssue(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return setIssueBoard({
+    ticketId: field(formData, 'ticketId'),
+    boardId: field(formData, 'boardId'),
+  });
+}
+
 /* -------------------------------------------------------------------------- */
 /* placeIssue -- the drag-and-drop primitive                                   */
 /* -------------------------------------------------------------------------- */
@@ -661,18 +672,21 @@ export async function setIssueBoard(input: {
     if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
 
     const ctx = await requireTicket(parsed.data.ticketId);
-    if (parsed.data.boardId !== '') {
-      await requireBoardInProject(ctx.ticket.projectId, parsed.data.boardId);
-    }
+    const board =
+      parsed.data.boardId === ''
+        ? null
+        : await requireBoardInProject(ctx.ticket.projectId, parsed.data.boardId);
 
     await prisma.ticket.update({
       where: { id: ctx.ticket.id },
-      data: { boardId: parsed.data.boardId === '' ? null : parsed.data.boardId },
+      data: { boardId: board?.id ?? null },
     });
 
-    // The OLD board's page needs revalidating too, or the card lingers there.
-    revalidateIssue(ctx);
-    return ok();
+    // `ticketSurfaces` covers the OLD board -- `ctx` predates the write -- or the
+    // card lingers there. The DESTINATION is not in it, and without this the
+    // issue is missing from the board it was just moved to.
+    revalidateIssue(ctx, board ? [boardPath(ctx.org, ctx.project, board)] : []);
+    return ok('Board updated.');
   });
 }
 
