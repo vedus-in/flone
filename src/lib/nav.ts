@@ -4,30 +4,40 @@ import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/authz';
 
 /**
- * The navigation tree behind the sidebar: the caller's organizations and the
- * projects inside them.
+ * The navigation tree behind the sidebar: the caller's organizations, the
+ * workspaces inside them, and the projects inside those.
  *
- * Boards are deliberately NOT loaded any more. A project row now expands to a
- * fixed set of destinations -- Home, Issues, Cycles, Boards, Views -- so the
- * sidebar no longer needs, or wants, a per-project board list: on a workspace
- * with a few dozen boards that query ran on every single page render to build a
- * tree nobody navigates by.
+ * Boards are deliberately NOT loaded. A project row expands to a fixed set of
+ * destinations -- Home, Issues, Cycles, Boards, Views -- so the sidebar does not
+ * need, or want, a per-project board list: on an organization with a few dozen
+ * boards that query ran on every single page render to build a tree nobody
+ * navigates by.
+ *
+ * Workspaces ARE loaded, and that is a different trade: there are few of them,
+ * they are the grouping the sidebar renders, and a project cannot be placed
+ * without knowing which one owns it. One nested relation, no extra round trip.
  *
  * Scoped by MEMBERSHIP at the root of the query -- every organization returned
- * is one the acting user belongs to, and projects come back only as nested
- * relations of those rows. Nothing here is ever keyed off a client-supplied id,
- * so this cannot be turned into a cross-tenant read.
+ * is one the acting user belongs to, and workspaces and projects come back only
+ * as nested relations of those rows. Nothing here is ever keyed off a
+ * client-supplied id, so this cannot be turned into a cross-tenant read.
  *
  * The user id comes from the session via `requireUser()`, never from an argument.
  */
 
 export type NavProject = { id: string; key: string; name: string };
+export type NavWorkspace = {
+  id: string;
+  name: string;
+  slug: string;
+  projects: NavProject[];
+};
 export type NavOrg = {
   id: string;
   name: string;
   slug: string;
   role: string;
-  projects: NavProject[];
+  workspaces: NavWorkspace[];
 };
 
 export async function listNavTree(): Promise<NavOrg[]> {
@@ -43,9 +53,17 @@ export async function listNavTree(): Promise<NavOrg[]> {
           id: true,
           name: true,
           slug: true,
-          projects: {
+          workspaces: {
             orderBy: [{ name: 'asc' }, { id: 'asc' }],
-            select: { id: true, key: true, name: true },
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              projects: {
+                orderBy: [{ name: 'asc' }, { id: 'asc' }],
+                select: { id: true, key: true, name: true },
+              },
+            },
           },
         },
       },
@@ -57,10 +75,15 @@ export async function listNavTree(): Promise<NavOrg[]> {
     name: membership.organization.name,
     slug: membership.organization.slug,
     role: membership.role,
-    projects: membership.organization.projects.map((project) => ({
-      id: project.id,
-      key: project.key,
-      name: project.name,
+    workspaces: membership.organization.workspaces.map((workspace) => ({
+      id: workspace.id,
+      name: workspace.name,
+      slug: workspace.slug,
+      projects: workspace.projects.map((project) => ({
+        id: project.id,
+        key: project.key,
+        name: project.name,
+      })),
     })),
   }));
 }

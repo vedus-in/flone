@@ -13,7 +13,10 @@ import {
   requireAdmin,
   requireBoard,
   requireOrgBySlug,
-  requireProjectByKey,
+  // Tools address a project by (orgSlug, projectKey) and have no URL to prove
+  // canonical, so they use the workspace-free loader -- same authorization, one
+  // fewer argument every caller would have to look up first.
+  requireProjectByKeyInOrg,
   requireTicket,
   requireUser,
   ticketPath,
@@ -29,7 +32,8 @@ import { STATE_ORDER, TICKET_ORDER, cuid } from '@/lib/validation';
 
 import { setRegistration, setUserAdmin } from '@/app/(app)/admin/actions';
 import { createOrganization } from '@/app/(app)/orgs/new/actions';
-import { createProject } from '@/app/(app)/orgs/[orgSlug]/actions';
+import { createWorkspace } from '@/app/(app)/orgs/[orgSlug]/actions';
+import { createProject } from '@/app/(app)/orgs/[orgSlug]/[workspaceSlug]/actions';
 import {
   addMember,
   changeMemberRole,
@@ -43,7 +47,7 @@ import {
   deleteProject,
   renameBoard,
   updateProject,
-} from '@/app/(app)/orgs/[orgSlug]/[projectKey]/actions';
+} from '@/app/(app)/orgs/[orgSlug]/[workspaceSlug]/[projectKey]/actions';
 import {
   createIssue,
   deleteIssue,
@@ -56,12 +60,12 @@ import {
   setIssueParent,
   setIssuePriority,
   updateIssue,
-} from '@/app/(app)/orgs/[orgSlug]/[projectKey]/issue-actions';
+} from '@/app/(app)/orgs/[orgSlug]/[workspaceSlug]/[projectKey]/issue-actions';
 import {
   createComment,
   deleteComment,
   updateComment,
-} from '@/app/(app)/orgs/[orgSlug]/[projectKey]/issue/[ticketNumber]/actions';
+} from '@/app/(app)/orgs/[orgSlug]/[workspaceSlug]/[projectKey]/issue/[ticketNumber]/actions';
 
 /**
  * The MCP tool surface (transport lives in `src/app/api/mcp/route.ts`).
@@ -682,7 +686,7 @@ export const TOOLS: Tool[] = [
     },
     annotations: { readOnlyHint: true },
     run: async (args) => {
-      const ctx = await requireProjectByKey(
+      const ctx = await requireProjectByKeyInOrg(
         requiredString(args, 'orgSlug'),
         requiredString(args, 'projectKey').toUpperCase(),
       );
@@ -928,14 +932,49 @@ export const TOOLS: Tool[] = [
   /* ------------------------------------------------------------------ */
 
   {
-    name: 'create_project',
-    title: 'Create a project',
+    name: 'create_workspace',
+    title: 'Create a workspace',
     description:
-      'Create a project in an organization. The key is derived from the name when omitted. ADMIN or OWNER.',
+      'Create a workspace: a named group of projects inside an organization, and a URL segment. The URL slug is derived from the name when omitted. ADMIN or OWNER.',
     inputSchema: {
       type: 'object',
       properties: {
         orgSlug: ORG_SLUG,
+        name: STRING,
+        slug: { ...STRING, description: '2-40 lowercase letters, digits or dashes, e.g. platform.' },
+      },
+      required: ['orgSlug', 'name'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const slug = optionalString(args, 'slug');
+      const target = await runNavigating(() =>
+        createWorkspace(
+          null,
+          form({
+            orgSlug: requiredString(args, 'orgSlug'),
+            name: requiredString(args, 'name'),
+            ...(slug ? { slug } : {}),
+          }),
+        ),
+      );
+      return { ok: true, workspaceSlug: tailOf(target), url: target };
+    },
+  },
+
+  {
+    name: 'create_project',
+    title: 'Create a project',
+    description:
+      'Create a project inside a workspace. The key is derived from the name when omitted, and is unique across the organization. Omit `workspace` only when the organization has exactly one. ADMIN or OWNER.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        workspace: {
+          ...STRING,
+          description: 'Workspace slug, from list_boards. Required once there is more than one.',
+        },
         name: STRING,
         key: { ...STRING, description: '2-10 characters: a letter then letters or digits, e.g. ENG.' },
         description: STRING,
@@ -944,13 +983,39 @@ export const TOOLS: Tool[] = [
       additionalProperties: false,
     },
     run: async (args) => {
+      const orgSlug = requiredString(args, 'orgSlug');
       const key = optionalString(args, 'key');
       const description = optionalString(args, 'description');
+
+      // Resolve the destination rather than guessing it. One workspace is the
+      // unambiguous case and stays a one-argument call; more than one is a
+      // question only the caller can answer, so it is asked rather than assumed.
+      let workspaceSlug = optionalString(args, 'workspace');
+      if (!workspaceSlug) {
+        const ctx = await requireOrgBySlug(orgSlug);
+        const workspaces = await prisma.workspace.findMany({
+          where: { organizationId: ctx.org.id },
+          orderBy: [{ name: 'asc' }, { id: 'asc' }],
+          select: { name: true, slug: true },
+        });
+        if (workspaces.length !== 1) {
+          throw new ToolError(
+            workspaces.length === 0
+              ? 'This organization has no workspaces. Create one with create_workspace first.'
+              : `Pass "workspace" — this organization has ${workspaces.length}: ${workspaces
+                  .map((w) => w.slug)
+                  .join(', ')}.`,
+          );
+        }
+        workspaceSlug = workspaces[0].slug;
+      }
+
       const target = await runNavigating(() =>
         createProject(
           null,
           form({
-            orgSlug: requiredString(args, 'orgSlug'),
+            orgSlug,
+            workspaceSlug,
             name: requiredString(args, 'name'),
             ...(key ? { key } : {}),
             ...(description ? { description } : {}),
@@ -989,7 +1054,7 @@ export const TOOLS: Tool[] = [
 
       // updateProject writes BOTH columns and nulls an absent description, so the
       // untouched field is read back and re-sent rather than silently wiped.
-      const current = await requireProjectByKey(orgSlug, projectKey);
+      const current = await requireProjectByKeyInOrg(orgSlug, projectKey);
 
       must(
         await updateProject(
@@ -1136,7 +1201,7 @@ export const TOOLS: Tool[] = [
     },
     run: async (args) => {
       const user = await requireUser();
-      const ctx = await requireProjectByKey(
+      const ctx = await requireProjectByKeyInOrg(
         requiredString(args, 'orgSlug'),
         requiredString(args, 'projectKey').toUpperCase(),
       );

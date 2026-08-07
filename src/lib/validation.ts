@@ -17,9 +17,12 @@ import { COLOR_TOKENS, ISSUE_TABS } from '@/lib/model';
 /* -------------------------------------------------------------------------- */
 
 /**
- * Organization slugs live under `/orgs/`, so the only static sibling a slug
- * could shadow is `new`. The rest are defence in depth against future routes and
- * against slugs that look like infrastructure.
+ * Shared by organization slugs (under `/orgs/`) and workspace slugs (under
+ * `/orgs/[orgSlug]/`). An org slug's only static sibling is `new`; a workspace
+ * slug's are `settings` and `go`. Both sets are frozen and both are covered
+ * here, which is what keeps the denylist provably complete rather than
+ * aspirational (SPEC 7.1). The rest are defence in depth against future routes
+ * and against slugs that look like infrastructure.
  */
 export const RESERVED_SLUGS = new Set([
   'new',
@@ -29,6 +32,8 @@ export const RESERVED_SLUGS = new Set([
   'api',
   'admin',
   'settings',
+  /** The legacy-project-URL trampoline at `/orgs/[orgSlug]/go/...`. */
+  'go',
   'static',
   '_next',
   'favicon.ico',
@@ -36,6 +41,14 @@ export const RESERVED_SLUGS = new Set([
   'sitemap.xml',
   'health',
 ]);
+
+/**
+ * The workspace every organization is created with, and the one the workspace
+ * migration backfilled every pre-existing project into. Nothing depends on a
+ * workspace with this slug existing later -- it can be renamed or deleted like
+ * any other.
+ */
+export const DEFAULT_WORKSPACE = { name: 'General', slug: 'general' } as const;
 
 /**
  * The issue model's vocabulary lives in `@/lib/model`, which is import-free
@@ -216,6 +229,7 @@ export const assignableRoleSchema = z.enum(['ADMIN', 'MEMBER']);
 
 export const userNameSchema = safeText(1, 80);
 export const orgNameSchema = safeText(2, 60);
+export const workspaceNameSchema = safeText(2, 60);
 export const projectNameSchema = safeText(1, 80);
 export const projectDescriptionSchema = safeMultiline(0, 2000);
 export const boardNameSchema = safeText(1, 80);

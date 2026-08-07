@@ -7,7 +7,13 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { orgPath, requireUser, runAction, type OrgRef } from '@/lib/authz';
 import { fail, ok, type ActionResult } from '@/lib/result';
-import { orgNameSchema, randomSlugSuffix, slugSchema, slugify } from '@/lib/validation';
+import {
+  DEFAULT_WORKSPACE,
+  orgNameSchema,
+  randomSlugSuffix,
+  slugSchema,
+  slugify,
+} from '@/lib/validation';
 
 /**
  * SPEC 6.4 -- `createOrganization`.
@@ -46,7 +52,10 @@ function isUniqueViolation(e: unknown): boolean {
 
 /**
  * One atomic nested write: Prisma wraps a nested `create` in a transaction, so an
- * organization can never exist without its owner's membership.
+ * organization can never exist without its owner's membership -- nor without its
+ * default workspace. That workspace is not a nicety: `Project.workspaceId` is
+ * required, so an organization created without one has nowhere to put a project
+ * and its "New project" form would fail on every submit.
  *
  * Returns `null` -- never throws -- when the slug is taken, so the caller can
  * decide between "retry with a random suffix" and "tell the user".
@@ -58,6 +67,7 @@ async function createOrg(userId: string, name: string, slug: string): Promise<Or
         name,
         slug,
         memberships: { create: { userId, role: Role.OWNER } },
+        workspaces: { create: { ...DEFAULT_WORKSPACE } },
       },
       select: { id: true, name: true, slug: true },
     });

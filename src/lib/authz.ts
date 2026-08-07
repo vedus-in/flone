@@ -39,7 +39,23 @@ import { ERRORS, type ActionResult } from '@/lib/result';
 export type SessionUser = { id: string; email: string; name: string; sessionId: string };
 
 export type OrgRef = { id: string; name: string; slug: string };
-export type ProjectRef = { id: string; name: string; key: string; description: string | null };
+export type WorkspaceRef = { id: string; name: string; slug: string };
+export type ProjectRef = {
+  id: string;
+  name: string;
+  key: string;
+  description: string | null;
+  /**
+   * The owning workspace's slug, denormalized onto the ref.
+   *
+   * Deliberate: every path builder below derives from `projectPath`, and every
+   * project URL now needs the workspace segment. Carrying the slug here keeps
+   * all of them binary `(org, project)` functions, so adding the segment did not
+   * touch a single one of their call sites. `ctx.workspace` is the full ref when
+   * a caller needs more than the slug.
+   */
+  workspaceSlug: string;
+};
 export type BoardRef = { id: string; name: string };
 export type CycleRef = { id: string; number: number; name: string | null; startsAt: Date; endsAt: Date };
 export type StateRef = { id: string; name: string; type: WorkflowStateType; position: number };
@@ -64,7 +80,8 @@ export type TicketRef = {
 export type CommentRef = { id: string; ticketId: string; authorId: string; body: string };
 
 export type OrgCtx = { user: SessionUser; org: OrgRef; role: Role };
-export type ProjectCtx = OrgCtx & { project: ProjectRef };
+export type WorkspaceCtx = OrgCtx & { workspace: WorkspaceRef };
+export type ProjectCtx = WorkspaceCtx & { project: ProjectRef };
 export type BoardCtx = ProjectCtx & { board: BoardRef };
 /** `board` is nullable here precisely because an issue need not be on one. */
 export type TicketCtx = ProjectCtx & { ticket: TicketRef; board: BoardRef | null };
@@ -113,7 +130,8 @@ export function isNextControlFlowError(e: unknown): boolean {
 /* -------------------------------------------------------------------------- */
 
 type OrgRow = { id: string; name: string; slug: string; memberships: Array<{ role: Role }> };
-type ProjectRow = ProjectRef & { organization: OrgRow };
+type WorkspaceRow = WorkspaceRef & { organization: OrgRow };
+type ProjectRow = Omit<ProjectRef, 'workspaceSlug'> & { workspace: WorkspaceRow };
 type BoardRow = BoardRef & { project: ProjectRow };
 type TicketRow = TicketRef & { project: ProjectRow; board: BoardRef | null };
 type CycleRow = CycleRef & { project: ProjectRow };
@@ -128,13 +146,27 @@ function orgSelect(userId: string) {
   } as const;
 }
 
+function workspaceSelect(userId: string) {
+  return {
+    id: true,
+    name: true,
+    slug: true,
+    organization: { select: orgSelect(userId) },
+  } as const;
+}
+
+/**
+ * The walk-up is now project -> workspace -> organization. The membership
+ * predicate still lands on the organization, which is still the only tenant
+ * boundary; the workspace is one more link in the same chain, not a second one.
+ */
 function projectSelect(userId: string) {
   return {
     id: true,
     name: true,
     key: true,
     description: true,
-    organization: { select: orgSelect(userId) },
+    workspace: { select: workspaceSelect(userId) },
   } as const;
 }
 
@@ -167,10 +199,23 @@ function toOrgCtx(user: SessionUser, row: OrgRow): OrgCtx {
   return { user, org: { id: row.id, name: row.name, slug: row.slug }, role };
 }
 
-function toProjectCtx(user: SessionUser, row: ProjectRow): ProjectCtx {
+function toWorkspaceCtx(user: SessionUser, row: WorkspaceRow): WorkspaceCtx {
   return {
     ...toOrgCtx(user, row.organization),
-    project: { id: row.id, name: row.name, key: row.key, description: row.description },
+    workspace: { id: row.id, name: row.name, slug: row.slug },
+  };
+}
+
+function toProjectCtx(user: SessionUser, row: ProjectRow): ProjectCtx {
+  return {
+    ...toWorkspaceCtx(user, row.workspace),
+    project: {
+      id: row.id,
+      name: row.name,
+      key: row.key,
+      description: row.description,
+      workspaceSlug: row.workspace.slug,
+    },
   };
 }
 
@@ -321,15 +366,55 @@ export async function requireOrgBySlug(orgSlug: string): Promise<OrgCtx> {
   return toOrgCtx(user, row);
 }
 
+/**
+ * Non-throwing. Exists because one caller -- the workspace page -- has to tell
+ * "no such workspace" apart from "not yours" only to decide whether to try the
+ * segment as a legacy project key instead, and a thrown NOT_FOUND cannot be
+ * caught without also swallowing UNAUTHENTICATED.
+ */
+export async function findWorkspaceBySlug(
+  orgSlug: string,
+  workspaceSlug: string,
+): Promise<WorkspaceCtx | null> {
+  const user = await requireUser();
+  const row = await prisma.workspace.findFirst({
+    where: {
+      slug: workspaceSlug,
+      organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+    },
+    select: workspaceSelect(user.id),
+  });
+  return row ? toWorkspaceCtx(user, row) : null;
+}
+
+export async function requireWorkspaceBySlug(
+  orgSlug: string,
+  workspaceSlug: string,
+): Promise<WorkspaceCtx> {
+  const ctx = await findWorkspaceBySlug(orgSlug, workspaceSlug);
+  if (!ctx) throw new AuthzError('NOT_FOUND');
+  return ctx;
+}
+
+/**
+ * The workspace slug is a CONSTRAINT, not a hint: asking for `ENG` under the
+ * wrong workspace yields null, exactly as asking for it under the wrong org
+ * does. `Project.key` stays unique per organization, so the workspace segment
+ * never disambiguates the lookup — it only proves the URL is the canonical one.
+ */
 export async function requireProjectByKey(
   orgSlug: string,
+  workspaceSlug: string,
   projectKey: string,
 ): Promise<ProjectCtx> {
   const user = await requireUser();
   const row = await prisma.project.findFirst({
     where: {
       key: projectKey,
-      organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+      workspace: {
+        slug: workspaceSlug,
+        organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+      },
     },
     select: projectSelect(user.id),
   });
@@ -337,8 +422,49 @@ export async function requireProjectByKey(
   return toProjectCtx(user, row);
 }
 
+/**
+ * The same project, resolved WITHOUT the workspace segment. For Server Actions.
+ *
+ * The workspace is not an access boundary -- the membership predicate on the
+ * organization is, and `Project.key` is unique per organization, so the
+ * workspace slug never narrows the result. It earns its place in the URL-tuple
+ * loader above only as proof that the URL is canonical, which an action has no
+ * URL to check. Threading a hidden `workspaceSlug` input through every form to
+ * re-assert something the org predicate already settles would be ceremony, and
+ * ceremony is where authorization bugs hide.
+ *
+ * The returned ctx still carries the workspace, so `projectPath` and every
+ * revalidation target built from it are complete.
+ */
+export async function findProjectByKeyInOrg(
+  orgSlug: string,
+  projectKey: string,
+): Promise<ProjectCtx | null> {
+  const user = await requireUser();
+  const row = await prisma.project.findFirst({
+    where: {
+      key: projectKey,
+      workspace: {
+        organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+      },
+    },
+    select: projectSelect(user.id),
+  });
+  return row ? toProjectCtx(user, row) : null;
+}
+
+export async function requireProjectByKeyInOrg(
+  orgSlug: string,
+  projectKey: string,
+): Promise<ProjectCtx> {
+  const ctx = await findProjectByKeyInOrg(orgSlug, projectKey);
+  if (!ctx) throw new AuthzError('NOT_FOUND');
+  return ctx;
+}
+
 export async function requireBoardInPath(
   orgSlug: string,
+  workspaceSlug: string,
   projectKey: string,
   boardId: string,
 ): Promise<BoardCtx> {
@@ -348,7 +474,10 @@ export async function requireBoardInPath(
       id: boardId,
       project: {
         key: projectKey,
-        organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+        workspace: {
+          slug: workspaceSlug,
+          organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+        },
       },
     },
     select: { id: true, name: true, project: { select: projectSelect(user.id) } },
@@ -366,6 +495,7 @@ export async function requireBoardInPath(
  */
 export async function requireTicketInPath(
   orgSlug: string,
+  workspaceSlug: string,
   projectKey: string,
   ticketNumber: number,
 ): Promise<TicketCtx> {
@@ -375,7 +505,10 @@ export async function requireTicketInPath(
       number: ticketNumber,
       project: {
         key: projectKey,
-        organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+        workspace: {
+          slug: workspaceSlug,
+          organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+        },
       },
     },
     select: ticketSelect(user.id),
@@ -386,6 +519,7 @@ export async function requireTicketInPath(
 
 export async function requireCycleInPath(
   orgSlug: string,
+  workspaceSlug: string,
   projectKey: string,
   cycleNumber: number,
 ): Promise<CycleCtx> {
@@ -395,7 +529,10 @@ export async function requireCycleInPath(
       number: cycleNumber,
       project: {
         key: projectKey,
-        organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+        workspace: {
+          slug: workspaceSlug,
+          organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
+        },
       },
     },
     select: {
@@ -653,9 +790,23 @@ export function orgSettingsPath(org: OrgRef): string {
   return `${orgPath(org)}/settings`;
 }
 
-/** The project's home -- Linear's team overview. */
+export function workspacePath(org: OrgRef, workspace: WorkspaceRef): string {
+  return `${orgPath(org)}/${encodeURIComponent(workspace.slug)}`;
+}
+
+export function workspaceSettingsPath(org: OrgRef, workspace: WorkspaceRef): string {
+  return `${workspacePath(org, workspace)}/settings`;
+}
+
+/**
+ * The project's home -- Linear's team overview.
+ *
+ * Every other project-scoped path below is built from this one, so the
+ * workspace segment was added here and nowhere else. The slug rides on
+ * `ProjectRef` for exactly that reason; see the type.
+ */
 export function projectPath(org: OrgRef, project: ProjectRef): string {
-  return `${orgPath(org)}/${encodeURIComponent(project.key)}`;
+  return `${orgPath(org)}/${encodeURIComponent(project.workspaceSlug)}/${encodeURIComponent(project.key)}`;
 }
 
 export function issuesPath(org: OrgRef, project: ProjectRef): string {

@@ -42,20 +42,32 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       role: org.role,
       href: orgHref,
       settingsHref: `${orgHref}/settings`,
-      newProjectHref: `${orgHref}#new-project`,
-      projects: org.projects.map((project) => {
-        const projectHref = `${orgHref}/${encodeURIComponent(project.key)}`;
+      newWorkspaceHref: `${orgHref}#new-workspace`,
+      projectCount: org.workspaces.reduce((total, w) => total + w.projects.length, 0),
+      workspaces: org.workspaces.map((workspace) => {
+        const workspaceHref = `${orgHref}/${encodeURIComponent(workspace.slug)}`;
         return {
-          id: project.id,
-          key: project.key,
-          name: project.name,
-          href: projectHref,
-          issuesHref: `${projectHref}/issues`,
-          cyclesHref: `${projectHref}/cycles`,
-          currentCycleHref: `${projectHref}/cycles/current`,
-          upcomingCyclesHref: `${projectHref}/cycles/upcoming`,
-          boardsHref: `${projectHref}/boards`,
-          viewsHref: `${projectHref}/views`,
+          id: workspace.id,
+          name: workspace.name,
+          slug: workspace.slug,
+          href: workspaceHref,
+          settingsHref: `${workspaceHref}/settings`,
+          newProjectHref: `${workspaceHref}#new-project`,
+          projects: workspace.projects.map((project) => {
+            const projectHref = `${workspaceHref}/${encodeURIComponent(project.key)}`;
+            return {
+              id: project.id,
+              key: project.key,
+              name: project.name,
+              href: projectHref,
+              issuesHref: `${projectHref}/issues`,
+              cyclesHref: `${projectHref}/cycles`,
+              currentCycleHref: `${projectHref}/cycles/current`,
+              upcomingCyclesHref: `${projectHref}/cycles/upcoming`,
+              boardsHref: `${projectHref}/boards`,
+              viewsHref: `${projectHref}/views`,
+            };
+          }),
         };
       }),
     };

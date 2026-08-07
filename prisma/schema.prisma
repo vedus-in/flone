@@ -6,16 +6,25 @@
 // issue — and is OPTIONAL. An issue has exactly one status, and that status
 // belongs to the Project, never to a board.
 //
+// A Workspace groups Projects inside an Organization and is a URL segment:
+// `/orgs/acme/platform/ENG`. It is presentation and naming only — it owns no
+// states, labels, cycles or members. The Organization remains the single
+// multi-tenant boundary.
+//
 // Index rationale (final): no standalone index where the column is already the
 // leading column of a composite unique or index. `Ticket.boardId`,
-// `Ticket.cycleId` and `Ticket.parentId` DO each carry one — they are nullable
-// foreign keys that views filter on directly and none of them leads a composite.
+// `Ticket.cycleId`, `Ticket.parentId` and `Project.workspaceId` DO each carry
+// one — they are foreign keys that views filter on directly and none of them
+// leads a composite.
 // No index on Ticket.createdById, Ticket.assigneeId or Comment.authorId —
 // nothing filters by them.
 //
 // Referential actions: the tenant tree cascades (Organization ->
-// Membership/Project -> Board/WorkflowState/Cycle/Label/Ticket -> Comment,
-// User -> Session). Three deliberate exceptions:
+// Membership/Workspace/Project -> Board/WorkflowState/Cycle/Label/Ticket ->
+// Comment, User -> Session). Four deliberate exceptions:
+//   - Project.workspaceId is Restrict. A workspace holding projects cannot be
+//     deleted; the UI empties it first. Deleting a grouping must never delete
+//     the work grouped under it.
 //   - Ticket.stateId is Restrict. A state holding issues cannot be deleted;
 //     the UI reassigns first. Deleting a status must never delete work.
 //   - Ticket.boardId is SetNull. Deleting a board drops the chip and keeps the
@@ -163,8 +172,34 @@ model Organization {
   updatedAt DateTime @updatedAt
 
   memberships Membership[]
+  workspaces  Workspace[]
   projects    Project[]
   emailTokens EmailToken[]
+}
+
+/// A named grouping of Projects inside an Organization, and a URL segment:
+/// `/orgs/acme/platform/ENG`.
+///
+/// It owns NOTHING but its projects. States, labels and cycles stay on the
+/// Project, and membership stays on the Organization -- a workspace is visible
+/// to every member of its org. Adding a second membership boundary here would
+/// duplicate what Organization already is.
+///
+/// The slug shares `slugSchema` with organizations, so `RESERVED_SLUGS` already
+/// stops a workspace from shadowing the `settings` and `go` siblings that sit
+/// beside it under `/orgs/[orgSlug]/`.
+model Workspace {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  slug           String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  projects Project[]
+
+  @@unique([organizationId, slug])
 }
 
 model Membership {
@@ -186,7 +221,17 @@ model Project {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// Required: every project lives in exactly one workspace. Restrict, not
+  /// Cascade -- a workspace holding projects cannot be deleted, because doing so
+  /// would take every issue in them with it. Same reasoning as `Ticket.stateId`:
+  /// deleting a container must never delete work. The UI empties a workspace
+  /// (move the projects out, or delete them individually) before it can go.
+  workspaceId    String
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   name           String
+  /// Unique per ORGANIZATION, not per workspace. The key is the issue prefix, so
+  /// `VED-153` has to name exactly one issue no matter which workspace it sits
+  /// in. This is also what keeps the legacy-URL redirect unambiguous forever.
   key            String
   description    String?
   createdAt      DateTime     @default(now())
@@ -210,6 +255,7 @@ model Project {
   savedViews SavedView[]
 
   @@unique([organizationId, key])
+  @@index([workspaceId])
 }
 
 /// What an issue's status MEANS, independent of what a team called it.

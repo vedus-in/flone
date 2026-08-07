@@ -51,6 +51,21 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+
+  /*
+   * NO rewrite for pre-workspace project URLs, and the reason is worth keeping.
+   *
+   * The obvious shim is a `beforeFiles` rewrite matching the old
+   * `/orgs/:orgSlug/:projectKey/...` shape by its alphabet -- project keys are
+   * uppercase-only, workspace slugs lowercase-only, so a character class ought
+   * to separate them. It does not. Next compiles rewrite sources with
+   * path-to-regexp's default `sensitive: false`, so `([A-Z][A-Z0-9]{1,9})` also
+   * matches `platform`, and `Rewrite` exposes no case-sensitivity option. The
+   * shim silently swallowed every workspace whose slug was 2-10 alphanumerics.
+   *
+   * Legacy project URLs are handled in `[workspaceSlug]/page.tsx` instead, where
+   * the ambiguity is resolved by asking the database rather than the spelling.
+   */
 };
 
 export default nextConfig;

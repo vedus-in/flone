@@ -7,38 +7,44 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import {
   orgPath,
-  projectPath,
   requireOrgBySlug,
   requireRole,
   requireUser,
   runAction,
+  workspacePath,
+  type WorkspaceRef,
 } from '@/lib/authz';
 import { fail, ok, type ActionResult } from '@/lib/result';
 import {
-  DEFAULT_STATES,
-  deriveProjectKey,
-  projectDescriptionSchema,
-  projectKeySchema,
-  projectNameSchema,
+  randomSlugSuffix,
   slugSchema,
+  slugify,
+  workspaceNameSchema,
 } from '@/lib/validation';
 
 /**
- * SPEC 6.5 -- `createProject`.
+ * `createWorkspace`.
  *
  * `orgSlug` arriving in FormData is not a trust violation: it is a routing key,
  * and `requireOrgBySlug` re-proves membership (and yields the caller's role)
  * before it is used for anything. It is never identity.
+ *
+ * A workspace groups projects and owns nothing else, so creating one is gated at
+ * ADMIN -- the same bar as creating the projects that will live in it.
  */
 
 const INVALID_INPUT = 'Check the highlighted fields.';
-const KEY_TAKEN = 'That key is already in use.';
+const SLUG_TAKEN = 'That URL is taken in this organization.';
+const NO_SLUG_AVAILABLE = 'Could not pick a URL for that name. Choose one yourself.';
+
+const RANDOM_SUFFIX_ATTEMPTS = 5;
+/** 40-char slug budget minus a dash and four random base36 characters. */
+const STEM_BUDGET = 34;
 
 const schema = z.object({
   orgSlug: slugSchema,
-  name: projectNameSchema,
-  key: projectKeySchema.optional(),
-  description: projectDescriptionSchema.optional(),
+  name: workspaceNameSchema,
+  slug: slugSchema.optional(),
 });
 
 function fieldMessages(error: z.ZodError): Record<string, string> {
@@ -50,13 +56,36 @@ function fieldMessages(error: z.ZodError): Record<string, string> {
   return out;
 }
 
-/** Blank optional text inputs arrive as `''`; treat them as absent. */
-function optionalField(formData: FormData, name: string): string | undefined {
-  const raw = formData.get(name);
-  return typeof raw === 'string' && raw.trim().length > 0 ? raw : undefined;
+function isUniqueViolation(e: unknown): boolean {
+  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
 }
 
-export async function createProject(
+/**
+ * Returns `null` -- never throws -- when the slug is taken, so the caller can
+ * decide between "retry with a random suffix" and "tell the user".
+ *
+ * Unlike an organization slug, a workspace slug is unique per organization, so a
+ * collision here leaks only a name the caller can already see in their own
+ * sidebar. The random suffix is kept anyway for the derived path, because a
+ * silent `-2` is a worse experience than a random one either way.
+ */
+async function createWorkspaceRow(
+  organizationId: string,
+  name: string,
+  slug: string,
+): Promise<WorkspaceRef | null> {
+  try {
+    return await prisma.workspace.create({
+      data: { organizationId, name, slug },
+      select: { id: true, name: true, slug: true },
+    });
+  } catch (e) {
+    if (isUniqueViolation(e)) return null;
+    throw e;
+  }
+}
+
+export async function createWorkspace(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
@@ -65,11 +94,15 @@ export async function createProject(
   const result = await runAction(async () => {
     await requireUser();
 
+    // A blank "advanced" slug field means "derive one", not "an empty slug".
+    const rawSlug = formData.get('slug');
+    const slugInput =
+      typeof rawSlug === 'string' && rawSlug.trim().length > 0 ? rawSlug : undefined;
+
     const parsed = schema.safeParse({
       orgSlug: formData.get('orgSlug'),
       name: formData.get('name'),
-      key: optionalField(formData, 'key'),
-      description: optionalField(formData, 'description'),
+      slug: slugInput,
     });
     if (!parsed.success) return fail(INVALID_INPUT, fieldMessages(parsed.error));
 
@@ -77,37 +110,30 @@ export async function createProject(
     requireRole(ctx, Role.ADMIN);
 
     const { name } = parsed.data;
-    const key = parsed.data.key ?? deriveProjectKey(name);
-    const description = parsed.data.description ?? null;
 
-    try {
-      // One nested write, so a project can never exist without its workflow
-      // states. Prisma wraps nested creates in a transaction.
-      //
-      // The states hang off the PROJECT now, not off a board -- and no board is
-      // created here at all. A board is Linear's "project": an optional grouping
-      // you make when you have something to group, not a container every issue
-      // has to be filed into on day one.
-      const project = await prisma.project.create({
-        data: {
-          organizationId: ctx.org.id,
-          name,
-          key,
-          description,
-          states: { create: DEFAULT_STATES.map((state) => ({ ...state })) },
-        },
-        select: { id: true, name: true, key: true, description: true },
-      });
-
-      revalidatePath(orgPath(ctx.org));
-      nav.to = projectPath(ctx.org, project);
+    // Slug typed explicitly -> a collision is a field error, never a silent rename.
+    if (parsed.data.slug) {
+      const created = await createWorkspaceRow(ctx.org.id, name, parsed.data.slug);
+      if (!created) return fail(SLUG_TAKEN, { slug: SLUG_TAKEN });
+      revalidatePath('/', 'layout');
+      nav.to = workspacePath(ctx.org, created);
       return ok();
-    } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        return fail(KEY_TAKEN, { key: KEY_TAKEN });
-      }
-      throw e;
     }
+
+    const stem = slugify(name);
+    const base =
+      stem.length > STEM_BUDGET ? stem.slice(0, STEM_BUDGET).replace(/-+$/g, '') : stem;
+
+    let created = await createWorkspaceRow(ctx.org.id, name, stem);
+    for (let attempt = 0; attempt < RANDOM_SUFFIX_ATTEMPTS && !created; attempt += 1) {
+      created = await createWorkspaceRow(ctx.org.id, name, `${base}-${randomSlugSuffix()}`);
+    }
+    if (!created) return fail(NO_SLUG_AVAILABLE, { slug: NO_SLUG_AVAILABLE });
+
+    revalidatePath('/', 'layout');
+    revalidatePath(orgPath(ctx.org));
+    nav.to = workspacePath(ctx.org, created);
+    return ok();
   });
 
   if (!result.ok) return result;

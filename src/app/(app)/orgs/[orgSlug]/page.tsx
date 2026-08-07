@@ -2,38 +2,26 @@ import Link from 'next/link';
 import { Role } from '@prisma/client';
 import { ChevronDown } from '@untitledui/icons';
 import { prisma } from '@/lib/db';
-import {
-  atLeast,
-  loadPage,
-  projectPath,
-  requireOrgBySlug,
-} from '@/lib/authz';
-import {
-  Card,
-  EmptyState,
-  Field,
-  Input,
-  SubmitButton,
-  Textarea,
-} from '@/components/ui';
+import { atLeast, loadPage, requireOrgBySlug, workspacePath } from '@/lib/authz';
+import { Card, EmptyState, Field, Input, SubmitButton } from '@/components/ui';
 import { ActionForm } from '../../action-form';
-import { createProject } from './actions';
+import { createWorkspace } from './actions';
 
 /**
- * One grid definition shared by the header row and every project row, so the
- * columns cannot drift apart. Below `sm` only the name and the ticket count
- * survive -- the rest are `hidden`, and grid simply does not place them.
+ * The organization root: its workspaces.
+ *
+ * This used to be the project list, which now lives one level down under the
+ * workspace that owns it. Every project has exactly one workspace, so nothing is
+ * reachable from here that is not reachable through one of these rows.
  */
 const ROW =
-  'grid grid-cols-[minmax(0,1fr)_3.5rem] items-center gap-3 px-3 sm:grid-cols-[minmax(0,1fr)_5rem_4.5rem_4.5rem_5.5rem]';
+  'grid grid-cols-[minmax(0,1fr)_4.5rem] items-center gap-3 px-3 sm:grid-cols-[minmax(0,1fr)_8rem_4.5rem]';
 
-const UPDATED = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' });
-
-function ProjectIcon() {
+function WorkspaceIcon() {
   return (
     <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-4 shrink-0 text-tertiary">
       <path
-        d="M8 1.75 13.75 5v6L8 14.25 2.25 11V5zM2.25 5 8 8.25 13.75 5M8 8.25v6"
+        d="M2.25 5.25A1.5 1.5 0 0 1 3.75 3.75h2.19c.4 0 .78.16 1.06.44l.81.81h4.44a1.5 1.5 0 0 1 1.5 1.5v5.25a1.5 1.5 0 0 1-1.5 1.5h-8.5a1.5 1.5 0 0 1-1.5-1.5z"
         stroke="currentColor"
         strokeWidth="1.5"
         strokeLinecap="round"
@@ -54,11 +42,7 @@ export default async function OrganizationPage({
   // `organizationId` comes from the upward walk, never from the URL. The nested
   // membership predicate is belt-and-braces: it makes the tenant boundary part
   // of this query too, so the read is safe when read in isolation (SPEC 3).
-  //
-  // Ticket totals ride along on the boards selection rather than a second
-  // query: `_count` cannot reach across two relations, and a project has a
-  // handful of boards, not thousands.
-  const projects = await prisma.project.findMany({
+  const workspaces = await prisma.workspace.findMany({
     where: {
       organizationId: ctx.org.id,
       organization: { memberships: { some: { userId: ctx.user.id } } },
@@ -66,36 +50,28 @@ export default async function OrganizationPage({
     select: {
       id: true,
       name: true,
-      key: true,
-      // Unused by the row, but `ProjectRef` (and so `projectPath`) requires it.
-      description: true,
-      updatedAt: true,
-      boards: { select: { _count: { select: { tickets: true } } } },
+      slug: true,
+      _count: { select: { projects: true } },
     },
-    orderBy: [{ key: 'asc' }, { id: 'asc' }],
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
   });
 
   const canManage = atLeast(ctx.role, Role.ADMIN);
-  const empty = projects.length === 0;
+  const empty = workspaces.length === 0;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-sm font-medium text-primary">Projects</h1>
+        <h1 className="text-sm font-medium text-primary">Workspaces</h1>
         {canManage ? (
           <a
-            href="#new-project"
-            aria-label="New project"
-            title="New project"
+            href="#new-workspace"
+            aria-label="New workspace"
+            title="New workspace"
             className="grid size-6 place-items-center rounded-md text-tertiary no-underline transition-colors hover:bg-secondary hover:text-primary"
           >
             <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-4">
-              <path
-                d="M8 3.5v9M3.5 8h9"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
+              <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </a>
         ) : null}
@@ -103,68 +79,49 @@ export default async function OrganizationPage({
 
       {empty ? (
         <EmptyState
-          title="No projects yet"
+          title="No workspaces yet"
           description={
             canManage
-              ? 'A project groups the boards for one piece of work. Create the first one below.'
+              ? 'A workspace groups related projects. Create the first one below.'
               : 'Ask an owner or admin to create one.'
           }
         />
       ) : (
-        <section className="flex flex-col" aria-label="Projects">
-          <div className="flex items-center gap-2 px-3 pb-2">
-            <span className="rounded-md bg-secondary px-2 py-1 text-xs font-medium text-primary">
-              All projects
-            </span>
-            <span className="text-xs text-tertiary tabular-nums">{projects.length}</span>
-          </div>
-
+        <section className="flex flex-col" aria-label="Workspaces">
           <div
             className={`${ROW} border-b border-secondary py-2 text-xs text-tertiary`}
             aria-hidden="true"
           >
             <span>Name</span>
-            <span className="hidden sm:block">Key</span>
-            <span className="hidden text-end sm:block">Boards</span>
-            <span className="text-end">Tickets</span>
-            <span className="hidden text-end sm:block">Updated</span>
+            <span className="hidden sm:block">URL</span>
+            <span className="text-end">Projects</span>
           </div>
 
           <ul className="flex flex-col">
-            {projects.map((project) => {
-              const tickets = project.boards.reduce(
-                (total, board) => total + board._count.tickets,
-                0,
-              );
-              return (
-                <li
-                  key={project.id}
-                  /* The name link's `::after` covers the row, so the whole row is
-                     one link -- one tab stop, one accessible name. */
-                  className={`${ROW} relative border-b border-secondary/60 py-2.5 text-sm transition-colors hover:bg-primary_hover has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-focus-ring`}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <ProjectIcon />
-                    <Link
-                      href={projectPath(ctx.org, project)}
-                      className="truncate font-medium text-primary no-underline outline-none after:absolute after:inset-0 after:content-['']"
-                    >
-                      {project.name}
-                    </Link>
-                  </span>
-                  <span className="hidden truncate font-mono text-xs text-tertiary sm:block">
-                    {project.key}
-                  </span>
-                  <span className="hidden text-end text-xs text-tertiary tabular-nums sm:block">
-                    {project.boards.length}
-                  </span>
-                  <span className="text-end text-xs text-tertiary tabular-nums">{tickets}</span>
-                  <span className="hidden text-end text-xs text-tertiary sm:block">
-                    {UPDATED.format(project.updatedAt)}
-                  </span>
-                </li>
-              );
-            })}
+            {workspaces.map((workspace) => (
+              <li
+                key={workspace.id}
+                /* The name link's `::after` covers the row, so the whole row is
+                   one link -- one tab stop, one accessible name. */
+                className={`${ROW} relative border-b border-secondary/60 py-2.5 text-sm transition-colors hover:bg-primary_hover has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-focus-ring`}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <WorkspaceIcon />
+                  <Link
+                    href={workspacePath(ctx.org, workspace)}
+                    className="truncate font-medium text-primary no-underline outline-none after:absolute after:inset-0 after:content-['']"
+                  >
+                    {workspace.name}
+                  </Link>
+                </span>
+                <span className="hidden truncate font-mono text-xs text-tertiary sm:block">
+                  /{workspace.slug}
+                </span>
+                <span className="text-end text-xs text-tertiary tabular-nums">
+                  {workspace._count.projects}
+                </span>
+              </li>
+            ))}
           </ul>
         </section>
       )}
@@ -172,14 +129,14 @@ export default async function OrganizationPage({
       {/* Empty states never dangle an action the viewer's role cannot perform.
           The action re-checks the role regardless (SPEC 5). */}
       {canManage ? (
-        <section id="new-project" aria-labelledby="new-project-heading">
+        <section id="new-workspace" aria-labelledby="new-workspace-heading">
           <Card className="gap-0 p-0">
             <details className="group" open={empty}>
               <summary
-                id="new-project-heading"
+                id="new-workspace-heading"
                 className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-5 py-4 text-sm font-medium text-primary"
               >
-                New project
+                New workspace
                 <ChevronDown
                   aria-hidden="true"
                   className="size-4 transition-transform duration-100 group-open:rotate-180"
@@ -187,53 +144,49 @@ export default async function OrganizationPage({
               </summary>
               <div className="px-5 pb-5">
                 <ActionForm
-                  action={createProject}
+                  action={createWorkspace}
                   className="flex flex-col gap-5"
-                  aria-label="New project"
+                  aria-label="New workspace"
                 >
                   <input type="hidden" name="orgSlug" value={ctx.org.slug} />
 
-                  <div className="grid gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-                    <Field htmlFor="project-name" label="Name">
-                      <Input
-                        id="project-name"
-                        name="name"
-                        required
-                        maxLength={80}
-                        autoComplete="off"
-                        autoFocus={empty}
-                        placeholder="Website Redesign"
-                      />
-                    </Field>
-
-                    <Field
-                      htmlFor="project-key"
-                      label="Key"
-                      hint="Optional. Derived from the name if blank."
-                    >
-                      <Input
-                        id="project-key"
-                        name="key"
-                        maxLength={10}
-                        pattern="[A-Za-z][A-Za-z0-9]{1,9}"
-                        autoComplete="off"
-                        placeholder="WEB"
-                        spellCheck={false}
-                      />
-                    </Field>
-                  </div>
-
-                  <Field htmlFor="project-description" label="Description" hint="Optional.">
-                    <Textarea
-                      id="project-description"
-                      name="description"
-                      rows={3}
-                      maxLength={2000}
+                  <Field htmlFor="workspace-name" label="Name">
+                    <Input
+                      id="workspace-name"
+                      name="name"
+                      required
+                      maxLength={60}
+                      autoComplete="off"
+                      autoFocus={empty}
+                      placeholder="Platform"
                     />
                   </Field>
 
+                  <details className="group/adv">
+                    <summary className="cursor-pointer list-none text-xs text-tertiary">
+                      Advanced: choose a URL
+                    </summary>
+                    <div className="pt-3">
+                      <Field
+                        htmlFor="workspace-slug"
+                        label="URL"
+                        hint={`/orgs/${ctx.org.slug}/…  Derived from the name if blank.`}
+                      >
+                        <Input
+                          id="workspace-slug"
+                          name="slug"
+                          maxLength={40}
+                          pattern="[a-z0-9][a-z0-9-]{0,38}[a-z0-9]"
+                          autoComplete="off"
+                          placeholder="platform"
+                          spellCheck={false}
+                        />
+                      </Field>
+                    </div>
+                  </details>
+
                   <div className="flex flex-wrap items-center gap-2">
-                    <SubmitButton pendingLabel="Creating...">Create project</SubmitButton>
+                    <SubmitButton pendingLabel="Creating...">Create workspace</SubmitButton>
                   </div>
                 </ActionForm>
               </div>

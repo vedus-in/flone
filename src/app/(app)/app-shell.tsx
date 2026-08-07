@@ -46,6 +46,16 @@ export type ShellProject = {
   boardsHref: string;
   viewsHref: string;
 };
+/** A named grouping of projects. The section header the project rows hang off. */
+export type ShellWorkspace = {
+  id: string;
+  name: string;
+  slug: string;
+  href: string;
+  settingsHref: string;
+  newProjectHref: string;
+  projects: ShellProject[];
+};
 export type ShellOrg = {
   id: string;
   name: string;
@@ -53,8 +63,10 @@ export type ShellOrg = {
   role: string;
   href: string;
   settingsHref: string;
-  newProjectHref: string;
-  projects: ShellProject[];
+  newWorkspaceHref: string;
+  /** Flattened across workspaces, for the switcher's subtitle. */
+  projectCount: number;
+  workspaces: ShellWorkspace[];
 };
 
 type AppShellProps = {
@@ -115,6 +127,8 @@ const I_HOME = 'M2.5 6.75 8 2.5l5.5 4.25v6.25h-11zM6.25 13v-4h3.5v4';
 const I_ISSUES = 'M2.5 4h11M2.5 8h11M2.5 12h7';
 const I_CYCLE = 'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 4.5v3.7l2.2 1.6';
 const I_VIEWS = 'M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8ZM8 9.75a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Z';
+const I_FOLDER =
+  'M2.25 5.25A1.5 1.5 0 0 1 3.75 3.75h2.19c.4 0 .78.16 1.06.44l.81.81h4.44a1.5 1.5 0 0 1 1.5 1.5v5.25a1.5 1.5 0 0 1-1.5 1.5h-8.5a1.5 1.5 0 0 1-1.5-1.5z';
 
 /* -------------------------------------------------------------------------- */
 
@@ -226,24 +240,42 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
     [orgs, pathname],
   );
 
-  const activeProject = useMemo(
+  const activeWorkspace = useMemo(
     () =>
-      activeOrg?.projects.find(
-        (project) => pathname === project.href || pathname.startsWith(`${project.href}/`),
+      activeOrg?.workspaces.find(
+        (workspace) =>
+          pathname === workspace.href || pathname.startsWith(`${workspace.href}/`),
       ) ?? null,
     [activeOrg, pathname],
   );
 
+  const activeProject = useMemo(
+    () =>
+      activeWorkspace?.projects.find(
+        (project) => pathname === project.href || pathname.startsWith(`${project.href}/`),
+      ) ?? null,
+    [activeWorkspace, pathname],
+  );
+
+  // One set for both levels. Workspace and project ids are cuids from the same
+  // generator, so they cannot collide, and a single set means one toggle
+  // function rather than two that behave identically.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  // Auto-open the project you are inside, without collapsing anything you
-  // opened by hand.
+  // Auto-open the workspace and project you are inside, without collapsing
+  // anything you opened by hand.
   useEffect(() => {
-    if (!activeProject) return;
-    setExpanded((current) =>
-      current.has(activeProject.id) ? current : new Set(current).add(activeProject.id),
+    const open = [activeWorkspace?.id, activeProject?.id].filter(
+      (id): id is string => typeof id === 'string',
     );
-  }, [activeProject]);
+    if (open.length === 0) return;
+    setExpanded((current) => {
+      if (open.every((id) => current.has(id))) return current;
+      const next = new Set(current);
+      for (const id of open) next.add(id);
+      return next;
+    });
+  }, [activeWorkspace, activeProject]);
 
   function toggleProject(id: string) {
     setExpanded((current) => {
@@ -296,8 +328,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate text-sm">{org.name}</span>
                         <span className="truncate text-xs text-tertiary">
-                          {org.projects.length}{' '}
-                          {org.projects.length === 1 ? 'project' : 'projects'}
+                          {org.projectCount} {org.projectCount === 1 ? 'project' : 'projects'}
                         </span>
                       </span>
                     </Dropdown.Item>
@@ -316,15 +347,18 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
       <nav aria-label="Navigation" className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 pb-2">
         {activeOrg ? (
           <>
-            <Section title="Workspace">
+            {/* "Organization", not "Workspace": a Workspace is now a concrete
+                thing one level down, and one word cannot mean both on one
+                screen. */}
+            <Section title="Organization">
               <li>
                 <NavRow
                   href={activeOrg.href}
                   active={pathname === activeOrg.href}
                   onNavigate={closeDrawer}
-                  icon={I_CUBE}
+                  icon={I_FOLDER}
                 >
-                  Projects
+                  Workspaces
                 </NavRow>
               </li>
               <li>
@@ -339,20 +373,71 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
               </li>
             </Section>
 
+            {/* Workspaces are the grouping this whole section exists for, so
+                they get the section, and the projects nest one level in. A
+                workspace with no projects still renders: an empty group is the
+                only affordance telling you where to put the next one. */}
             <Section
-              title="Your projects"
+              title="Workspaces"
               action={
                 <SectionAction
-                  href={activeOrg.newProjectHref}
-                  label="New project"
+                  href={activeOrg.newWorkspaceHref}
+                  label="New workspace"
                   onNavigate={closeDrawer}
                 />
               }
             >
-              {activeOrg.projects.length === 0 ? (
-                <li className="px-2 py-1 text-[0.8125rem] text-tertiary">No projects yet</li>
+              {activeOrg.workspaces.length === 0 ? (
+                <li className="px-2 py-1 text-[0.8125rem] text-tertiary">No workspaces yet</li>
               ) : (
-                activeOrg.projects.map((project) => {
+                activeOrg.workspaces.map((workspace) => {
+                  const wsOpen = expanded.has(workspace.id);
+                  const wsActive = pathname === workspace.href;
+                  return (
+                    <li key={workspace.id}>
+                      <div
+                        className={cx(
+                          'flex h-7 items-center gap-0.5 rounded-md pe-2 ps-0.5 transition-colors',
+                          wsActive ? 'bg-secondary' : 'hover:bg-secondary',
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleProject(workspace.id)}
+                          aria-expanded={wsOpen}
+                          aria-label={`${wsOpen ? 'Collapse' : 'Expand'} ${workspace.name}`}
+                          className="grid size-5 shrink-0 place-items-center rounded text-tertiary transition-colors hover:text-primary"
+                        >
+                          <Icon
+                            d={I_CHEVRON}
+                            className={cx('size-3 transition-transform', wsOpen && 'rotate-90')}
+                          />
+                        </button>
+                        <Link
+                          href={workspace.href}
+                          onClick={closeDrawer}
+                          aria-current={wsActive ? 'page' : undefined}
+                          className={cx(
+                            'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+                            wsActive ? 'font-medium text-primary' : 'text-tertiary',
+                          )}
+                        >
+                          <Icon d={I_FOLDER} className="size-3.5 opacity-80" />
+                          <span className="truncate">{workspace.name}</span>
+                        </Link>
+                        <span className="shrink-0 text-[0.625rem] text-tertiary tabular-nums">
+                          {workspace.projects.length}
+                        </span>
+                      </div>
+
+                      {wsOpen ? (
+                        <ul className="ms-3.5 flex flex-col gap-px border-s border-secondary ps-1">
+                          {workspace.projects.length === 0 ? (
+                            <li className="px-2 py-1 text-[0.8125rem] text-tertiary">
+                              No projects
+                            </li>
+                          ) : null}
+                          {workspace.projects.map((project) => {
                   const isOpen = expanded.has(project.id);
                   const isActive = pathname === project.href;
                   return (
@@ -487,6 +572,22 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                               indented
                             >
                               Views
+                            </NavRow>
+                          </li>
+                        </ul>
+                      ) : null}
+                    </li>
+                  );
+                          })}
+                          <li>
+                            <NavRow
+                              href={workspace.newProjectHref}
+                              active={false}
+                              onNavigate={closeDrawer}
+                              icon={I_PLUS}
+                              indented
+                            >
+                              New project
                             </NavRow>
                           </li>
                         </ul>
