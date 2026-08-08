@@ -84,7 +84,7 @@ export default async function NewOrganizationPage() {
           <div className="flex flex-wrap items-center gap-2">
             <SubmitButton pendingLabel="Creating...">Create organization</SubmitButton>
             {!firstRun ? (
-              <ButtonLink href="/" color="tertiary">
+              <ButtonLink href="/orgs" color="tertiary">
                 Cancel
               </ButtonLink>
             ) : null}

@@ -7,7 +7,8 @@ import { Badge, ButtonLink, Card, PageHeader } from '@/components/ui';
 export const metadata: Metadata = { title: 'Organizations' };
 
 /**
- * SPEC 5 -- the `/` dispatcher.
+ * SPEC 5 -- the signed-in dispatcher, now at `/orgs`. `/` is the public
+ * landing page and redirects anyone with a session here.
  *
  *   0 organizations -> /orgs/new (first-run copy lives there)
  *   1 organization  -> straight into it

@@ -478,5 +478,5 @@ export async function deleteOrganization(
   });
 
   if (!result.ok) return result;
-  redirect('/');
+  redirect('/orgs');
 }

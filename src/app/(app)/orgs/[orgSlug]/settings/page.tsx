@@ -131,7 +131,7 @@ export default async function OrganizationSettingsPage({
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-5">
         <Breadcrumbs>
-          <Breadcrumbs.Item href="/">Organizations</Breadcrumbs.Item>
+          <Breadcrumbs.Item href="/orgs">Organizations</Breadcrumbs.Item>
           <Breadcrumbs.Item href={orgPath(ctx.org)}>{ctx.org.name}</Breadcrumbs.Item>
           <Breadcrumbs.Item>Members &amp; settings</Breadcrumbs.Item>
         </Breadcrumbs>
