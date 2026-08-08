@@ -2,17 +2,17 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import {
-  ArrowRight,
-  Columns03,
-  Dataflow03,
-  Mail01,
-  RefreshCcw02,
-  Target04,
-  Users01,
-} from '@untitledui/icons';
-import { ButtonLink } from '@/components/ui';
+import { ArrowRight } from '@untitledui/icons';
 import { readSession } from '@/lib/session';
+import {
+  AgentsVisual,
+  FigCubes,
+  FigPanels,
+  FigStack,
+  HeroAppMockup,
+  PlanVisual,
+  TrackVisual,
+} from './landing-mockups';
 
 /**
  * SPEC 5 amendment -- `/` is the public landing page. The signed-in dispatcher
@@ -32,226 +32,63 @@ import { readSession } from '@/lib/session';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: { absolute: 'Flone — plan, track and ship without the ceremony' },
+  title: { absolute: 'Flone — the kanban system for teams and agents' },
   description:
-    'Flone is a simple, secure kanban board for small teams: boards, cycles, daily challenges and first-class agent access. Nothing you don’t need.',
+    'Flone is a purpose-built kanban tool for small teams and the agents working alongside them: boards, cycles, daily challenges and a first-class MCP server.',
 };
 
-/* Stagger per make-interfaces-feel-better: semantic chunks ~100ms apart.
-   `fill-mode-backwards` keeps delayed chunks invisible until their turn. */
-const ENTER = 'animate-in fade-in slide-in-from-bottom-2 duration-700 fill-mode-backwards motion-reduce:animate-none';
+/* Stagger per make-interfaces-feel-better: semantic chunks ~100ms apart,
+   hero only — the rest of the page holds still, like the reference. */
+const ENTER =
+  'animate-in fade-in slide-in-from-bottom-2 duration-700 fill-mode-backwards motion-reduce:animate-none';
 
-const FEATURES: Array<{ icon: typeof Columns03; title: string; body: string }> = [
-  {
-    icon: Columns03,
-    title: 'Boards that move',
-    body: 'Drag-and-drop kanban with per-project boards, saved views and an issue composer that never leaves the keyboard.',
-  },
-  {
-    icon: RefreshCcw02,
-    title: 'Cycles',
-    body: 'Timeboxed iterations with current and upcoming views, and a burndown that draws itself.',
-  },
-  {
-    icon: Target04,
-    title: 'Daily Challenges',
-    body: 'A personal board that cuts across every project — what you are doing today, in one place.',
-  },
-  {
-    icon: Users01,
-    title: 'Orgs & workspaces',
-    body: 'Invite teammates by email, group projects into workspaces and scope roles per organization.',
-  },
-  {
-    icon: Dataflow03,
-    title: 'Built for agents',
-    body: 'A first-class MCP server: hand Claude or any agent a token and let it file, move and search issues.',
-  },
-  {
-    icon: Mail01,
-    title: 'Email that matters',
-    body: 'Verification, password resets, invitations and notifications. No digests, no drip campaigns.',
-  },
-];
+/* ≥40px hit area for small text links (skill principle 16). */
+const HIT = "relative before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-['']";
 
-export default async function LandingPage() {
-  const session = await readSession().catch(() => null);
-  if (session) redirect('/orgs');
+/* No radius here: each caller sets its own, so `rounded-full` on the pill
+   never fights a shared `rounded-sm` (conflicting utilities resolve by
+   stylesheet order, not class order).
 
+   No `outline-none` either: in Tailwind v4 it sets `--tw-outline-style: none`
+   unconditionally, which the `focus-visible:outline-2` ramp then inherits —
+   the ring gets width and color but `outline-style: none`, i.e. an invisible
+   focus indicator. Browsers only draw the default outline on focus, and on
+   focus these utilities fully replace it, so nothing is lost by omitting it. */
+const FOCUS =
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+
+function Container({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`mx-auto w-full max-w-6xl px-6 ${className}`}>{children}</div>;
+}
+
+function NavLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-50 border-b border-secondary bg-primary/80 backdrop-blur-md">
-        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-6">
-          <Wordmark />
-          <nav aria-label="Account" className="flex items-center gap-2">
-            <ButtonLink href="/login" color="tertiary">
-              Log in
-            </ButtonLink>
-            <ButtonLink href="/register" color="primary">
-              Sign up
-            </ButtonLink>
-          </nav>
-        </div>
-      </header>
-
-      <main className="flex-1">
-        {/* Hero */}
-        <section className="relative overflow-hidden">
-          {/* Brand glow behind the headline, Linear-style. Decorative. */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -top-48 left-1/2 h-[30rem] w-[45rem] -translate-x-1/2 rounded-full bg-brand-solid/15 blur-[10rem]"
-          />
-
-          <div className="relative mx-auto w-full max-w-7xl px-6 pt-20 sm:pt-28">
-            <div className={ENTER}>
-              {/* Pseudo-element grows the hit area to ≥40px without growing the pill. */}
-              <Link
-                href="#features"
-                className="relative inline-flex items-center gap-2 rounded-full bg-secondary py-1 pr-3.5 pl-1 text-sm text-secondary ring-1 ring-white/10 outline-none transition-colors before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] hover:bg-secondary_hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-              >
-                <span className="rounded-full bg-brand-solid px-2 py-0.5 text-xs font-medium text-white">
-                  New
-                </span>
-                Daily Challenges<span className="hidden sm:inline">&nbsp;— one board across every project</span>
-                <ArrowRight aria-hidden="true" className="size-3.5" />
-              </Link>
-            </div>
-
-            <h1
-              className={`mt-6 max-w-3xl text-display-md font-semibold text-balance text-primary sm:text-display-lg ${ENTER} delay-100`}
-            >
-              Flone is a purpose-built board for planning and shipping
-            </h1>
-
-            <p
-              className={`mt-6 max-w-xl text-lg text-pretty text-tertiary sm:text-xl ${ENTER} delay-200`}
-            >
-              A simple, secure kanban tool for small teams. Boards, cycles and daily
-              challenges — and nothing you don&rsquo;t need.
-            </p>
-
-            <div className={`mt-8 flex flex-wrap items-center gap-3 ${ENTER} delay-300`}>
-              <ButtonLink href="/register" color="primary" size="lg">
-                Start your board
-              </ButtonLink>
-              <ButtonLink href="/login" color="secondary" size="lg">
-                Log in
-              </ButtonLink>
-            </div>
-          </div>
-
-          {/* Product mockup: pure CSS, no screenshot to keep, nothing to go stale.
-              Decorative — the features section says all of this in text. */}
-          <div aria-hidden="true" className={`relative mx-auto mt-16 w-full max-w-7xl px-6 sm:mt-20 ${ENTER} delay-500`}>
-            <div className="relative [perspective:100rem]">
-              {/* Concentric: outer 16px radius − 6px padding = 10px inner. */}
-              <div className="origin-top rounded-2xl bg-secondary/60 p-1.5 shadow-2xl ring-1 ring-white/10 [transform:rotateX(3deg)]">
-                <div className="overflow-hidden rounded-[10px] bg-primary ring-1 ring-white/10">
-                  <div className="flex items-center gap-1.5 border-b border-secondary px-4 py-3">
-                    <span className="size-2.5 rounded-full bg-tertiary" />
-                    <span className="size-2.5 rounded-full bg-tertiary" />
-                    <span className="size-2.5 rounded-full bg-tertiary" />
-                    <span className="ml-3 font-mono text-xs text-quaternary">
-                      acme / platform / FLN — Cycle 14
-                    </span>
-                  </div>
-                  {/* Two columns fit a phone; the third joins at `sm`. */}
-                  <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3">
-                    <MockColumn name="Todo" dot="bg-quaternary" count={4}>
-                      <MockCard id="FLN-131" title="Empty-state copy for new boards" label="Design" />
-                      <MockCard id="FLN-127" title="Rate-limit the invite endpoint" label="Security" />
-                    </MockColumn>
-                    <MockColumn name="In progress" dot="bg-brand-solid" count={3}>
-                      <MockCard id="FLN-124" title="Refile issues across boards" label="Boards" assignee="MK" />
-                      <MockCard id="FLN-119" title="Burndown for current cycle" label="Cycles" assignee="AL" />
-                    </MockColumn>
-                    <MockColumn name="Done" dot="bg-success-solid" count={12} className="max-sm:hidden">
-                      <MockCard id="FLN-116" title="Group projects into workspaces" label="Core" done />
-                      <MockCard id="FLN-112" title="MCP smoke tests in CI" label="Agents" done />
-                    </MockColumn>
-                  </div>
-                </div>
-              </div>
-              {/* Fade the mockup into the page the way Linear's hero shot dissolves. */}
-              <div className="pointer-events-none absolute inset-x-0 -bottom-px h-32 bg-gradient-to-t from-[var(--color-bg-primary)] to-transparent" />
-            </div>
-          </div>
-        </section>
-
-        {/* Features */}
-        <section id="features" className="scroll-mt-16 border-t border-secondary">
-          <div className="mx-auto w-full max-w-7xl px-6 py-20 sm:py-24">
-            <h2 className="max-w-2xl text-display-xs font-semibold text-balance text-primary sm:text-display-sm">
-              Everything a small team needs. Nothing it doesn&rsquo;t.
-            </h2>
-            <p className="mt-4 max-w-xl text-lg text-pretty text-tertiary">
-              No sprawling settings, no plugin marketplace, no seat-math. One tool that
-              your whole team — human and otherwise — can drive.
-            </p>
-
-            <ul className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {FEATURES.map(({ icon: Icon, title, body }) => (
-                <li
-                  key={title}
-                  className="rounded-xl bg-secondary/40 p-6 ring-1 ring-white/5"
-                >
-                  <span
-                    aria-hidden="true"
-                    className="grid size-10 place-items-center rounded-lg bg-brand-primary text-brand-secondary"
-                  >
-                    <Icon className="size-5" />
-                  </span>
-                  <h3 className="mt-4 text-md font-semibold text-primary">{title}</h3>
-                  <p className="mt-1 text-sm text-pretty text-tertiary">{body}</p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-
-        {/* Closing CTA */}
-        <section className="border-t border-secondary">
-          <div className="mx-auto flex w-full max-w-7xl flex-col items-start gap-6 px-6 py-20 sm:py-24">
-            <h2 className="text-display-xs font-semibold text-balance text-primary sm:text-display-sm">
-              Plan less. Ship more.
-            </h2>
-            <ButtonLink href="/register" color="primary" size="lg">
-              Start your board
-            </ButtonLink>
-          </div>
-        </section>
-      </main>
-
-      <footer className="border-t border-secondary">
-        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-8">
-          <Wordmark muted />
-          {/* Same ≥40px hit-area treatment as the hero pill; gap-6 keeps the
-              extended areas from overlapping. */}
-          <nav aria-label="Footer" className="flex items-center gap-6 text-sm text-tertiary">
-            <Link className="relative rounded-sm outline-none before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[''] hover:text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring" href="/login">
-              Log in
-            </Link>
-            <Link className="relative rounded-sm outline-none before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[''] hover:text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring" href="/register">
-              Sign up
-            </Link>
-          </nav>
-        </div>
-      </footer>
-    </div>
+    <Link href={href} className={`${HIT} ${FOCUS} rounded-sm text-sm text-tertiary transition-colors hover:text-primary`}>
+      {children}
+    </Link>
   );
 }
 
-/** The same letter mark the auth shell uses, sized for a nav bar. */
+function PillLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className={`${FOCUS} relative rounded-full bg-white px-4 py-1.5 text-sm font-medium text-neutral-950 transition-[background-color,scale] before:absolute before:inset-x-0 before:-inset-y-1 before:content-[''] hover:bg-neutral-200 active:scale-[0.96]`}
+    >
+      {children}
+    </Link>
+  );
+}
+
 function Wordmark({ muted = false }: { muted?: boolean }) {
   return (
     <Link
       href="/"
-      className="relative flex items-center gap-2.5 rounded-md outline-none before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+      className={`${FOCUS} relative flex items-center gap-2.5 rounded-md before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']`}
     >
       <span
         aria-hidden="true"
-        className="grid size-7 place-items-center rounded-lg bg-brand-solid text-sm font-semibold text-white"
+        className="grid size-6 place-items-center rounded-md bg-brand-solid text-xs font-semibold text-white"
       >
         K
       </span>
@@ -262,60 +99,265 @@ function Wordmark({ muted = false }: { muted?: boolean }) {
   );
 }
 
-function MockColumn({
-  name,
-  dot,
-  count,
-  className = '',
+/** Left heading, right description — the reference's two-column section head. */
+function SectionHead({
+  index,
+  title,
   children,
 }: {
-  name: string;
-  dot: string;
-  count: number;
-  className?: string;
+  index: string;
+  title: string;
   children: ReactNode;
 }) {
   return (
-    <div className={`flex min-w-0 flex-col gap-2 ${className}`}>
-      <div className="flex items-center gap-2 px-1 text-xs font-medium text-secondary">
-        <span className={`size-2 rounded-full ${dot}`} />
-        <span className="truncate">{name}</span>
-        <span className="text-quaternary">{count}</span>
+    <div className="grid gap-8 lg:grid-cols-2 lg:gap-16">
+      <h2 className="max-w-md text-display-sm font-semibold text-balance text-primary sm:text-display-md">
+        {title}
+      </h2>
+      <div className="max-w-md lg:justify-self-end lg:pt-1.5">
+        <p className="text-lg text-pretty text-tertiary">{children}</p>
+        <p className="mt-6 font-mono text-sm text-quaternary">{index}</p>
       </div>
-      {children}
     </div>
   );
 }
 
-function MockCard({
-  id,
+/** The numbered sub-feature index the reference closes each chapter with. */
+function SectionIndex({ items }: { items: Array<[string, string]> }) {
+  return (
+    <div className="mt-14 grid max-w-md gap-x-12 gap-y-2.5 sm:grid-cols-2 lg:ml-auto">
+      {items.map(([n, label]) => (
+        <span key={n} className="flex items-baseline gap-3 text-sm">
+          <span className="font-mono text-xs text-quaternary tabular-nums">{n}</span>
+          <span className="text-tertiary">{label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function Pillar({
+  fig,
   title,
-  label,
-  assignee,
-  done = false,
+  children,
+  illustration,
 }: {
-  id: string;
+  fig: string;
   title: string;
-  label: string;
-  assignee?: string;
-  done?: boolean;
+  children: ReactNode;
+  illustration: ReactNode;
 }) {
   return (
-    <div className="rounded-md bg-secondary/60 p-3 ring-1 ring-white/5">
-      <p className="font-mono text-[10px] text-quaternary">{id}</p>
-      <p className={`mt-1 truncate text-xs font-medium ${done ? 'text-quaternary line-through' : 'text-secondary'}`}>
-        {title}
-      </p>
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] text-tertiary ring-1 ring-white/10">
-          {label}
-        </span>
-        {assignee ? (
-          <span className="grid size-5 place-items-center rounded-full bg-brand-primary text-[9px] font-medium text-brand-secondary">
-            {assignee}
-          </span>
-        ) : null}
+    <div className="flex flex-col sm:px-8 sm:first:pl-0 sm:last:pr-0">
+      <span className="font-mono text-[10px] tracking-widest text-quaternary uppercase">{fig}</span>
+      <div aria-hidden="true" className="my-8 flex h-40 items-center">
+        {illustration}
       </div>
+      {/* h2, not h3: these are the first headings after the page h1, and the
+          statement above them is a paragraph — an h3 here skips a level. */}
+      <h2 className="text-sm font-semibold text-primary">{title}</h2>
+      <p className="mt-2 text-sm text-pretty text-tertiary">{children}</p>
+    </div>
+  );
+}
+
+export default async function LandingPage() {
+  const session = await readSession().catch(() => null);
+  if (session) redirect('/orgs');
+
+  return (
+    <div className="flex min-h-dvh flex-col">
+      <header className="sticky top-0 z-50 border-b border-white/5 bg-primary/80 backdrop-blur-md">
+        <Container className="flex h-16 items-center justify-between">
+          <Wordmark />
+          <nav aria-label="Sections" className="hidden items-center gap-8 md:flex">
+            <NavLink href="#track">Track</NavLink>
+            <NavLink href="#plan">Plan</NavLink>
+            <NavLink href="#agents">Agents</NavLink>
+          </nav>
+          <nav aria-label="Account" className="flex items-center gap-6">
+            <NavLink href="/login">Log in</NavLink>
+            <PillLink href="/register">Sign up</PillLink>
+          </nav>
+        </Container>
+      </header>
+
+      <main className="flex-1">
+        {/* Hero — no buttons, like the reference: headline, one line of
+            positioning, the announcement link, then the product itself. */}
+        <section className="pt-20 sm:pt-28">
+          <Container>
+            <div className="flex flex-col gap-10 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h1
+                  className={`max-w-2xl text-display-md font-semibold text-balance text-primary sm:text-display-lg lg:text-display-xl ${ENTER}`}
+                >
+                  The kanban system for teams and agents
+                </h1>
+                <p className={`mt-6 max-w-md text-md text-pretty text-tertiary ${ENTER} delay-100`}>
+                  Purpose-built for planning and shipping. Small enough to stay honest, open enough
+                  for the agents you work with.
+                </p>
+              </div>
+              <Link
+                href="#track"
+                className={`${HIT} ${FOCUS} flex items-center gap-3 rounded-sm text-sm ${ENTER} delay-200`}
+              >
+                <span className="font-medium text-primary">New</span>
+                <span className="text-tertiary transition-colors hover:text-primary">
+                  Daily Challenges
+                </span>
+                <ArrowRight aria-hidden="true" className="size-3.5 text-tertiary" />
+              </Link>
+            </div>
+          </Container>
+          <Container className="max-w-7xl">
+            <div aria-hidden="true" className={`mt-16 sm:mt-20 ${ENTER} delay-300`}>
+              <HeroAppMockup />
+            </div>
+          </Container>
+        </section>
+
+        {/* Compatibility row — the one claim we can make instead of a logo
+            cloud: the MCP server speaks to every client. */}
+        <section className="pt-24 pb-4 sm:pt-32">
+          <Container className="text-center">
+            <p className="font-mono text-[11px] tracking-widest text-quaternary uppercase">
+              Works with any MCP client
+            </p>
+            <p className="mt-5 flex flex-wrap items-center justify-center gap-x-10 gap-y-3 text-sm font-medium text-tertiary">
+              <span>Claude Code</span>
+              <span>Claude</span>
+              <span>Cursor</span>
+              <span>Codex</span>
+              <span>Copilot</span>
+              <span>Windsurf</span>
+            </p>
+          </Container>
+        </section>
+
+        {/* Two-tone statement + pillars. */}
+        <section className="py-24 sm:py-32">
+          <Container>
+            <p className="max-w-4xl text-display-xs font-semibold text-pretty sm:text-display-sm">
+              <span className="text-primary">A deliberately small tracker. </span>
+              <span className="text-quaternary">
+                Built for compact teams working alongside agents, Flone keeps planning honest and
+                shipping quick — boards, cycles, and nothing you have to administer.
+              </span>
+            </p>
+            <div className="mt-20 grid gap-12 sm:grid-cols-3 sm:gap-0 sm:divide-x sm:divide-white/5">
+              <Pillar fig="Fig 0.1" title="Purpose-built" illustration={<FigStack />}>
+                Shaped by how small teams actually ship: boards, issues and cycles — no plugin
+                marketplace, no seat-math, no admin console.
+              </Pillar>
+              <Pillar fig="Fig 0.2" title="Powered by agents" illustration={<FigCubes />}>
+                Humans and agents work the same issues through the same rules. From filing a bug to
+                moving the card to Done.
+              </Pillar>
+              <Pillar fig="Fig 0.3" title="Designed for speed" illustration={<FigPanels />}>
+                Server-rendered and keyboard-first. Less noise, fewer clicks, and momentum that
+                survives Monday.
+              </Pillar>
+            </div>
+          </Container>
+        </section>
+
+        {/* 1.0 Track */}
+        <section id="track" className="scroll-mt-24 py-24 sm:py-32">
+          <Container>
+            <SectionHead index="1.0 Track" title="Make the day's work obvious">
+              Boards that stay current, issues that carry their own context, and a personal Daily
+              Challenges board that cuts across every project you're part of.
+            </SectionHead>
+            <div aria-hidden="true" className="mt-16">
+              <TrackVisual />
+            </div>
+            <SectionIndex
+              items={[
+                ['1.1', 'Boards'],
+                ['1.2', 'Issues'],
+                ['1.3', 'Saved views'],
+                ['1.4', 'Daily Challenges'],
+              ]}
+            />
+          </Container>
+        </section>
+
+        {/* 2.0 Plan */}
+        <section id="plan" className="scroll-mt-24 py-24 sm:py-32">
+          <Container>
+            <SectionHead index="2.0 Plan" title="Define the cycle ahead">
+              Timeboxed cycles with a burndown that draws itself. See what's current, what's
+              upcoming and what slipped — without calling a status meeting.
+            </SectionHead>
+            <div aria-hidden="true" className="mt-16">
+              <PlanVisual />
+            </div>
+            <SectionIndex
+              items={[
+                ['2.1', 'Cycles'],
+                ['2.2', 'Burndown'],
+                ['2.3', 'Workspaces'],
+                ['2.4', 'Projects'],
+              ]}
+            />
+          </Container>
+        </section>
+
+        {/* 3.0 Agents */}
+        <section id="agents" className="scroll-mt-24 py-24 sm:py-32">
+          <Container>
+            <SectionHead index="3.0 Agents" title="Move work forward across teams and agents">
+              Hand Claude — or any MCP client — a token and let it file, move and search issues
+              alongside your team. Every action is scoped to its own membership, like any other
+              teammate.
+            </SectionHead>
+            <div aria-hidden="true" className="mt-16">
+              <AgentsVisual />
+            </div>
+            <SectionIndex
+              items={[
+                ['3.1', 'MCP server'],
+                ['3.2', 'API tokens'],
+                ['3.3', 'Comments'],
+                ['3.4', 'Email'],
+              ]}
+            />
+          </Container>
+        </section>
+
+        {/* Closing CTA */}
+        <section className="py-24 sm:py-32">
+          <Container>
+            <h2 className="text-display-sm font-semibold text-balance text-primary">
+              Plan less. Ship more.
+            </h2>
+            <p className="mt-4 max-w-md text-lg text-pretty text-tertiary">
+              Set up an organization in a minute. Invite the team — and the agents — when you're
+              ready.
+            </p>
+            <div className="mt-8 flex flex-wrap items-center gap-6">
+              <PillLink href="/register">Start your board</PillLink>
+              <NavLink href="/login">Log in</NavLink>
+            </div>
+          </Container>
+        </section>
+      </main>
+
+      <footer className="border-t border-white/5">
+        <Container className="flex flex-wrap items-center justify-between gap-4 py-8">
+          <Wordmark muted />
+          <nav aria-label="Footer" className="flex items-center gap-8 text-sm text-tertiary">
+            <Link className={`${HIT} ${FOCUS} rounded-sm transition-colors hover:text-secondary`} href="/login">
+              Log in
+            </Link>
+            <Link className={`${HIT} ${FOCUS} rounded-sm transition-colors hover:text-secondary`} href="/register">
+              Sign up
+            </Link>
+          </nav>
+        </Container>
+      </footer>
     </div>
   );
 }

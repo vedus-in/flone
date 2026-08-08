@@ -32,18 +32,31 @@ were repointed at `/orgs`: the org-settings breadcrumb, the cancel link on
 
 ## Page anatomy
 
-Single server component, `src/app/page.tsx`, no client JS:
+**Rebuilt 2026-08-09 after design feedback** — the first version was a generic
+token-styled SaaS page; the brief is structural fidelity to the reference
+(linear.app): near-monochrome, oversized left-aligned type, no hero CTA
+buttons, detailed product mockups, numbered feature chapters.
 
-1. Sticky header — blurred `bg-primary/80`, letter mark + wordmark (shared
-   `Wordmark` helper mirroring the auth shell), Log in / Sign up `ButtonLink`s.
-2. Hero — "New" pill (Daily Challenges), display-lg headline, subcopy, two
-   CTAs. Brand glow via a blurred `bg-brand-solid/15` disc.
-3. Product mockup — a kanban board drawn in pure CSS from `MockColumn` /
-   `MockCard` helpers (no screenshot to go stale), 3° perspective tilt,
-   bottom gradient fade into the page. `aria-hidden` — decorative.
-4. Feature grid — six cards, all real features: boards, cycles, daily
-   challenges, orgs/workspaces, MCP-for-agents, email.
-5. Closing CTA + footer.
+Two server components, no client JS: `src/app/page.tsx` (composition) and
+`src/app/landing-mockups.tsx` (decorative CSS-drawn product mockups):
+
+1. Sticky header — wordmark, center anchors (Track/Plan/Agents), Log in, and
+   a white rounded-full Sign up pill (the reference's one hard accent).
+2. Hero — display-xl headline + one positioning line on the left, a
+   "New — Daily Challenges →" text link on the right, **no buttons**; then a
+   flat (no tilt) detailed app mockup: sidebar, issue view with comments,
+   meta rail, and a floating agent-chat card, fading into the page.
+3. Compatibility row — "Works with any MCP client" + client names, the honest
+   stand-in for a customer logo cloud (we will not fabricate logos).
+4. Two-tone statement paragraph (first sentence white, rest gray) + three
+   pillars with `Fig 0.n`-labelled monoline isometric SVG wireframes.
+5. Numbered chapters `1.0 Track`, `2.0 Plan`, `3.0 Agents` — each: left H2 /
+   right paragraph + mono index label, a large composite visual (dimmed
+   backdrop + floating card), and a `n.n` sub-feature index, bottom-right.
+6. Closing CTA + minimal footer.
+
+Palette discipline: near-monochrome; surfaces separate with white-alpha rings
+and shadows, chroma only in tiny status dots and the brand tile.
 
 ## Styling constraints
 
