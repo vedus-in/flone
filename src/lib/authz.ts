@@ -290,7 +290,7 @@ export async function requireUser(): Promise<SessionUser> {
   };
 }
 
-/** Memberships of the caller only. Used by `/` to dispatch and by the org picker. */
+/** Memberships of the caller only. Used by `/orgs` to dispatch and by the org picker. */
 export async function listUserOrgs(): Promise<Array<OrgRef & { role: Role }>> {
   const user = await requireUser();
   const rows = await prisma.membership.findMany({

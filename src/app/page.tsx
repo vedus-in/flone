@@ -22,8 +22,12 @@ import { readSession } from '@/lib/session';
  *
  * `readSession()` rather than `requireUser()` for the same reason as the auth
  * layout: the interesting case is the absence of a session, which must not
- * throw. Reading the session makes the route dynamic; `force-dynamic` is the
- * same belt-and-braces the rest of the session-aware tree wears.
+ * throw. The `.catch` goes further: a visitor carrying a stale cookie during a
+ * DB outage still gets the marketing page, not the error boundary — the one
+ * page with no reason to hard-depend on the database. Signed-in users with a
+ * broken DB fail at `/orgs` exactly as before. Reading the session makes the
+ * route dynamic; `force-dynamic` is the same belt-and-braces the rest of the
+ * session-aware tree wears.
  */
 export const dynamic = 'force-dynamic';
 
@@ -71,7 +75,7 @@ const FEATURES: Array<{ icon: typeof Columns03; title: string; body: string }> =
 ];
 
 export default async function LandingPage() {
-  const session = await readSession();
+  const session = await readSession().catch(() => null);
   if (session) redirect('/orgs');
 
   return (
@@ -104,7 +108,7 @@ export default async function LandingPage() {
               {/* Pseudo-element grows the hit area to ≥40px without growing the pill. */}
               <Link
                 href="#features"
-                className="relative inline-flex items-center gap-2 rounded-full bg-secondary py-1 pr-3.5 pl-1 text-sm text-secondary ring-1 ring-white/10 outline-none transition-colors before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                className="relative inline-flex items-center gap-2 rounded-full bg-secondary py-1 pr-3.5 pl-1 text-sm text-secondary ring-1 ring-white/10 outline-none transition-colors before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] hover:bg-secondary_hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
               >
                 <span className="rounded-full bg-brand-solid px-2 py-0.5 text-xs font-medium text-white">
                   New
@@ -222,11 +226,13 @@ export default async function LandingPage() {
       <footer className="border-t border-secondary">
         <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-8">
           <Wordmark muted />
+          {/* Same ≥40px hit-area treatment as the hero pill; gap-6 keeps the
+              extended areas from overlapping. */}
           <nav aria-label="Footer" className="flex items-center gap-6 text-sm text-tertiary">
-            <Link className="rounded-sm outline-none hover:text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring" href="/login">
+            <Link className="relative rounded-sm outline-none before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[''] hover:text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring" href="/login">
               Log in
             </Link>
-            <Link className="rounded-sm outline-none hover:text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring" href="/register">
+            <Link className="relative rounded-sm outline-none before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[''] hover:text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring" href="/register">
               Sign up
             </Link>
           </nav>
@@ -241,7 +247,7 @@ function Wordmark({ muted = false }: { muted?: boolean }) {
   return (
     <Link
       href="/"
-      className="flex items-center gap-2.5 rounded-md outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+      className="relative flex items-center gap-2.5 rounded-md outline-none before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
     >
       <span
         aria-hidden="true"

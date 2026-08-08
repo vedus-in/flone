@@ -16,7 +16,7 @@ import { register } from './actions';
  * either this or the closed state.
  *
  * Three fields: name, email, password. No organization is created here; the
- * dispatcher at `/` sends a brand-new zero-org user to `/orgs/new`, which is the
+ * dispatcher at `/orgs` sends a brand-new zero-org user to `/orgs/new`, which is the
  * one and only org-creation path (SPEC 7.3).
  *
  * Name and email are held in React state so React 19's post-action form reset
