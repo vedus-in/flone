@@ -64,6 +64,8 @@ export type ShellOrg = {
   href: string;
   settingsHref: string;
   newWorkspaceHref: string;
+  /** The viewer's own Daily Challenges board. Org-scoped, not per-workspace. */
+  challengesHref: string;
   /** Flattened across workspaces, for the switcher's subtitle. */
   projectCount: number;
   workspaces: ShellWorkspace[];
@@ -129,6 +131,8 @@ const I_CYCLE = 'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 4.5v3.7l2.2 1
 const I_VIEWS = 'M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8ZM8 9.75a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Z';
 const I_FOLDER =
   'M2.25 5.25A1.5 1.5 0 0 1 3.75 3.75h2.19c.4 0 .78.16 1.06.44l.81.81h4.44a1.5 1.5 0 0 1 1.5 1.5v5.25a1.5 1.5 0 0 1-1.5 1.5h-8.5a1.5 1.5 0 0 1-1.5-1.5z';
+const I_TARGET =
+  'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z';
 
 /* -------------------------------------------------------------------------- */
 
@@ -359,6 +363,20 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                   icon={I_FOLDER}
                 >
                   Workspaces
+                </NavRow>
+              </li>
+              {/* Personal, not shared: this row leads to the viewer's OWN
+                  picks. It sits at organization level because a pick may name an
+                  issue in any project, so there is no one workspace it belongs
+                  under. */}
+              <li>
+                <NavRow
+                  href={activeOrg.challengesHref}
+                  active={pathname === activeOrg.challengesHref}
+                  onNavigate={closeDrawer}
+                  icon={I_TARGET}
+                >
+                  Daily Challenges
                 </NavRow>
               </li>
               <li>

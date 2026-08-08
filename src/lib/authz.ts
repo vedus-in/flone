@@ -790,6 +790,18 @@ export function orgSettingsPath(org: OrgRef): string {
   return `${orgPath(org)}/settings`;
 }
 
+/**
+ * The signed-in user's Daily Challenges board, at ORGANIZATION scope.
+ *
+ * It sits beside workspace slugs rather than under one, because a pick may name
+ * an issue from any project in the organization. `challenges` is in
+ * `RESERVED_SLUGS` for exactly that reason -- otherwise a workspace could be
+ * created at this path and shadow it.
+ */
+export function challengesPath(org: OrgRef): string {
+  return `${orgPath(org)}/challenges`;
+}
+
 export function workspacePath(org: OrgRef, workspace: WorkspaceRef): string {
   return `${orgPath(org)}/${encodeURIComponent(workspace.slug)}`;
 }

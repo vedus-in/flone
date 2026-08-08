@@ -32,6 +32,8 @@ export const RESERVED_SLUGS = new Set([
   'api',
   'admin',
   'settings',
+  /** The per-person board at `/orgs/[orgSlug]/challenges`. */
+  'challenges',
   /** The legacy-project-URL trampoline at `/orgs/[orgSlug]/go/...`. */
   'go',
   'static',

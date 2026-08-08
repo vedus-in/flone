@@ -34,6 +34,8 @@
 //     rather than deleting them.
 // Ticket.createdById and Comment.authorId stay Restrict so a user cannot be
 // hard-deleted while authored content exists. Ticket.assigneeId is SetNull.
+// ChallengePick cascades on BOTH sides: a pick is a bookmark, not content, so
+// deleting either the person or the issue should take it with them.
 //
 // `position` is never unique-constrained. It is a sort hint (SPEC §6.10),
 // dense within a (projectId, stateId) pair.
@@ -89,6 +91,7 @@ model User {
   ledBoards       Board[]      @relation("BoardLead")
   savedViews      SavedView[]
   emailTokens     EmailToken[]
+  challengePicks  ChallengePick[]
 
   @@index([isAdmin])
 }
@@ -387,7 +390,8 @@ model Ticket {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  comments Comment[]
+  comments       Comment[]
+  challengePicks ChallengePick[]
 
   @@unique([projectId, number])
   @@index([projectId, stateId, position])
@@ -405,6 +409,41 @@ enum Priority {
   MEDIUM
   HIGH
   URGENT
+}
+
+/// One issue on one person's Daily Challenges board.
+///
+/// PURELY ADDITIVE. Nothing about picking or clearing a challenge writes to
+/// `Ticket`, so a challenge board cannot change what any other view shows. The
+/// single write the feature makes to shared data is the status change a column
+/// move performs, and that goes through the same `setIssueState` the project
+/// board already calls -- which is why the two can never disagree. There is no
+/// second copy of a status to keep in sync, because an issue has exactly one and
+/// it belongs to the Project (see `WorkflowState`).
+///
+/// Deliberately NOT a `Board`: `Ticket.boardId` is single-valued, so filing an
+/// issue under a challenge board would take it OFF the board it belongs to --
+/// the exact opposite of cherry-picking. And deliberately not a `Label`: labels
+/// are per-project and shared by everyone, where a pick is per-person and spans
+/// every project in the organization.
+///
+/// No `date` column, and no scheduler. "Daily" is the habit, not the mechanism:
+/// a pick sits here until its owner drops it in the Completed column. That also
+/// means there is no timezone to argue about.
+model ChallengePick {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  /// One pick per person per issue, so picking something twice is a no-op rather
+  /// than a duplicate card. Per the index rationale at the top of this file
+  /// `userId` gets no index of its own -- it leads this pair -- while `ticketId`
+  /// leads nothing and is what the "already on your board?" search filter walks.
+  @@unique([userId, ticketId])
+  @@index([ticketId])
 }
 
 /// A named URL. `query` is the Issues-list query string verbatim, so there is

@@ -32,6 +32,8 @@ import { Priority } from '@prisma/client';
 import { PRIORITY_LABEL, PRIORITY_ORDER, colorClass } from '@/lib/model';
 import { cx } from '@/lib/utils/cx';
 
+import { addChallenge } from '@/app/(app)/orgs/[orgSlug]/challenges/actions';
+
 import type { BoardIssue, BoardStateColumn } from './board-view';
 import {
   deleteIssue,
@@ -99,6 +101,7 @@ const I_TRASH = 'M2.5 4h11M6 4V2.5h4V4M12 4v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4M6.
 const I_CHEVRON = 'M6 3.5 10.5 8 6 12.5';
 const I_CHECK = 'M3 8.5 6.5 12 13 4.5';
 const I_DOTS = 'M8 3.2h.01M8 8h.01M8 12.8h.01';
+const I_TARGET = 'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z';
 
 function SubTrigger({ icon, children }: { icon: string; children: ReactNode }) {
   return (
@@ -349,6 +352,16 @@ function IssueMenuItems({
           </Submenu>
         </Menu.SubmenuRoot>
       </Menu.Group>
+
+      <Menu.Separator className="my-1 h-px bg-border-secondary" />
+
+      {/* Adds a row to the caller's own pick list and nothing else. The issue
+          does not move, does not change status, and stays on this board -- the
+          challenge board shows it a second time rather than taking it away. */}
+      <Menu.Item className={ITEM} onClick={() => run(() => addChallenge({ ticketId: issue.id }))}>
+        <Icon d={I_TARGET} className="text-tertiary" />
+        Add to my challenges
+      </Menu.Item>
 
       <Menu.Separator className="my-1 h-px bg-border-secondary" />
 

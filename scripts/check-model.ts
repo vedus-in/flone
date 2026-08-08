@@ -1,5 +1,5 @@
 /**
- * Asserts the three things in the Linear rework that rot silently.
+ * Asserts the four things in this model that rot silently.
  *
  *   1. State TYPE -> tab and group mapping. The type is what decides which tab
  *      an issue appears under and whether it counts as done. A sixth state type
@@ -16,6 +16,13 @@
  *      `cycleNumberAt` is an exact inverse of `cycleWindow` and consecutive
  *      windows tile without gap or overlap. If that stops holding, the same
  *      sprint gets two rows and every burndown splits in half.
+ *
+ *   4. The Daily Challenges columns. They are state TYPES, because a board
+ *      spanning projects has no state id that means the same thing twice. Every
+ *      type must be admitted by exactly one column or a picked issue becomes
+ *      invisible on a board it cannot be removed from, and exactly one column
+ *      must write no status at all -- if Completed ever gained one, clearing a
+ *      card off your own board would silently change it on everyone else's.
  *
  * Runs on plain Node — 22 strips the types. No test framework, no fixtures:
  *
@@ -46,6 +53,12 @@ import {
   isoWeekday,
   DAY_MS,
 } from '../src/lib/cycle-math.ts';
+import {
+  CHALLENGE_COLUMNS,
+  challengeColumn,
+  columnForStateType,
+  isClearingColumn,
+} from '../src/lib/challenges.ts';
 
 const ALL_TYPES = ['BACKLOG', 'UNSTARTED', 'STARTED', 'COMPLETED', 'CANCELED'] as const;
 let checks = 0;
@@ -372,6 +385,56 @@ ok('progress is clamped to [0, 1]', () => {
 ok('a zero-length window reports complete rather than dividing by zero', () => {
   const instant = new Date('2026-08-03T00:00:00Z');
   assert.equal(cycleProgress({ startsAt: instant, endsAt: instant }, instant), 1);
+});
+
+console.log('\ndaily challenges');
+
+ok('every state type is admitted by exactly one column', () => {
+  // The invariant the whole board rests on. A type admitted by NO column would
+  // strand a picked issue -- invisible, and so impossible to clear -- and a type
+  // admitted by two would make the same card appear twice.
+  for (const type of ALL_TYPES) {
+    const admitting = CHALLENGE_COLUMNS.filter((column) => column.admits.includes(type));
+    assert.equal(admitting.length, 1, `${type} is admitted by ${admitting.length} columns`);
+    assert.equal(columnForStateType(type), admitting[0].id);
+  }
+});
+
+ok('exactly one column writes no status, and it is Completed', () => {
+  // If Completed ever gained a `sets`, dropping a card there would silently
+  // change the issue on its own project's board -- the one thing this feature
+  // promises it will not do.
+  const clearing = CHALLENGE_COLUMNS.filter(isClearingColumn);
+  assert.equal(clearing.length, 1);
+  assert.equal(clearing[0].id, 'completed');
+  assert.deepEqual(clearing[0].admits, []);
+});
+
+ok('a column that sets a type also admits it, so a card lands where it was dropped', () => {
+  for (const column of CHALLENGE_COLUMNS) {
+    if (column.sets === null) continue;
+    assert.ok(
+      column.admits.includes(column.sets),
+      `${column.id} writes ${column.sets} but does not show it`,
+    );
+  }
+});
+
+ok('the status a column writes is a real state type', () => {
+  for (const column of CHALLENGE_COLUMNS) {
+    if (column.sets === null) continue;
+    assert.ok((ALL_TYPES as readonly string[]).includes(column.sets));
+  }
+});
+
+ok('challengeColumn accepts every id and rejects anything else', () => {
+  for (const column of CHALLENGE_COLUMNS) {
+    assert.equal(challengeColumn(column.id)?.id, column.id);
+  }
+  // A forged column id from the drop handler must not resolve to a real column.
+  assert.equal(challengeColumn('COMPLETED'), null);
+  assert.equal(challengeColumn(''), null);
+  assert.equal(challengeColumn('__proto__'), null);
 });
 
 console.log(`\nAll good — ${checks} checks.\n`);
