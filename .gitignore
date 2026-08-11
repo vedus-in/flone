@@ -1,5 +1,9 @@
 # dependencies
 /node_modules
+/cli/node_modules
+
+# the CLI's build output — `cli/` is published to npm, not committed built
+/cli/dist
 
 # next.js
 /.next/

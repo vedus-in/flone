@@ -1,0 +1,31 @@
+{
+  "name": "flone",
+  "version": "0.1.0",
+  "description": "Command line client for Flone — boards, issues and comments from your terminal.",
+  "type": "module",
+  "bin": {
+    "flone": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "node --experimental-strip-types test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "ink": "^6.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.0",
+    "typescript": "^5.9.3"
+  }
+}
