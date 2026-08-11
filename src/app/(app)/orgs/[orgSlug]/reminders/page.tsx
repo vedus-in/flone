@@ -128,9 +128,13 @@ export default async function RemindersPage({
             <Card.Title id="new-reminder-heading" className="text-base">
               New reminder
             </Card.Title>
+            {/* "Within a few minutes" is not hedging: the scheduler ticks on
+                an interval, so the tick interval is a reminder's worst-case
+                lateness. Promising the exact minute here would be a promise the
+                deployment cannot keep. */}
             <Card.Description>
-              The email arrives at the time you pick, in your own timezone. Recurring reminders
-              keep that time.
+              The email arrives at the time you pick, in your own timezone, within a few minutes.
+              Recurring reminders keep that time.
             </Card.Description>
           </Card.Header>
 

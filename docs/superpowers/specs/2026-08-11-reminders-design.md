@@ -182,6 +182,10 @@ curl -fsS -X POST -H "authorization: Bearer $CRON_SECRET" \
   https://flone.example.com/api/cron/reminders
 ```
 
+**The tick interval is the worst-case lateness of a reminder.** Every 5 minutes
+means a 09:00 reminder arrives between 09:00 and 09:05 — which is why the form
+says "within a few minutes" rather than promising the exact minute.
+
 A route rather than a worker process, because the mail layer is Next's: the
 templates are TSX and `src/lib/email.ts` is `server-only`, so a standalone script
 would need a second copy of the render path. One HTTP call also means the
@@ -201,9 +205,42 @@ uptime pinger with no code change.
 - Logs are counts only: `[cron] reminders claimed=3 sent=2 skipped=1`. Never a
   title, an address or an organization.
 
-Railway deployment: add a second service from the same repo, start command set
-to the `curl` above, cron schedule `* * * * *`. It shares the project's
-variables.
+### Railway
+
+A second service in the same project, on the `buildpack-deps:curl` image:
+
+```
+start:    curl -fsS --retry 3 --retry-delay 5 --max-time 60 \
+            -X POST --oauth2-bearer <the literal secret> \
+            https://flow.vedus.in/api/cron/reminders
+schedule: */5 * * * *
+restart:  NEVER
+```
+
+> **ROTATION HAZARD.** The token is written into the start command, so changing
+> `CRON_SECRET` on `web` does NOT update the cron — it starts returning 401 and
+> reminders stop going out silently, with the only symptom a crashed cron
+> deployment nobody is looking at. Rotate both together, and re-run the
+> verification below afterwards.
+
+Three things that cost a tick each to learn, recorded so they are not learned
+twice:
+
+- **Railway's minimum cron interval is 5 minutes.** `* * * * *` is rejected
+  outright.
+- **Not the `curlimages/curl` image.** Its `ENTRYPOINT` is `curl`, so a start
+  command beginning with `curl` arrives as *arguments to curl* and every run
+  dies with `try 'curl --help'`. `buildpack-deps:curl` has no entrypoint.
+- **The start command is NOT run through a shell.** It is split into argv, so
+  `$CRON_SECRET` is passed to curl as the literal string `$CRON_SECRET` and the
+  request comes back 401 — which reads like a wrong secret rather than an
+  unexpanded variable. A `sh -c '...'` wrapper does not rescue it either: the
+  splitter mangles the inner quoting. Hence `--oauth2-bearer` with the token
+  inline: it builds `Authorization: Bearer <token>` from one argument that
+  contains no space, so there is nothing to quote and nothing to expand.
+  A reference variable (`${{web.CRON_SECRET}}`) is set on the service anyway,
+  because it is the right thing for the day this field learns to expand — but
+  nothing reads it today.
 
 ## 7. Email
 
