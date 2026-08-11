@@ -68,10 +68,13 @@ import {
 } from '../src/lib/challenges.ts';
 import {
   REPEAT_LABEL,
+  formatLocalDateTime,
   formatOffset,
   formatWhen,
   nextRun,
+  stepClock,
   toInstant,
+  typeClockDigit,
 } from '../src/lib/reminder-math.ts';
 
 const ALL_TYPES = ['BACKLOG', 'UNSTARTED', 'STARTED', 'COMPLETED', 'CANCELED'] as const;
@@ -537,6 +540,75 @@ ok('every repeat has a label, so no email says undefined', () => {
     assert.equal(typeof REPEAT_LABEL[repeat], 'string');
     assert.ok(REPEAT_LABEL[repeat].length > 0);
   }
+});
+
+console.log('\nreminder clock boxes');
+
+ok('arrows wrap at both ends of both units', () => {
+  // Wrapping is what makes a time near midnight reachable without 23 presses.
+  assert.equal(stepClock(23, 1, 23), 0);
+  assert.equal(stepClock(0, -1, 23), 23);
+  assert.equal(stepClock(59, 1, 59), 0);
+  assert.equal(stepClock(0, -1, 59), 59);
+  assert.equal(stepClock(8, 1, 23), 9);
+  assert.equal(stepClock(9, -1, 23), 8);
+});
+
+ok('typing builds the pair left to right', () => {
+  // "1" then "4" is 14 -- not 1, and not 41.
+  const first = typeClockDigit(0, 1, false, 23);
+  assert.equal(first, 1);
+  assert.equal(typeClockDigit(first, 4, true, 23), 14);
+});
+
+ok('typing clamps where the arrows wrap', () => {
+  // "5" then "9" in the hours box is the latest legal hour, NOT 23:00 + 36h and
+  // not a wrap round to 11. Getting this wrong sends the reminder on the wrong
+  // day, which nothing downstream would flag.
+  const started = typeClockDigit(0, 5, false, 23);
+  assert.equal(started, 5);
+  assert.equal(typeClockDigit(started, 9, true, 23), 23);
+  // The same pair is perfectly legal in minutes.
+  assert.equal(typeClockDigit(typeClockDigit(0, 5, false, 59), 9, true, 59), 59);
+  // A lone first digit above the max is clamped too: "9" in hours is 9, but a
+  // second "9" cannot take it to 99.
+  assert.equal(typeClockDigit(9, 9, true, 23), 23);
+});
+
+ok('every reachable value stays inside its unit', () => {
+  for (const max of [23, 59]) {
+    for (let current = 0; current <= max; current += 1) {
+      for (let digit = 0; digit <= 9; digit += 1) {
+        for (const continuing of [true, false]) {
+          const next = typeClockDigit(current, digit, continuing, max);
+          assert.ok(
+            Number.isInteger(next) && next >= 0 && next <= max,
+            `typing ${digit} on ${current} (max ${max}) produced ${next}`,
+          );
+        }
+      }
+      for (const by of [1, -1]) {
+        const next = stepClock(current, by, max);
+        assert.ok(next >= 0 && next <= max, `stepping ${current} by ${by} produced ${next}`);
+      }
+    }
+  }
+});
+
+ok('what the field submits is exactly what the action parses', () => {
+  // The round trip that keeps the picker and `localDateTimeSchema` honest: the
+  // schema rejects the seconds that CalendarDateTime.toString() would append,
+  // so a drift here is a form that cannot be submitted at all.
+  const parts = { year: 2026, month: 8, day: 12, hour: 9, minute: 5 };
+  const submitted = formatLocalDateTime(parts);
+  assert.equal(submitted, '2026-08-12T09:05');
+  assert.ok(toInstant(submitted, 0) !== null, 'the action would reject its own form value');
+  assert.equal(toInstant(submitted, 0)?.toISOString(), '2026-08-12T09:05:00.000Z');
+  // Single digits pad, and a year below 1000 still fills four columns.
+  assert.equal(
+    formatLocalDateTime({ year: 999, month: 1, day: 2, hour: 3, minute: 4 }),
+    '0999-01-02T03:04',
+  );
 });
 
 console.log(`\nAll good — ${checks} checks.\n`);

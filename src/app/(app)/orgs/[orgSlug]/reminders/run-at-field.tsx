@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import {
   Button,
   Calendar,
@@ -18,61 +18,75 @@ import {
   Popover,
 } from 'react-aria-components';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight } from '@untitledui/icons';
-import { CalendarDateTime, getLocalTimeZone, today } from '@internationalized/date';
+import {
+  CalendarDateTime,
+  getLocalTimeZone,
+  toCalendarDate,
+  today,
+  type CalendarDate,
+} from '@internationalized/date';
 
 import { Label } from '@/components/base/input/label';
+import { formatLocalDateTime, stepClock, typeClockDigit } from '@/lib/reminder-math';
 
 /**
- * "First send" — a react-aria `DatePicker` with minute granularity.
+ * "First send" — a date field with a calendar, and hours and minutes as two
+ * separate boxes.
  *
- * Replaces `<input type="datetime-local">`. The native control renders as a
- * browser widget rather than as part of this app, and its time half is close to
- * unusable: an empty `--:-- --` with no way in but arrow keys or a tiny caret.
+ * The date half is react-aria's `DatePicker`, the library everything under
+ * `@/components/base` already wraps. The TIME half follows the interaction
+ * model of openstatusHQ/time-picker (MIT), which the segmented react-aria time
+ * input it replaces did not: a labelled two-digit box per unit, digits typed
+ * left to right with focus advancing on its own, and arrows that step the value
+ * rather than the caret.
  *
- * react-aria is not a new dependency for the sake of this field — it is what
- * every component under `@/components/base` already wraps, which is also why
- * this can reuse that `Label` verbatim: it IS a react-aria `Label`, so it wires
- * itself to the picker through context with no `htmlFor` to keep in sync.
+ * PORTED RATHER THAN INSTALLED, deliberately. That component publishes no
+ * registry entry -- it is copy-paste by design -- and it is written against
+ * shadcn/ui's `Input` and `Label`, neither of which exists in this app. Pulling
+ * them in would stand a second design system up beside Untitled UI for the sake
+ * of two 48px boxes. What is reproduced here is the BEHAVIOUR, on this app's own
+ * field tokens; the arithmetic below matches its `time-picker-utils.ts` exactly,
+ * including the wrap-on-arrow and clamp-on-type asymmetry.
  *
- * WHY THIS IS A CLIENT MODULE AND HOLDS ITS OWN STATE. `ActionForm` restores a
- * rejected submit by writing back through `form.elements`, which only reaches
- * real form controls -- the reason the rest of this page uses native `<select>`s.
- * A react-aria picker cannot be restored that way, so it keeps the value in
- * React state instead, where React 19's post-action form reset cannot touch it.
- * Submitting a reminder with a bad title therefore no longer throws away the
- * date, which the native input did.
- *
- * The value reaches the Server Action through the hidden input below, in the
- * same `YYYY-MM-DDTHH:mm` shape the native control submitted -- so
- * `localDateTimeSchema`, `toInstant` and the action are untouched by this
- * change.
+ * The value stays one `CalendarDateTime`, and reaches the Server Action through
+ * the hidden input at the bottom in the same `YYYY-MM-DDTHH:mm` shape the
+ * original native control submitted -- so `localDateTimeSchema`, `toInstant` and
+ * the action are untouched by any of this.
  */
 
-/** 09:00 tomorrow: the overwhelmingly common case, and never in the past. */
-function defaultPlaceholder(): CalendarDateTime {
+const HOUR_MAX = 23;
+const MINUTE_MAX = 59;
+
+/** The window in which a second digit continues the first rather than restarting. */
+const SECOND_DIGIT_MS = 2000;
+
+/** 09:00 tomorrow. Applied on mount, never during render -- see the effect below. */
+function defaultValue(): CalendarDateTime {
   const tomorrow = today(getLocalTimeZone()).add({ days: 1 });
   return new CalendarDateTime(tomorrow.year, tomorrow.month, tomorrow.day, 9, 0);
 }
 
-/**
- * `CalendarDateTime.toString()` includes seconds (`...T09:00:00`), which the
- * action's schema deliberately does not accept. Pad the parts by hand instead:
- * one obvious function beats loosening a validator that is doing its job.
- */
+const pad = (value: number) => String(value).padStart(2, '0');
+
+/** Empty until the mount effect below has run; the action reads this. */
 function serialize(value: CalendarDateTime | null): string {
-  if (!value) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${String(value.year).padStart(4, '0')}-${pad(value.month)}-${pad(value.day)}T${pad(value.hour)}:${pad(value.minute)}`;
+  return value ? formatLocalDateTime(value) : '';
 }
 
 /* -------------------------------------------------------------------------- */
-/* Styling — the app's own field tokens, not react-aria's defaults             */
+/* Styling — this app's field tokens, not react-aria's or shadcn's defaults    */
 /* -------------------------------------------------------------------------- */
 
-const GROUP =
-  'flex min-h-9 w-full items-center gap-1 rounded-lg border border-primary bg-primary px-3 py-2 text-sm text-primary shadow-xs transition-colors hover:bg-primary_hover focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus-ring';
+const FIELD =
+  'flex min-h-9 items-center gap-1 rounded-lg border border-primary bg-primary px-3 py-2 text-sm text-primary shadow-xs transition-colors hover:bg-primary_hover focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus-ring';
 
-/** Each segment is its own tab stop, so the focus ring has to sit on it. */
+/**
+ * `caret-transparent` because every keystroke is handled, never inserted -- a
+ * blinking caret would promise text editing the box does not do.
+ */
+const TIME_BOX =
+  'w-12 rounded-lg border border-primary bg-primary px-2 py-2 text-center font-mono text-sm tabular-nums text-primary shadow-xs caret-transparent outline-none transition-colors hover:bg-primary_hover focus:bg-brand-solid focus:text-white';
+
 const SEGMENT =
   'rounded px-0.5 tabular-nums caret-transparent outline-none focus:bg-brand-solid focus:text-white data-[placeholder]:text-placeholder data-[type=literal]:px-0 data-[type=literal]:text-tertiary';
 
@@ -87,83 +101,212 @@ const CELL =
 const NAV_BUTTON =
   'grid size-8 place-items-center rounded-md text-tertiary outline-none transition-colors hover:bg-secondary hover:text-primary pressed:bg-secondary data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-1 data-[focus-visible]:outline-focus-ring';
 
+const SUBLABEL = 'text-xs font-medium text-tertiary';
+
+/* -------------------------------------------------------------------------- */
+/* One two-digit box                                                           */
+/* -------------------------------------------------------------------------- */
+
+function TimeBox({
+  id,
+  label,
+  value,
+  max,
+  onChange,
+  inputRef,
+  onLeftFocus,
+  onRightFocus,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  max: number;
+  onChange: (next: number) => void;
+  inputRef: RefObject<HTMLInputElement | null>;
+  onLeftFocus?: () => void;
+  onRightFocus?: () => void;
+}) {
+  /** True when the NEXT digit continues this one rather than starting over. */
+  const [continuing, setContinuing] = useState(false);
+
+  useEffect(() => {
+    if (!continuing) return;
+    const timer = setTimeout(() => setContinuing(false), SECOND_DIGIT_MS);
+    return () => clearTimeout(timer);
+  }, [continuing]);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    // Tab is the one key that still belongs to the browser.
+    if (event.key === 'Tab') return;
+    event.preventDefault();
+
+    if (event.key === 'ArrowRight') return onRightFocus?.();
+    if (event.key === 'ArrowLeft') return onLeftFocus?.();
+
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      setContinuing(false);
+      onChange(stepClock(value, event.key === 'ArrowUp' ? 1 : -1, max));
+      return;
+    }
+
+    if (event.key >= '0' && event.key <= '9') {
+      onChange(typeClockDigit(value, Number(event.key), continuing, max));
+      // Two digits in, so the unit is finished -- move on without being asked.
+      if (continuing) onRightFocus?.();
+      setContinuing((previous) => !previous);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <label htmlFor={id} className={SUBLABEL}>
+        {label}
+      </label>
+      <input
+        id={id}
+        ref={inputRef}
+        // `tel` + decimal gets the numeric keypad on a phone without the
+        // spinner and scroll-wheel behaviour `number` brings.
+        type="tel"
+        inputMode="decimal"
+        value={pad(value)}
+        className={TIME_BOX}
+        // Every change goes through the key handler; this only silences React's
+        // read-only-input warning.
+        onChange={() => {}}
+        onKeyDown={handleKeyDown}
+        onFocus={(event) => event.currentTarget.select()}
+      />
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
 export function RunAtField() {
   const [value, setValue] = useState<CalendarDateTime | null>(null);
+  const hourRef = useRef<HTMLInputElement>(null);
+  const minuteRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Filled in on the client, after hydration, and never during render: "tomorrow"
+   * depends on the timezone, and a server in UTC would otherwise render a
+   * different date from the browser it is hydrating into.
+   */
+  useEffect(() => {
+    setValue((current) => current ?? defaultValue());
+  }, []);
+
+  /** Before the effect lands there is no value; show the default's time, not 00:00. */
+  const shown = value ?? defaultValue();
+
+  function setTime(part: 'hour' | 'minute', next: number) {
+    setValue((current) => (current ?? defaultValue()).set({ [part]: next }));
+  }
+
+  function setDate(date: CalendarDate | null) {
+    if (!date) return;
+    setValue((current) =>
+      (current ?? defaultValue()).set({ year: date.year, month: date.month, day: date.day }),
+    );
+  }
 
   return (
     <div className="flex flex-col gap-1.5">
-      <DatePicker
-        value={value}
-        onChange={setValue}
-        granularity="minute"
-        /* 24-hour, because every other time on this page is rendered 24-hour.
-           A picker that says 9:00 PM beside a table that says 21:00 is one
-           screen speaking two dialects. */
-        hourCycle={24}
-        /* The action rejects a first send in the past; saying so here with a
-           disabled calendar is kinder than saying it after a round trip. */
-        minValue={today(getLocalTimeZone())}
-        placeholderValue={defaultPlaceholder()}
-        shouldForceLeadingZeros
-        className="flex flex-col gap-1.5"
-      >
-        <Label>First send</Label>
-
-        <Group className={GROUP}>
-          <DateInput className="flex flex-1 items-center">
-            {(segment) => <DateSegment segment={segment} className={SEGMENT} />}
-          </DateInput>
-          <Button
-            className={`${NAV_BUTTON} size-6 shrink-0`}
-            aria-label="Choose a date from the calendar"
-          >
-            <CalendarIcon className="size-4" aria-hidden="true" />
-          </Button>
-        </Group>
-
-        <Popover
-          placement="bottom start"
-          className="rounded-xl bg-primary p-3 shadow-lg ring-1 ring-secondary entering:animate-in entering:fade-in exiting:animate-out exiting:fade-out"
+      <div className="flex flex-wrap items-end gap-2">
+        <DatePicker
+          value={value ? toCalendarDate(value) : null}
+          onChange={setDate}
+          /* Date only. The time lives in the two boxes beside it, where it can
+             carry its own labels -- which is the whole point of the change. */
+          granularity="day"
+          minValue={today(getLocalTimeZone())}
+          className="flex min-w-44 flex-1 flex-col gap-1.5"
         >
-          <Dialog className="outline-none">
-            <Calendar className="flex flex-col gap-3">
-              <header className="flex items-center justify-between gap-2">
-                <Button slot="previous" className={NAV_BUTTON} aria-label="Previous month">
-                  <ChevronLeft className="size-4" aria-hidden="true" />
-                </Button>
-                {/* react-aria fills this with the month and year in the
-                    viewer's own locale. */}
-                <Heading className="text-sm font-medium text-primary" />
-                <Button slot="next" className={NAV_BUTTON} aria-label="Next month">
-                  <ChevronRight className="size-4" aria-hidden="true" />
-                </Button>
-              </header>
+          <Label>First send</Label>
 
-              <CalendarGrid className="border-collapse">
-                <CalendarGridHeader>
-                  {(day) => (
-                    <CalendarHeaderCell className="size-9 text-xs font-medium text-tertiary">
-                      {day}
-                    </CalendarHeaderCell>
-                  )}
-                </CalendarGridHeader>
-                <CalendarGridBody>
-                  {(date) => <CalendarCell date={date} className={CELL} />}
-                </CalendarGridBody>
-              </CalendarGrid>
-            </Calendar>
-          </Dialog>
-        </Popover>
-      </DatePicker>
+          <Group className={FIELD}>
+            <DateInput className="flex flex-1 items-center">
+              {(segment) => <DateSegment segment={segment} className={SEGMENT} />}
+            </DateInput>
+            <Button
+              className={`${NAV_BUTTON} size-6 shrink-0`}
+              aria-label="Choose a date from the calendar"
+            >
+              <CalendarIcon className="size-4" aria-hidden="true" />
+            </Button>
+          </Group>
+
+          <Popover
+            placement="bottom start"
+            className="rounded-xl bg-primary p-3 shadow-lg ring-1 ring-secondary entering:animate-in entering:fade-in exiting:animate-out exiting:fade-out"
+          >
+            <Dialog className="outline-none">
+              <Calendar className="flex flex-col gap-3">
+                <header className="flex items-center justify-between gap-2">
+                  <Button slot="previous" className={NAV_BUTTON} aria-label="Previous month">
+                    <ChevronLeft className="size-4" aria-hidden="true" />
+                  </Button>
+                  <Heading className="text-sm font-medium text-primary" />
+                  <Button slot="next" className={NAV_BUTTON} aria-label="Next month">
+                    <ChevronRight className="size-4" aria-hidden="true" />
+                  </Button>
+                </header>
+
+                <CalendarGrid className="border-collapse">
+                  <CalendarGridHeader>
+                    {(day) => (
+                      <CalendarHeaderCell className="size-9 text-xs font-medium text-tertiary">
+                        {day}
+                      </CalendarHeaderCell>
+                    )}
+                  </CalendarGridHeader>
+                  <CalendarGridBody>
+                    {(date) => <CalendarCell date={date} className={CELL} />}
+                  </CalendarGridBody>
+                </CalendarGrid>
+              </Calendar>
+            </Dialog>
+          </Popover>
+        </DatePicker>
+
+        <div className="flex items-end gap-1">
+          <TimeBox
+            id="reminder-hours"
+            label="Hours"
+            value={shown.hour}
+            max={HOUR_MAX}
+            onChange={(next) => setTime('hour', next)}
+            inputRef={hourRef}
+            onRightFocus={() => minuteRef.current?.focus()}
+          />
+          <span aria-hidden="true" className="pb-2 text-sm text-tertiary">
+            :
+          </span>
+          <TimeBox
+            id="reminder-minutes"
+            label="Minutes"
+            value={shown.minute}
+            max={MINUTE_MAX}
+            onChange={(next) => setTime('minute', next)}
+            inputRef={minuteRef}
+            onLeftFocus={() => hourRef.current?.focus()}
+          />
+        </div>
+      </div>
+
+      <p className="text-xs text-tertiary">
+        Type into the boxes, or use the up and down arrows. 24-hour clock.
+      </p>
 
       {/*
        * What the Server Action actually reads.
        *
        * Written to `defaultValue` (the ATTRIBUTE) rather than `value`, for the
-       * same reason as `TzOffsetField`: React 19 resets the form once the
-       * action settles, and a reset restores each control to its attribute. An
-       * inline ref callback re-runs on every render, so the attribute tracks
-       * the state above and survives that reset.
+       * same reason as `TzOffsetField`: React 19 resets the form once the action
+       * settles, and a reset restores each control to its attribute. An inline
+       * ref callback re-runs on every render, so the attribute tracks the state
+       * above and survives that reset -- a rejected submit keeps the time.
        */}
       <input
         type="hidden"

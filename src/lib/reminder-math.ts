@@ -84,6 +84,65 @@ export function nextRun(from: Date, repeat: ReminderRepeat, after: Date): Date |
 /** The bound the form and the schema both enforce: real offsets are within +-14h. */
 export const MAX_TZ_OFFSET_MINUTES = 840;
 
+/* -------------------------------------------------------------------------- */
+/* Clock-box arithmetic (the "First send" hours and minutes boxes)             */
+/*                                                                             */
+/* Lives here rather than in the component so it can be asserted from Node --  */
+/* it is fiddly, and every way it can go wrong is silent: a reminder set for a */
+/* time nobody chose still sends perfectly happily.                            */
+/* -------------------------------------------------------------------------- */
+
+const pad2 = (value: number) => String(value).padStart(2, '0');
+
+/**
+ * One press of an arrow key. WRAPS, so holding Up on the hours box runs 23 -> 00
+ * rather than sticking, which is what makes it usable for a time near midnight.
+ */
+export function stepClock(current: number, by: number, max: number): number {
+  const next = current + by;
+  if (next > max) return 0;
+  if (next < 0) return max;
+  return next;
+}
+
+/**
+ * One digit typed into a two-digit box.
+ *
+ * `continuing` is true when this is the second digit of a pair, in which case it
+ * joins the first; otherwise it starts over. Typing CLAMPS where the arrows
+ * wrap: `5` then `9` in the hours box is 23, not an hour later. That asymmetry
+ * is deliberate and is the behaviour of openstatusHQ/time-picker, which the
+ * field follows.
+ */
+export function typeClockDigit(
+  current: number,
+  digit: number,
+  continuing: boolean,
+  max: number,
+): number {
+  if (!continuing) return Math.min(digit, max);
+  return Math.min(Number(pad2(current).slice(1) + String(digit)), max);
+}
+
+/**
+ * The `YYYY-MM-DDTHH:mm` the form submits, from anything carrying the five
+ * parts -- `CalendarDateTime` satisfies this structurally, which is what keeps
+ * this module free of a runtime dependency on `@internationalized/date`.
+ *
+ * Exactly the inverse of `toInstant`'s parsing, and asserted to round-trip.
+ * `CalendarDateTime.toString()` is NOT usable here: it appends seconds, which
+ * `localDateTimeSchema` deliberately rejects.
+ */
+export function formatLocalDateTime(parts: {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+}): string {
+  return `${String(parts.year).padStart(4, '0')}-${pad2(parts.month)}-${pad2(parts.day)}T${pad2(parts.hour)}:${pad2(parts.minute)}`;
+}
+
 /**
  * `YYYY-MM-DDTHH:mm` from an `<input type="datetime-local">` to a UTC instant.
  *
