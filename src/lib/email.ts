@@ -134,26 +134,40 @@ export async function sendMail(mail: Mail): Promise<void> {
 }
 
 /**
+ * Render both parts and send. NEVER THROWS, exactly like `sendMail`: a template
+ * that blows up is one log line, not a failed caller.
+ *
+ * Awaited directly by the reminder scheduler, which is not serving a browser and
+ * so has no response for `after()` to run behind -- and which wants the send
+ * finished before the process is free to exit.
+ */
+export async function renderAndSend(
+  to: string,
+  subject: string,
+  element: ReactElement,
+): Promise<void> {
+  try {
+    const [html, text] = await Promise.all([
+      render(element),
+      render(element, { plainText: true }),
+    ]);
+    await sendMail({ to, subject, html, text });
+  } catch {
+    console.error(`[email] render_failed ref=${randomUUID().slice(0, 8)}`);
+  }
+}
+
+/**
  * Render and send after the response has been flushed.
  *
  * `after()` is the native Next 15 mechanism, so there is no queue, no worker and
  * no retry. A dropped message is always recoverable by the user -- resend the
  * verification, request another reset link -- which is why a retry layer would
- * not earn its weight. Rendering happens in here too, so a caller never waits on
- * it either.
+ * not earn its weight. Rendering happens in there too, so a caller never waits
+ * on it either.
  */
 export function queueMail(to: string, subject: string, element: ReactElement): void {
-  after(async () => {
-    try {
-      const [html, text] = await Promise.all([
-        render(element),
-        render(element, { plainText: true }),
-      ]);
-      await sendMail({ to, subject, html, text });
-    } catch {
-      // A template that throws must not take the request's `after` callback --
-      // and with it any other queued work -- down with it.
-      console.error(`[email] render_failed ref=${randomUUID().slice(0, 8)}`);
-    }
-  });
+  // The callback must not throw: it would take any other work queued on this
+  // request down with it. `renderAndSend` already swallows everything.
+  after(() => renderAndSend(to, subject, element));
 }

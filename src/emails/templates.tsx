@@ -2,11 +2,11 @@ import { Action, Card, EmailLayout, Eyebrow, FallbackLink, Meta, Note, Paragraph
 import { PRODUCT_NAME } from './theme';
 
 /**
- * The nine messages.
+ * The ten messages.
  *
  * All in one file on purpose: they are short, they share a vocabulary, and the
  * thing most worth reviewing about them is that the copy is CONSISTENT --
- * which is far easier to see in one file than across nine.
+ * which is far easier to see in one file than across ten.
  *
  * Rules that hold for every message here:
  *  - the subject lives next to the template, exported as `*Subject`, so a call
@@ -355,4 +355,75 @@ export function McpTokenCreatedEmail({ name, tokensUrl }: { name: string; tokens
 McpTokenCreatedEmail.PreviewProps = {
   name: 'Dana',
   tokensUrl: 'https://flone.example.com/tokens',
+};
+
+/* -------------------------------------------------------------------------- */
+/* 10. A scheduled reminder                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The reminder itself is the subject line. Anything prefixed -- "Reminder:" --
+ * pushes the part the person wrote out of the preview pane on a phone, which is
+ * the one place a reminder has to be readable without opening it.
+ */
+export function reminderSubject(title: string): string {
+  return title;
+}
+
+/**
+ * The only scheduled message the app sends, and the only one composed outside a
+ * request: the cron tick renders it.
+ *
+ * `setBy` is null when the recipient scheduled it themselves, and the copy
+ * changes rather than saying "Dana asked you to" to Dana. `scope` is the
+ * project name or the organization name -- a reminder always belongs to
+ * something, and which one it is decides where the link goes.
+ */
+export function ReminderEmail({
+  title,
+  when,
+  scope,
+  repeat,
+  setBy,
+  url,
+}: {
+  title: string;
+  when: string;
+  scope: string;
+  repeat: string;
+  setBy: string | null;
+  url: string;
+}) {
+  return (
+    <EmailLayout preview={title} context={scope}>
+      <Card>
+        <Eyebrow>Reminder</Eyebrow>
+        <Title>{title}</Title>
+        <Meta>
+          {when} &middot; {scope}
+        </Meta>
+        <Paragraph>
+          {setBy
+            ? `${setBy} scheduled this reminder for you.`
+            : 'You scheduled this reminder.'}{' '}
+          {repeat}.
+        </Paragraph>
+        <Action href={url}>Manage reminders</Action>
+        <FallbackLink href={url} note="Or paste this link into your browser:" />
+        <Note>
+          Delete it on that page to stop it. Reminders are not affected by the
+          notification switches in your account settings.
+        </Note>
+      </Card>
+    </EmailLayout>
+  );
+}
+
+ReminderEmail.PreviewProps = {
+  title: 'Post the deploy notes before standup',
+  when: 'Wed 12 Aug, 09:00 (UTC+02:00)',
+  scope: 'Engineering',
+  repeat: 'Every day',
+  setBy: 'Dana Reed',
+  url: 'https://flone.example.com/orgs/acme/reminders',
 };

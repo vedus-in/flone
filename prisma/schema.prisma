@@ -92,6 +92,8 @@ model User {
   savedViews      SavedView[]
   emailTokens     EmailToken[]
   challengePicks  ChallengePick[]
+  reminders        Reminder[]  @relation("ReminderRecipient")
+  createdReminders Reminder[]  @relation("ReminderCreatedBy")
 
   @@index([isAdmin])
 }
@@ -178,6 +180,7 @@ model Organization {
   workspaces  Workspace[]
   projects    Project[]
   emailTokens EmailToken[]
+  reminders   Reminder[]
 }
 
 /// A named grouping of Projects inside an Organization, and a URL segment:
@@ -256,6 +259,7 @@ model Project {
   labels     Label[]
   tickets    Ticket[]
   savedViews SavedView[]
+  reminders  Reminder[]
 
   @@unique([organizationId, key])
   @@index([workspaceId])
@@ -444,6 +448,63 @@ model ChallengePick {
   /// leads nothing and is what the "already on your board?" search filter walks.
   @@unique([userId, ticketId])
   @@index([ticketId])
+}
+
+enum ReminderRepeat {
+  ONCE
+  DAILY
+  WEEKLY
+}
+
+/// A scheduled email nudge. PURELY ADDITIVE: nothing in the reminder flow reads
+/// or writes a Ticket, a Board or a WorkflowState, so this table cannot change
+/// what any existing view shows.
+///
+/// SCOPE IS A NULLABLE FOREIGN KEY, NOT AN ENUM. `projectId == null` means the
+/// reminder is about the whole organization; non-null means one project. A
+/// second `scope` column would be a value that could disagree with the id beside
+/// it, and there is no third scope to make it worth the risk.
+///
+/// `nextRunAt` is the ONLY thing the scheduler reads, and writing it is how a
+/// send is claimed: the tick advances it with a conditional `updateMany` that
+/// matches on the value it read, so two overlapping ticks cannot both send the
+/// same occurrence. Null means "not scheduled" -- a one-time reminder that has
+/// already fired -- which is also why the due query (`nextRunAt <= now`) needs
+/// no second `active` flag to skip them.
+///
+/// `tzOffsetMinutes` is `Date.prototype.getTimezoneOffset()` from the creator's
+/// browser, stored so the cron process can render the time the person actually
+/// picked. See `src/lib/reminder-math.ts` for the arithmetic and for the DST
+/// ceiling this accepts.
+///
+/// Both User relations cascade. A reminder is a notification setting, not
+/// authored content, so unlike `Ticket.createdById` there is nothing here worth
+/// blocking a user delete over.
+model Reminder {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// Null = organization scope. Cascade, not SetNull: deleting a project must
+  /// not silently promote its reminders to organization-wide ones.
+  projectId      String?
+  project        Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title          String
+  repeat         ReminderRepeat @default(ONCE)
+  nextRunAt      DateTime?
+  lastSentAt     DateTime?
+  tzOffsetMinutes Int           @default(0)
+  recipientId    String
+  recipient      User           @relation("ReminderRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  createdById    String
+  createdBy      User           @relation("ReminderCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  /// The scheduler's whole query. Every other column is read only after a row
+  /// has already been found through this one.
+  @@index([nextRunAt])
+  /// The list on `/orgs/[orgSlug]/reminders`.
+  @@index([organizationId])
 }
 
 /// A named URL. `query` is the Issues-list query string verbatim, so there is

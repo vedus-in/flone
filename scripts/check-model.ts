@@ -24,6 +24,13 @@
  *      must write no status at all -- if Completed ever gained one, clearing a
  *      card off your own board would silently change it on everyone else's.
  *
+ *   5. Reminder recurrence. The scheduler advances a reminder with the value
+ *      `nextRun` returns and sends nothing else until that instant passes, so
+ *      a result that is not STRICTLY in the future is a mail loop: the row
+ *      stays due, and every tick sends another copy. Nothing else catches it --
+ *      a duplicate email is not a failing type, a failing page or a failing
+ *      query, it is just a person receiving the same nudge nine times.
+ *
  * Runs on plain Node — 22 strips the types. No test framework, no fixtures:
  *
  *   node scripts/check-model.ts
@@ -59,6 +66,13 @@ import {
   columnForStateType,
   isClearingColumn,
 } from '../src/lib/challenges.ts';
+import {
+  REPEAT_LABEL,
+  formatOffset,
+  formatWhen,
+  nextRun,
+  toInstant,
+} from '../src/lib/reminder-math.ts';
 
 const ALL_TYPES = ['BACKLOG', 'UNSTARTED', 'STARTED', 'COMPLETED', 'CANCELED'] as const;
 let checks = 0;
@@ -435,6 +449,94 @@ ok('challengeColumn accepts every id and rejects anything else', () => {
   assert.equal(challengeColumn('COMPLETED'), null);
   assert.equal(challengeColumn(''), null);
   assert.equal(challengeColumn('__proto__'), null);
+});
+
+console.log('\nreminders');
+
+const NINE_AM = new Date('2026-08-12T07:00:00Z'); // 09:00 in Berlin summer time.
+const BERLIN_SUMMER = -120;
+
+ok('a one-time reminder has no next run', () => {
+  // Null is what ends it. Anything else and it would send forever.
+  assert.equal(nextRun(NINE_AM, 'ONCE', NINE_AM), null);
+});
+
+ok('a daily reminder that fired on time moves exactly one day', () => {
+  const next = nextRun(NINE_AM, 'DAILY', NINE_AM);
+  assert.equal(next?.toISOString(), '2026-08-13T07:00:00.000Z');
+});
+
+ok('a weekly reminder moves exactly seven days', () => {
+  const next = nextRun(NINE_AM, 'WEEKLY', NINE_AM);
+  assert.equal(next?.toISOString(), '2026-08-19T07:00:00.000Z');
+});
+
+ok('the wall-clock time survives every recurrence', () => {
+  // The whole point of adding whole days in UTC: 09:00 stays 09:00 rather than
+  // drifting by the minutes a month-based calculation would introduce.
+  let at: Date | null = NINE_AM;
+  for (let i = 0; i < 400 && at; i += 1) {
+    assert.ok(formatWhen(at, BERLIN_SUMMER).endsWith('09:00 (UTC+02:00)'), at.toISOString());
+    at = nextRun(at, 'DAILY', at);
+  }
+});
+
+ok('a scheduler that was down for days sends once, not once per missed day', () => {
+  // Three days late. The next run must be tomorrow, not three sends today --
+  // and above all it must not still be in the past, or the next tick sends
+  // again, and the one after that, until the backlog is exhausted at one email
+  // per tick.
+  const now = new Date('2026-08-15T07:30:00Z');
+  const next = nextRun(NINE_AM, 'DAILY', now);
+  assert.equal(next?.toISOString(), '2026-08-16T07:00:00.000Z');
+  assert.ok(next!.getTime() > now.getTime(), 'the reminder would fire again immediately');
+});
+
+ok('the next run is strictly in the future however far behind the tick is', () => {
+  const from = new Date('2026-01-01T09:00:00Z');
+  for (const days of [0, 0.5, 1, 6.9, 7, 30, 365]) {
+    for (const repeat of ['DAILY', 'WEEKLY'] as const) {
+      const now = new Date(from.getTime() + days * 86_400_000);
+      const next = nextRun(from, repeat, now);
+      assert.ok(next!.getTime() > now.getTime(), `${repeat} +${days}d landed in the past`);
+    }
+  }
+});
+
+ok('a form value round-trips through the stored instant', () => {
+  // What the user typed is what the email says, from a server in any timezone.
+  const instant = toInstant('2026-08-12T09:00', BERLIN_SUMMER);
+  assert.equal(instant?.toISOString(), '2026-08-12T07:00:00.000Z');
+  assert.equal(formatWhen(instant!, BERLIN_SUMMER), 'Wed 12 Aug, 09:00 (UTC+02:00)');
+});
+
+ok('UTC and the far side of the date line both round-trip', () => {
+  assert.equal(toInstant('2026-08-12T09:00', 0)?.toISOString(), '2026-08-12T09:00:00.000Z');
+  // Chatham Islands: +12:45, and the only common offset that is not a whole hour.
+  const chatham = -765;
+  const instant = toInstant('2026-08-12T09:00', chatham);
+  assert.equal(instant?.toISOString(), '2026-08-11T20:15:00.000Z');
+  assert.equal(formatWhen(instant!, chatham), 'Wed 12 Aug, 09:00 (UTC+12:45)');
+  assert.equal(formatOffset(0), 'UTC+00:00');
+  assert.equal(formatOffset(300), 'UTC-05:00');
+});
+
+ok('an impossible date is rejected rather than rolled forward', () => {
+  // `Date.UTC` turns 31 February into 3 March without complaint, which would
+  // schedule a reminder for a day the user did not pick.
+  assert.equal(toInstant('2026-02-31T09:00', 0), null);
+  assert.equal(toInstant('2026-13-01T09:00', 0), null);
+  assert.equal(toInstant('2026-08-12T25:00', 0), null);
+  assert.equal(toInstant('2026-08-12', 0), null);
+  assert.equal(toInstant('', 0), null);
+  assert.equal(toInstant('2026-08-12T09:00:00', 0), null);
+});
+
+ok('every repeat has a label, so no email says undefined', () => {
+  for (const repeat of ['ONCE', 'DAILY', 'WEEKLY'] as const) {
+    assert.equal(typeof REPEAT_LABEL[repeat], 'string');
+    assert.ok(REPEAT_LABEL[repeat].length > 0);
+  }
 });
 
 console.log(`\nAll good — ${checks} checks.\n`);

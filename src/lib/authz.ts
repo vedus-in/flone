@@ -641,6 +641,36 @@ export async function requireStateInProject(
   return state;
 }
 
+/**
+ * MANDATORY before storing a client-supplied `projectId` against an
+ * already-authorized organization -- the reminder scope selector is the only
+ * caller today. Returns the same `ProjectRef` shape the path builders take, so
+ * a scoped reminder can be linked without a second query.
+ */
+export async function requireProjectInOrg(
+  organizationId: string,
+  projectId: string,
+): Promise<ProjectRef> {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, organizationId },
+    select: {
+      id: true,
+      name: true,
+      key: true,
+      description: true,
+      workspace: { select: { slug: true } },
+    },
+  });
+  if (!project) throw new AuthzError('NOT_FOUND');
+  return {
+    id: project.id,
+    name: project.name,
+    key: project.key,
+    description: project.description,
+    workspaceSlug: project.workspace.slug,
+  };
+}
+
 /** MANDATORY before any write of `Ticket.boardId` to a non-null value. */
 export async function requireBoardInProject(
   projectId: string,
@@ -800,6 +830,16 @@ export function orgSettingsPath(org: OrgRef): string {
  */
 export function challengesPath(org: OrgRef): string {
   return `${orgPath(org)}/challenges`;
+}
+
+/**
+ * Scheduled reminders, at ORGANIZATION scope for the same reason the challenges
+ * board is: a reminder may name any project in the organization, or none at
+ * all, so there is no one workspace it belongs under. `reminders` is in
+ * `RESERVED_SLUGS` so a workspace cannot be created at this path and shadow it.
+ */
+export function remindersPath(org: OrgRef): string {
+  return `${orgPath(org)}/reminders`;
 }
 
 export function workspacePath(org: OrgRef, workspace: WorkspaceRef): string {

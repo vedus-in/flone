@@ -66,6 +66,8 @@ export type ShellOrg = {
   newWorkspaceHref: string;
   /** The viewer's own Daily Challenges board. Org-scoped, not per-workspace. */
   challengesHref: string;
+  /** Scheduled email reminders. Org-scoped for the same reason. */
+  remindersHref: string;
   /** Flattened across workspaces, for the switcher's subtitle. */
   projectCount: number;
   workspaces: ShellWorkspace[];
@@ -133,6 +135,8 @@ const I_FOLDER =
   'M2.25 5.25A1.5 1.5 0 0 1 3.75 3.75h2.19c.4 0 .78.16 1.06.44l.81.81h4.44a1.5 1.5 0 0 1 1.5 1.5v5.25a1.5 1.5 0 0 1-1.5 1.5h-8.5a1.5 1.5 0 0 1-1.5-1.5z';
 const I_TARGET =
   'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z';
+const I_BELL =
+  'M4 6.5a4 4 0 1 1 8 0c0 3 1.25 4 1.25 4H2.75S4 9.5 4 6.5ZM6.5 13a1.75 1.75 0 0 0 3 0';
 
 /* -------------------------------------------------------------------------- */
 
@@ -377,6 +381,19 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                   icon={I_TARGET}
                 >
                   Daily Challenges
+                </NavRow>
+              </li>
+              {/* Shared, unlike the row above: everyone in the organization
+                  sees every scheduled reminder, because anyone may be the one
+                  receiving it. */}
+              <li>
+                <NavRow
+                  href={activeOrg.remindersHref}
+                  active={pathname === activeOrg.remindersHref}
+                  onNavigate={closeDrawer}
+                  icon={I_BELL}
+                >
+                  Reminders
                 </NavRow>
               </li>
               <li>

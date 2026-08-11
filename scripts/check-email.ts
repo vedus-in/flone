@@ -361,6 +361,32 @@ const RENDERABLE = [
     templates.McpTokenCreatedEmail({ name: 'Dana', tokensUrl: LINK }),
     true,
   ],
+  [
+    'ReminderEmail',
+    templates.ReminderEmail({
+      title: 'Post the deploy notes',
+      when: 'Wed 12 Aug, 09:00 (UTC+02:00)',
+      scope: 'Engineering',
+      repeat: 'Every day',
+      setBy: 'Dana',
+      url: LINK,
+    }),
+    true,
+  ],
+  [
+    // The self-scheduled branch: `setBy` null changes the copy, and a template
+    // that only ever renders one of its two branches in a check is half checked.
+    'ReminderEmail (self)',
+    templates.ReminderEmail({
+      title: 'Post the deploy notes',
+      when: 'Wed 12 Aug, 09:00 (UTC+02:00)',
+      scope: 'Acme',
+      repeat: 'Once',
+      setBy: null,
+      url: LINK,
+    }),
+    true,
+  ],
 ] as const;
 
 for (const [name, element, expectsLink] of RENDERABLE) {

@@ -2,7 +2,7 @@ import 'server-only';
 import { EmailTokenPurpose, type Role } from '@prisma/client';
 
 import { prisma } from '@/lib/db';
-import { appUrl, queueMail, tokenUrl } from '@/lib/email';
+import { appUrl, queueMail, renderAndSend, tokenUrl } from '@/lib/email';
 import { issueToken } from '@/lib/email-token';
 import {
   AccountExistsEmail,
@@ -13,6 +13,7 @@ import {
   NewCommentEmail,
   PasswordChangedEmail,
   PasswordResetEmail,
+  ReminderEmail,
   VerifyEmail,
   accountExistsSubject,
   addedToOrgSubject,
@@ -22,6 +23,7 @@ import {
   newCommentSubject,
   passwordChangedSubject,
   passwordResetSubject,
+  reminderSubject,
   verifyEmailSubject,
 } from '@/emails/templates';
 
@@ -296,4 +298,45 @@ export async function notifyNewComment(input: {
       }),
     );
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reminders                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The one message that breaks the never-mail-the-actor rule at the top of this
+ * file, and deliberately: a reminder you set for yourself is the entire point of
+ * the feature. There is no actor at send time anyway -- a cron tick is.
+ *
+ * `await`ed rather than queued, because the caller is a scheduler with no
+ * response to run `after()` behind. It still cannot throw: `renderAndSend`
+ * swallows a template failure and `sendMail` swallows a provider failure, so one
+ * bad reminder cannot stop the rest of the batch.
+ *
+ * The unverified-address rule DOES still hold, and the scheduler applies it: it
+ * advances the schedule for an unconfirmed recipient without sending, so the row
+ * does not stay permanently due.
+ */
+export async function sendReminderMail(input: {
+  email: string;
+  title: string;
+  when: string;
+  scope: string;
+  repeat: string;
+  setBy: string | null;
+  url: string;
+}): Promise<void> {
+  await renderAndSend(
+    input.email,
+    reminderSubject(input.title),
+    ReminderEmail({
+      title: input.title,
+      when: input.when,
+      scope: input.scope,
+      repeat: input.repeat,
+      setBy: input.setBy,
+      url: input.url,
+    }),
+  );
 }

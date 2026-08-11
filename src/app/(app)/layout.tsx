@@ -44,6 +44,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       settingsHref: `${orgHref}/settings`,
       newWorkspaceHref: `${orgHref}#new-workspace`,
       challengesHref: `${orgHref}/challenges`,
+      remindersHref: `${orgHref}/reminders`,
       projectCount: org.workspaces.reduce((total, w) => total + w.projects.length, 0),
       workspaces: org.workspaces.map((workspace) => {
         const workspaceHref = `${orgHref}/${encodeURIComponent(workspace.slug)}`;

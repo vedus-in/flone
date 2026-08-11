@@ -1,8 +1,9 @@
 import 'server-only';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { BoardStatus, Role, WorkflowStateType } from '@prisma/client';
+import { BoardStatus, ReminderRepeat, Role, WorkflowStateType } from '@prisma/client';
 import { COLOR_TOKENS, ISSUE_TABS } from '@/lib/model';
+import { MAX_TZ_OFFSET_MINUTES, toInstant } from '@/lib/reminder-math';
 
 /**
  * SPEC 4.5 + 4.10 -- shared validation primitives.
@@ -19,10 +20,10 @@ import { COLOR_TOKENS, ISSUE_TABS } from '@/lib/model';
 /**
  * Shared by organization slugs (under `/orgs/`) and workspace slugs (under
  * `/orgs/[orgSlug]/`). An org slug's only static sibling is `new`; a workspace
- * slug's are `settings` and `go`. Both sets are frozen and both are covered
- * here, which is what keeps the denylist provably complete rather than
- * aspirational (SPEC 7.1). The rest are defence in depth against future routes
- * and against slugs that look like infrastructure.
+ * slug's are `settings`, `go`, `challenges` and `reminders`. Both sets are
+ * frozen and both are covered here, which is what keeps the denylist provably
+ * complete rather than aspirational (SPEC 7.1). The rest are defence in depth
+ * against future routes and against slugs that look like infrastructure.
  */
 export const RESERVED_SLUGS = new Set([
   'new',
@@ -34,6 +35,8 @@ export const RESERVED_SLUGS = new Set([
   'settings',
   /** The per-person board at `/orgs/[orgSlug]/challenges`. */
   'challenges',
+  /** Scheduled email reminders at `/orgs/[orgSlug]/reminders`. */
+  'reminders',
   /** The legacy-project-URL trampoline at `/orgs/[orgSlug]/go/...`. */
   'go',
   'static',
@@ -224,6 +227,44 @@ export const isoDateSchema = z
 
 /** The roles an ADMIN is allowed to hand out. Granting OWNER is OWNER-only. */
 export const assignableRoleSchema = z.enum(['ADMIN', 'MEMBER']);
+
+/* -------------------------------------------------------------------------- */
+/* Reminders                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export const reminderRepeatSchema = z.nativeEnum(ReminderRepeat);
+
+/**
+ * `YYYY-MM-DDTHH:mm`, the value an `<input type="datetime-local">` submits.
+ *
+ * The real-date check is delegated to `toInstant` rather than repeated here, so
+ * the string the form validates and the instant the action stores can never
+ * disagree about whether 2026-02-31T09:00 exists. Same trap `isoDateSchema`
+ * guards against; same fix, one implementation.
+ */
+export const localDateTimeSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'Pick a date and a time.')
+  .refine((value) => toInstant(value, 0) !== null, 'That is not a real date and time.');
+
+/**
+ * The browser's UTC offset in minutes, as `getTimezoneOffset()` reports it.
+ *
+ * Bounded to the real range (+-14h) and defaulted rather than required: the
+ * hidden field carrying it is filled by client JavaScript, and a form submitted
+ * without it must still produce a working reminder -- interpreted as UTC, which
+ * is the only defensible guess.
+ */
+export const tzOffsetSchema = z.coerce
+  .number()
+  .int()
+  .min(-MAX_TZ_OFFSET_MINUTES)
+  .max(MAX_TZ_OFFSET_MINUTES)
+  .catch(0);
+
+/** Same cap as an issue title: it is the subject line of the email. */
+export const reminderTitleSchema = safeText(1, 200);
 
 /* -------------------------------------------------------------------------- */
 /* Named length caps (SPEC 4.10, final)                                        */
