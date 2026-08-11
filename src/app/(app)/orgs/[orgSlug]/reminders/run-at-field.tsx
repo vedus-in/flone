@@ -9,12 +9,11 @@ import {
   CalendarGridBody,
   CalendarGridHeader,
   CalendarHeaderCell,
+  DateField,
   DateInput,
-  DatePicker,
   DateSegment,
   Dialog,
   DialogTrigger,
-  Group,
   Heading,
   ListBox,
   ListBoxItem,
@@ -34,19 +33,26 @@ import {
   type CalendarDate,
 } from '@internationalized/date';
 
-import { Label } from '@/components/base/input/label';
 import { formatLocalDateTime, stepClock, typeClockDigit } from '@/lib/reminder-math';
 
 /**
- * "First send" — one field: date segments, then hours and minutes, then the
- * calendar button, all inside a single border.
+ * "First send" — one field: date segments, hours and minutes, a clock menu and
+ * a calendar menu, all inside a single border.
  *
- * The date half is react-aria's `DatePicker`, the library everything under
- * `@/components/base` already wraps. The TIME half follows the interaction
- * model of openstatusHQ/time-picker (MIT), which the segmented react-aria time
- * input it replaces did not: one two-digit box per unit, digits typed left to
- * right with focus advancing on its own, and arrows that step the value rather
- * than the caret.
+ * NOT BUILT ON `DatePicker`, and that is the load-bearing detail. A `DatePicker`
+ * hands a `PopoverContext` down to every `Popover` beneath it, so a second
+ * popover nested inside one -- the clock menu -- is captured by the date
+ * picker's own state and opens the CALENDAR instead. Nothing about that fails
+ * to compile or throws; the wrong menu simply appears.
+ *
+ * So the pieces are composed by hand and kept as siblings: a `DateField` for the
+ * segments, and one `DialogTrigger` per menu. Each button now owns exactly one
+ * popover.
+ *
+ * The TIME half follows the interaction model of openstatusHQ/time-picker (MIT),
+ * which the segmented react-aria time input it replaces did not: one two-digit
+ * box per unit, digits typed left to right with focus advancing on its own, and
+ * arrows that step the value rather than the caret.
  *
  * PORTED RATHER THAN INSTALLED, deliberately. That component publishes no
  * registry entry -- it is copy-paste by design -- and it is written against
@@ -224,32 +230,64 @@ function TimeColumn({
   value: number;
   onSelect: (next: number) => void;
 }) {
+  const scroller = useRef<HTMLDivElement>(null);
+
   /**
-   * Opening at 00:00 and asking someone to scroll to 21 is the thing that makes
+   * Opening at 00 and asking someone to scroll to 21 is the thing that makes
    * these menus tiresome, so the current value is centred on open.
    *
-   * Done once per open, guarded by this ref: the callback re-runs on every
-   * render, and re-centring after each click would yank the list out from under
-   * the pointer. The popover unmounts when it closes, so the guard resets with
-   * it.
+   * ONE FRAME LATE, DELIBERATELY. react-aria builds its collection in a second
+   * render pass, so at mount the listbox is still empty and there is no selected
+   * option to measure -- doing this in a ref callback silently left the hours
+   * column sitting at the top, which is exactly the problem it exists to solve.
    *
-   * `scrollTop` rather than `scrollIntoView` deliberately -- the latter walks up
-   * to the nearest scrollable ancestor and can take the whole page with it.
+   * Empty deps, so it runs once per open: the popover unmounts when it closes,
+   * and re-centring after each click would yank the list out from under the
+   * pointer mid-selection.
+   *
+   * `scrollTop` rather than `scrollIntoView` -- the latter walks up to the
+   * nearest scrollable ancestor and can take the whole page with it.
    */
-  const centred = useRef(false);
+  useEffect(() => {
+    const node = scroller.current;
+    if (!node) return;
 
-  function centreOnOpen(node: HTMLDivElement | null) {
-    if (!node || centred.current) return;
-    const selected = node.querySelector<HTMLElement>('[aria-selected="true"]');
-    if (!selected) return;
-    centred.current = true;
-    node.scrollTop = selected.offsetTop - node.clientHeight / 2 + selected.clientHeight / 2;
-  }
+    let frame = 0;
+    let attempts = 0;
+
+    const centre = () => {
+      const selected = node.querySelector<HTMLElement>('[aria-selected="true"]');
+      // BOTH conditions matter. The option appears a render pass late, and the
+      // popover is measured and positioned a frame after THAT -- until it has,
+      // the column has no height, is not scrollable, and assigning `scrollTop`
+      // silently clamps to 0. Treating "found the option" as success was what
+      // left the hours column sitting at the top.
+      const ready = selected && node.clientHeight > 0 && node.scrollHeight > node.clientHeight;
+
+      if (ready) {
+        node.scrollTop = selected.offsetTop - node.clientHeight / 2 + selected.clientHeight / 2;
+        return;
+      }
+
+      // Bounded, so a column that never becomes scrollable -- a short list that
+      // needs no centring at all -- costs a few frames rather than spinning.
+      if (attempts++ < 20) frame = requestAnimationFrame(centre);
+    };
+
+    frame = requestAnimationFrame(centre);
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <span className="px-2 text-xs font-medium text-tertiary">{label}</span>
-      <div ref={centreOnOpen} className="h-48 overflow-y-auto overscroll-contain">
+      {/*
+       * `relative` is load-bearing: `offsetTop` is measured from the nearest
+       * POSITIONED ancestor, and without it the option's offset is measured
+       * against the popover -- padding, caption and all -- so the column
+       * scrolls to the wrong place.
+       */}
+      <div ref={scroller} className="relative h-48 overflow-y-auto overscroll-contain">
         <ListBox
           aria-label={label}
           selectionMode="single"
@@ -278,6 +316,7 @@ function TimeColumn({
 
 export function RunAtField() {
   const [value, setValue] = useState<CalendarDateTime | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const hourRef = useRef<HTMLInputElement>(null);
   const minuteRef = useRef<HTMLInputElement>(null);
 
@@ -306,110 +345,128 @@ export function RunAtField() {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <DatePicker
-        value={value ? toCalendarDate(value) : null}
-        onChange={setDate}
-        /* Date only. The time is the two boxes inside the same border below. */
-        granularity="day"
-        minValue={today(getLocalTimeZone())}
-        className="flex flex-col gap-1.5"
-      >
-        <Label>First send</Label>
+      {/*
+       * A plain span, not `Label`, and a `role="group"` below rather than a
+       * `DatePicker`. See the note at the top of this file: react-aria's
+       * DatePicker hands a PopoverContext to every Popover beneath it, so the
+       * clock button opened the CALENDAR. The two menus are siblings now, and
+       * the caption names the group instead of a single control.
+       */}
+      <span id="run-at-label" className="text-sm font-medium text-secondary">
+        First send
+      </span>
 
-        <Group className={FIELD}>
-          <DateInput className="flex shrink-0 items-center">
+      <div role="group" aria-labelledby="run-at-label" className={FIELD}>
+        <DateField
+          aria-label="Date"
+          value={value ? toCalendarDate(value) : null}
+          onChange={setDate}
+          granularity="day"
+          minValue={today(getLocalTimeZone())}
+          className="shrink-0"
+        >
+          <DateInput className="flex items-center">
             {(segment) => <DateSegment segment={segment} className={SEGMENT} />}
           </DateInput>
+        </DateField>
 
-          <span aria-hidden="true" className={DIVIDER} />
+        <span aria-hidden="true" className={DIVIDER} />
 
-          {/* Inside the Group deliberately: one border, one focus ring, one
-              control as far as the eye is concerned. */}
-          <TimeBox
-            label="Hours"
-            value={shown.hour}
-            max={HOUR_MAX}
-            onChange={(next) => setTime('hour', next)}
-            inputRef={hourRef}
-            onRightFocus={() => minuteRef.current?.focus()}
-          />
-          <span aria-hidden="true" className="text-tertiary">
-            :
-          </span>
-          <TimeBox
-            label="Minutes"
-            value={shown.minute}
-            max={MINUTE_MAX}
-            onChange={(next) => setTime('minute', next)}
-            inputRef={minuteRef}
-            onLeftFocus={() => hourRef.current?.focus()}
-          />
+        <TimeBox
+          label="Hours"
+          value={shown.hour}
+          max={HOUR_MAX}
+          onChange={(next) => setTime('hour', next)}
+          inputRef={hourRef}
+          onRightFocus={() => minuteRef.current?.focus()}
+        />
+        <span aria-hidden="true" className="text-tertiary">
+          :
+        </span>
+        <TimeBox
+          label="Minutes"
+          value={shown.minute}
+          max={MINUTE_MAX}
+          onChange={(next) => setTime('minute', next)}
+          inputRef={minuteRef}
+          onLeftFocus={() => hourRef.current?.focus()}
+        />
 
-          {/* The time's own menu, sitting beside the time rather than beside
-              the calendar button: a field that offers a popover for the date
-              and nothing for the time reads as half-finished. Typing and the
-              arrow keys still work -- this is an addition, not a replacement. */}
-          <DialogTrigger>
-            <Button className={`${NAV_BUTTON} size-6 shrink-0`} aria-label="Choose a time">
-              <ClockIcon className="size-4" aria-hidden="true" />
-            </Button>
-            <Popover placement="bottom" className={POPOVER}>
-              <Dialog className="outline-none">
-                <div className="flex gap-2">
-                  <TimeColumn
-                    label="Hours"
-                    max={HOUR_MAX}
-                    value={shown.hour}
-                    onSelect={(next) => setTime('hour', next)}
-                  />
-                  <TimeColumn
-                    label="Minutes"
-                    max={MINUTE_MAX}
-                    value={shown.minute}
-                    onSelect={(next) => setTime('minute', next)}
-                  />
-                </div>
-              </Dialog>
-            </Popover>
-          </DialogTrigger>
+        {/* The time's own menu, beside the time. Typing and the arrow keys
+            still work -- this is an addition, not a replacement, so it stays
+            open while both columns are picked. */}
+        <DialogTrigger>
+          <Button className={`${NAV_BUTTON} size-6 shrink-0`} aria-label="Choose a time">
+            <ClockIcon className="size-4" aria-hidden="true" />
+          </Button>
+          <Popover placement="bottom" className={POPOVER}>
+            <Dialog className="outline-none">
+              <div className="flex gap-2">
+                <TimeColumn
+                  label="Hours"
+                  max={HOUR_MAX}
+                  value={shown.hour}
+                  onSelect={(next) => setTime('hour', next)}
+                />
+                <TimeColumn
+                  label="Minutes"
+                  max={MINUTE_MAX}
+                  value={shown.minute}
+                  onSelect={(next) => setTime('minute', next)}
+                />
+              </div>
+            </Dialog>
+          </Popover>
+        </DialogTrigger>
 
+        {/* Controlled, unlike the clock: picking a day is the whole errand, so
+            the calendar closes behind you rather than sitting over the form. */}
+        <DialogTrigger isOpen={calendarOpen} onOpenChange={setCalendarOpen}>
           <Button
             className={`${NAV_BUTTON} ms-auto size-6 shrink-0`}
             aria-label="Choose a date from the calendar"
           >
             <CalendarIcon className="size-4" aria-hidden="true" />
           </Button>
-        </Group>
+          <Popover placement="bottom end" className={POPOVER}>
+            <Dialog className="outline-none">
+              <Calendar
+                aria-label="Date"
+                value={value ? toCalendarDate(value) : null}
+                onChange={(date) => {
+                  setDate(date);
+                  setCalendarOpen(false);
+                }}
+                minValue={today(getLocalTimeZone())}
+                className="flex flex-col gap-3"
+              >
+                <header className="flex items-center justify-between gap-2">
+                  <Button slot="previous" className={NAV_BUTTON} aria-label="Previous month">
+                    <ChevronLeft className="size-4" aria-hidden="true" />
+                  </Button>
+                  <Heading className="text-sm font-medium text-primary" />
+                  <Button slot="next" className={NAV_BUTTON} aria-label="Next month">
+                    <ChevronRight className="size-4" aria-hidden="true" />
+                  </Button>
+                </header>
 
-        <Popover placement="bottom start" className={POPOVER}>
-          <Dialog className="outline-none">
-            <Calendar className="flex flex-col gap-3">
-              <header className="flex items-center justify-between gap-2">
-                <Button slot="previous" className={NAV_BUTTON} aria-label="Previous month">
-                  <ChevronLeft className="size-4" aria-hidden="true" />
-                </Button>
-                <Heading className="text-sm font-medium text-primary" />
-                <Button slot="next" className={NAV_BUTTON} aria-label="Next month">
-                  <ChevronRight className="size-4" aria-hidden="true" />
-                </Button>
-              </header>
-
-              <CalendarGrid className="border-collapse">
-                <CalendarGridHeader>
-                  {(day) => (
-                    <CalendarHeaderCell className="size-9 text-xs font-medium text-tertiary">
-                      {day}
-                    </CalendarHeaderCell>
-                  )}
-                </CalendarGridHeader>
-                <CalendarGridBody>
-                  {(date) => <CalendarCell date={date} className={CELL} />}
-                </CalendarGridBody>
-              </CalendarGrid>
-            </Calendar>
-          </Dialog>
-        </Popover>
-      </DatePicker>
+                <CalendarGrid className="border-collapse">
+                  <CalendarGridHeader>
+                    {(day) => (
+                      <CalendarHeaderCell className="size-9 text-xs font-medium text-tertiary">
+                        {day}
+                      </CalendarHeaderCell>
+                    )}
+                  </CalendarGridHeader>
+                  <CalendarGridBody>
+                    {(date) => <CalendarCell date={date} className={CELL} />}
+                  </CalendarGridBody>
+                </CalendarGrid>
+              </Calendar>
+            </Dialog>
+          </Popover>
+        </DialogTrigger>
+      </div>
 
       <span className="text-xs text-tertiary">
         24-hour clock. Type, use the arrow keys, or pick from the menus.
