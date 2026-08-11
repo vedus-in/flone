@@ -15,6 +15,7 @@ import { prisma } from '@/lib/db';
 import { REPEAT_LABEL, formatWhen } from '@/lib/reminder-math';
 import { ActionForm } from '../../../action-form';
 import { createReminder, deleteReminder } from './actions';
+import { RunAtField } from './run-at-field';
 import { TzOffsetField } from './tz-offset-field';
 
 export const metadata: Metadata = {
@@ -163,12 +164,11 @@ export default async function RemindersPage({
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field htmlFor="reminder-run-at" label="First send">
-                {/* Native picker: it is the platform's own control, it is
-                    keyboard accessible everywhere, and it submits a plain
-                    `YYYY-MM-DDTHH:mm` the action can parse. */}
-                <Input id="reminder-run-at" name="runAt" type="datetime-local" required />
-              </Field>
+              {/* Owns its own label and its own hidden `runAt` input, so it is
+                  not wrapped in `Field` -- see the note in that module for why
+                  this one control is allowed to keep React state where every
+                  other input on the page is native. */}
+              <RunAtField />
 
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="reminder-repeat">Repeats</Label>
