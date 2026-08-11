@@ -1,4 +1,8 @@
 # The `web` service builds the Next.js app and nothing else. `cli/` is a
 # separate npm package with its own dependencies and its own release; uploading
 # it would only make every deploy slower.
-cli/
+#
+# The leading slash is load-bearing. These are gitignore-style patterns, so a
+# bare `cli/` matches a directory of that name at ANY depth — which silently
+# swallowed `src/app/api/cli/` and shipped a build with no sign-in route.
+/cli/
