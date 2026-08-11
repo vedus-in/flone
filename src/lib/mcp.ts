@@ -21,6 +21,7 @@ import {
   requireUser,
   ticketPath,
   type BoardCtx,
+  type TicketCtx,
 } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { ensureCycles } from '@/lib/cycles';
@@ -141,6 +142,68 @@ function requiredId(args: Args, key: string): string {
     throw new ToolError(`"${key}" must be an id returned by a previous read (list_boards, get_organization, get_board, get_ticket or search_tickets).`);
   }
   return parsed.data;
+}
+
+/** `ENG-12` — the ref every read hands back, and the only handle a human types. */
+const TICKET_REF = /^([A-Z][A-Z0-9]*)-([1-9][0-9]*)$/;
+
+/** Postgres `Int`. A ref above this cannot name a row, so it is simply not found. */
+const MAX_TICKET_NUMBER = 2_147_483_647;
+
+/**
+ * A ticket id, or the `ENG-12` ref reads return. Both land on the SAME
+ * membership-scoped walk in `requireTicket`, so a ref reaches nothing an id
+ * could not — it is a lookup, never an authorization.
+ *
+ * Every tool that takes a `ticketId` goes through here, so accepting refs is
+ * one change rather than eight, and no tool can accidentally be left behind
+ * taking cuids only.
+ */
+async function requireTicketArg(args: Args, key = 'ticketId'): Promise<TicketCtx> {
+  const raw = requiredString(args, key).trim();
+
+  if (cuid.safeParse(raw).success) return requireTicket(raw);
+
+  const ref = TICKET_REF.exec(raw.toUpperCase());
+  if (!ref) {
+    throw new ToolError(
+      `"${key}" must be an id returned by a previous read (get_board, get_ticket or search_tickets), or a ref like ENG-12.`,
+    );
+  }
+
+  const number = Number(ref[2]);
+  if (number > MAX_TICKET_NUMBER) throw new AuthzError('NOT_FOUND');
+
+  const user = await requireUser();
+  const matches = await prisma.ticket.findMany({
+    where: {
+      number,
+      project: {
+        key: ref[1],
+        organization: { memberships: { some: { userId: user.id } } },
+      },
+    },
+    // Deliberately not `findFirst`. Two organizations may each own a project
+    // keyed ENG, and silently taking the first is how you edit the right ticket
+    // at the wrong company. Ambiguity is reported, never guessed.
+    select: { id: true, project: { select: { organization: { select: { name: true } } } } },
+  });
+
+  // Indistinguishable from a ticket in another tenant, exactly as an unknown id
+  // is: there is no existence oracle here either.
+  if (matches.length === 0) throw new AuthzError('NOT_FOUND');
+
+  if (matches.length > 1) {
+    const orgs = matches
+      .map((row) => row.project.organization.name)
+      .sort()
+      .join(', ');
+    throw new ToolError(
+      `"${raw}" matches an issue in more than one organization (${orgs}). Pass the ticketId from get_board or search_tickets instead.`,
+    );
+  }
+
+  return requireTicket(matches[0].id);
 }
 
 function optionalInt(args: Args, key: string): number | undefined {
@@ -350,6 +413,10 @@ type Tool = {
 const STRING = { type: 'string' } as const;
 const ORG_SLUG = { ...STRING, description: 'Organization slug, from list_boards.' } as const;
 const PROJECT_KEY = { ...STRING, description: 'Project key, e.g. ENG.' } as const;
+const TICKET_ID = {
+  ...STRING,
+  description: 'Issue id from a previous read, or a ref like ENG-12.',
+} as const;
 
 export const TOOLS: Tool[] = [
   /* ------------------------------------------------------------------ */
@@ -364,6 +431,21 @@ export const TOOLS: Tool[] = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
     run: async () => ({ organizations: await listNavTree() }),
+  },
+
+  {
+    name: 'whoami',
+    title: 'Who am I',
+    description:
+      'The person this token acts as. Every other tool is scoped to them, so this is who "assigned to me" means.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+    run: async () => {
+      const user = await requireUser();
+      // `sessionId` is deliberately not returned: it identifies the credential
+      // rather than the person, and nothing outside `@/lib/session` needs it.
+      return { userId: user.id, name: user.name, email: user.email };
+    },
   },
 
   {
@@ -508,13 +590,13 @@ export const TOOLS: Tool[] = [
       'One ticket in full: description, column, priority, due date, assignee and comments (with the commentId that update_comment and delete_comment need).',
     inputSchema: {
       type: 'object',
-      properties: { ticketId: { ...STRING, description: 'From get_board or search_tickets.' } },
+      properties: { ticketId: TICKET_ID },
       required: ['ticketId'],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true },
     run: async (args) => {
-      const ctx = await requireTicket(requiredId(args, 'ticketId'));
+      const ctx = await requireTicketArg(args);
 
       // Rooted at an id the walk above already authorized.
       const detail = await prisma.ticket.findFirst({
@@ -1290,7 +1372,7 @@ export const TOOLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        ticketId: STRING,
+        ticketId: TICKET_ID,
         title: STRING,
         description: { ...STRING, description: 'Empty string clears it.' },
         priority: { type: 'string', enum: PRIORITIES },
@@ -1316,7 +1398,7 @@ export const TOOLS: Tool[] = [
     },
     annotations: { idempotentHint: true },
     run: async (args) => {
-      const ctx = await requireTicket(requiredId(args, 'ticketId'));
+      const ctx = await requireTicketArg(args);
       const ticketId = ctx.ticket.id;
       const projectId = ctx.ticket.projectId;
 
@@ -1422,7 +1504,7 @@ export const TOOLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        ticketId: STRING,
+        ticketId: TICKET_ID,
         status: { ...STRING, description: 'Target workflow state name or id, from get_project.' },
         position: { type: 'integer', minimum: 0, description: '0 puts it at the top.' },
       },
@@ -1431,7 +1513,7 @@ export const TOOLS: Tool[] = [
     },
     annotations: { idempotentHint: true },
     run: async (args) => {
-      const ctx = await requireTicket(requiredId(args, 'ticketId'));
+      const ctx = await requireTicketArg(args);
       // The issue's OWN project, from the authorized row — never a client id.
       const state = await resolveState(ctx.ticket.projectId, requiredString(args, 'status'));
 
@@ -1464,7 +1546,7 @@ export const TOOLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        ticketId: STRING,
+        ticketId: TICKET_ID,
         board: { ...STRING, description: 'Board name or id; empty string for no board.' },
       },
       required: ['ticketId', 'board'],
@@ -1472,7 +1554,7 @@ export const TOOLS: Tool[] = [
     },
     annotations: { idempotentHint: true },
     run: async (args) => {
-      const ctx = await requireTicket(requiredId(args, 'ticketId'));
+      const ctx = await requireTicketArg(args);
       const boardId = await resolveBoard(ctx.ticket.projectId, requiredString(args, 'board'));
       must(await setIssueBoard({ ticketId: ctx.ticket.id, boardId }));
 
@@ -1495,13 +1577,13 @@ export const TOOLS: Tool[] = [
       'Permanently delete an issue and its comments. Any sub-issues survive and simply lose their parent. The issue author, or an ADMIN or OWNER — ask the user before calling this.',
     inputSchema: {
       type: 'object',
-      properties: { ticketId: STRING },
+      properties: { ticketId: TICKET_ID },
       required: ['ticketId'],
       additionalProperties: false,
     },
     annotations: { destructiveHint: true },
     run: async (args) => {
-      const ctx = await requireTicket(requiredId(args, 'ticketId'));
+      const ctx = await requireTicketArg(args);
       const ref = `${ctx.project.key}-${ctx.ticket.number}`;
       await runNavigating(() => deleteIssue(null, form({ ticketId: ctx.ticket.id })));
       return { ok: true, deleted: ref };
@@ -1518,12 +1600,12 @@ export const TOOLS: Tool[] = [
     description: 'Post a comment, authored by the owner of the token. Any member may comment.',
     inputSchema: {
       type: 'object',
-      properties: { ticketId: STRING, body: STRING },
+      properties: { ticketId: TICKET_ID, body: STRING },
       required: ['ticketId', 'body'],
       additionalProperties: false,
     },
     run: async (args) => {
-      const ctx = await requireTicket(requiredId(args, 'ticketId'));
+      const ctx = await requireTicketArg(args);
       must(
         await createComment(
           null,

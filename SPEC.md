@@ -30,6 +30,10 @@ filtering · activity feeds · websockets · realtime · drag-and-drop · admin 
 dark-mode toggle · i18n · analytics · markdown/rich text rendering · avatars · REST/JSON API ·
 route handlers (`route.ts`) · `middleware.ts` · tests beyond what is explicitly asked for.
 
+> **AMENDED 2026-08-11.** `route.ts` is off this list for two files only — the MCP endpoint and
+> CLI sign-in. A REST/JSON API remains out: neither exposes a resource, and every board, issue
+> and comment still moves through MCP or a Server Action. See §5.
+>
 > **AMENDED 2026-08-06.** Email sending, email verification and password reset were on this list
 > and have been built — see `docs/superpowers/specs/2026-08-06-email-design.md`, which supersedes
 > this section, §4.4 and §7.20, and items 2 and 3 of §8. Reminders and digests stay out for a
@@ -553,7 +557,26 @@ secret and is not the defense); and actions cannot be triggered by GET.
 **Binding rule:** no state-changing mutation may occur on a GET path — not in a Server Component
 render, not in `generateMetadata`, not in a layout. The one carve-out is the idempotent
 `Session.expiresAt` extension in `readSession()` (§4.2), which changes nothing an attacker could
-want. Any future `route.ts` invalidates this analysis — and route handlers are banned.
+want.
+
+> **AMENDED 2026-08-11.** Two route handlers now exist, and this analysis holds for both —
+> but it holds for a different reason than it does for Server Actions, so the reason is
+> recorded here rather than left to be re-derived.
+>
+> `POST /api/mcp` accepts the session as a cookie or as `Authorization: Bearer`. Of the four
+> layers above, only the first applies to it: there is no `Next-Action` header to demand and
+> no Origin comparison. `sameSite='lax'` is therefore doing the whole job, and it is
+> sufficient — a cross-site POST does not carry the cookie, and a cross-site request cannot
+> set an `Authorization` header. This means **`sameSite` must never be relaxed to `'none'`**
+> while that route exists; that single change, and no other, would open a CSRF hole here.
+>
+> `POST /api/cli/login` reads no cookie and sets none: it authenticates from the request body
+> and returns the token in the response body. A cross-site POST can be made but its response
+> cannot be read, since the route grants no CORS. `DELETE` on the same path revokes the
+> presented bearer token; a cross-site caller cannot present one.
+>
+> The binding rule above is unchanged and applies to both: no state-changing mutation on a GET
+> path. `GET /api/mcp` is a 405, and `/api/cli/login` has no GET.
 
 ### 4.7 What must never be logged
 
@@ -665,7 +688,15 @@ them **after** the try/catch closes, or re-throw digest errors (`runAction` does
 
 ## 5. App Router file tree
 
-Ten pages. **Zero route handlers. No `middleware.ts`.**
+Ten pages. **No `middleware.ts`.**
+
+> **AMENDED 2026-08-11.** Two route handlers exist, both serving non-browser clients, and
+> neither is a REST API — they expose no resources. `src/app/api/mcp/route.ts` is the MCP
+> tool surface. `src/app/api/cli/login/route.ts` exists because a Server Action is not
+> callable from outside a browser, so the one thing the `flone` CLI cannot do over MCP is
+> obtain the token MCP requires; it is two verbs and no nouns. Its credential checks are not
+> its own — they live in `@/lib/sign-in`, shared verbatim with the `signIn` action. See §4.6
+> for why the CSRF analysis survives both.
 
 ```
 prisma/
