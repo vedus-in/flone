@@ -13,11 +13,19 @@ import {
   DatePicker,
   DateSegment,
   Dialog,
+  DialogTrigger,
   Group,
   Heading,
+  ListBox,
+  ListBoxItem,
   Popover,
 } from 'react-aria-components';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight } from '@untitledui/icons';
+import {
+  Calendar as CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
+  Clock as ClockIcon,
+} from '@untitledui/icons';
 import {
   CalendarDateTime,
   getLocalTimeZone,
@@ -122,6 +130,13 @@ const CELL =
 const NAV_BUTTON =
   'grid size-8 place-items-center rounded-md text-tertiary outline-none transition-colors hover:bg-secondary hover:text-primary pressed:bg-secondary data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-1 data-[focus-visible]:outline-focus-ring';
 
+/** Shared by the calendar and the clock, so the two menus cannot drift apart. */
+const POPOVER =
+  'rounded-xl bg-primary p-3 shadow-lg ring-1 ring-secondary entering:animate-in entering:fade-in exiting:animate-out exiting:fade-out';
+
+const OPTION =
+  'cursor-default rounded-md px-3 py-1.5 text-center text-sm tabular-nums text-secondary outline-none transition-colors data-[hovered]:bg-secondary data-[selected]:bg-brand-solid data-[selected]:font-medium data-[selected]:text-white data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-1 data-[focus-visible]:outline-focus-ring';
+
 /* -------------------------------------------------------------------------- */
 /* One two-digit box                                                           */
 /* -------------------------------------------------------------------------- */
@@ -191,6 +206,71 @@ function TimeBox({
       onKeyDown={handleKeyDown}
       onFocus={(event) => event.currentTarget.select()}
     />
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* One scrolling column of the clock menu                                      */
+/* -------------------------------------------------------------------------- */
+
+function TimeColumn({
+  label,
+  max,
+  value,
+  onSelect,
+}: {
+  label: string;
+  max: number;
+  value: number;
+  onSelect: (next: number) => void;
+}) {
+  /**
+   * Opening at 00:00 and asking someone to scroll to 21 is the thing that makes
+   * these menus tiresome, so the current value is centred on open.
+   *
+   * Done once per open, guarded by this ref: the callback re-runs on every
+   * render, and re-centring after each click would yank the list out from under
+   * the pointer. The popover unmounts when it closes, so the guard resets with
+   * it.
+   *
+   * `scrollTop` rather than `scrollIntoView` deliberately -- the latter walks up
+   * to the nearest scrollable ancestor and can take the whole page with it.
+   */
+  const centred = useRef(false);
+
+  function centreOnOpen(node: HTMLDivElement | null) {
+    if (!node || centred.current) return;
+    const selected = node.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!selected) return;
+    centred.current = true;
+    node.scrollTop = selected.offsetTop - node.clientHeight / 2 + selected.clientHeight / 2;
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <span className="px-2 text-xs font-medium text-tertiary">{label}</span>
+      <div ref={centreOnOpen} className="h-48 overflow-y-auto overscroll-contain">
+        <ListBox
+          aria-label={label}
+          selectionMode="single"
+          // Clicking the value you are already on should be a no-op, not a way
+          // to end up with no time selected at all.
+          disallowEmptySelection
+          selectedKeys={[String(value)]}
+          onSelectionChange={(keys) => {
+            const [key] = [...keys];
+            if (key !== undefined) onSelect(Number(key));
+          }}
+          className="flex flex-col gap-px pe-1"
+        >
+          {Array.from({ length: max + 1 }, (_, unit) => (
+            <ListBoxItem key={unit} id={String(unit)} textValue={pad(unit)} className={OPTION}>
+              {pad(unit)}
+            </ListBoxItem>
+          ))}
+        </ListBox>
+      </div>
+    </div>
   );
 }
 
@@ -265,6 +345,34 @@ export function RunAtField() {
             onLeftFocus={() => hourRef.current?.focus()}
           />
 
+          {/* The time's own menu, sitting beside the time rather than beside
+              the calendar button: a field that offers a popover for the date
+              and nothing for the time reads as half-finished. Typing and the
+              arrow keys still work -- this is an addition, not a replacement. */}
+          <DialogTrigger>
+            <Button className={`${NAV_BUTTON} size-6 shrink-0`} aria-label="Choose a time">
+              <ClockIcon className="size-4" aria-hidden="true" />
+            </Button>
+            <Popover placement="bottom" className={POPOVER}>
+              <Dialog className="outline-none">
+                <div className="flex gap-2">
+                  <TimeColumn
+                    label="Hours"
+                    max={HOUR_MAX}
+                    value={shown.hour}
+                    onSelect={(next) => setTime('hour', next)}
+                  />
+                  <TimeColumn
+                    label="Minutes"
+                    max={MINUTE_MAX}
+                    value={shown.minute}
+                    onSelect={(next) => setTime('minute', next)}
+                  />
+                </div>
+              </Dialog>
+            </Popover>
+          </DialogTrigger>
+
           <Button
             className={`${NAV_BUTTON} ms-auto size-6 shrink-0`}
             aria-label="Choose a date from the calendar"
@@ -273,10 +381,7 @@ export function RunAtField() {
           </Button>
         </Group>
 
-        <Popover
-            placement="bottom start"
-            className="rounded-xl bg-primary p-3 shadow-lg ring-1 ring-secondary entering:animate-in entering:fade-in exiting:animate-out exiting:fade-out"
-          >
+        <Popover placement="bottom start" className={POPOVER}>
           <Dialog className="outline-none">
             <Calendar className="flex flex-col gap-3">
               <header className="flex items-center justify-between gap-2">
@@ -306,7 +411,9 @@ export function RunAtField() {
         </Popover>
       </DatePicker>
 
-      <span className="text-xs text-tertiary">24-hour clock. Arrow keys adjust.</span>
+      <span className="text-xs text-tertiary">
+        24-hour clock. Type, use the arrow keys, or pick from the menus.
+      </span>
 
       {/*
        * What the Server Action actually reads.
