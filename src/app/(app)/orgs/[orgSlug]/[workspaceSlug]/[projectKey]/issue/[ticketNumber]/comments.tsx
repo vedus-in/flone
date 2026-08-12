@@ -12,9 +12,10 @@
  * also the double-submit guard.
  *
  * Every piece of user text below is rendered as an escaped React child, and
- * multi-line text goes through `Prose` (`.pre-wrap`). There is no markdown
- * renderer, no autolinker and no use of React's raw-HTML escape hatch: the app
- * never constructs HTML from user input.
+ * multi-line text goes through `Prose`, which renders it as Markdown. That
+ * renderer builds React elements and drops raw HTML rather than parsing it, so
+ * React's raw-HTML escape hatch is still unused here: the app never constructs
+ * HTML from user input.
  *
  * Permission flags (`canManage`, `canDelete`) are computed on the SERVER and
  * passed down. They are politeness only -- every action re-checks the role.
@@ -202,7 +203,7 @@ export function TicketEditForm({ ticketId, title, description }: TicketEditFormP
         <Field
           htmlFor="ticket-description"
           label="Description"
-          hint="Plain text. Line breaks are kept."
+          hint="Markdown. Line breaks are kept."
           error={errors.description}
         >
           <Textarea

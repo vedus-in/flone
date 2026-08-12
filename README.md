@@ -19,7 +19,7 @@ A small, multi-tenant Kanban application. People sign up with an email address a
 
 ### Not included, on purpose
 
-File uploads, in-app notifications, password change while signed in (reset it instead), OAuth/SSO, MFA, @mentions, due-date reminders, digest emails, labels, filtering, activity feeds, realtime/websockets, an admin panel, billing, a dark-mode toggle, i18n, analytics, markdown rendering, avatars, and any public REST/JSON API — `/api/mcp` is the only route handler, it speaks MCP rather than REST, and it is closed to anyone without a session token. Board columns are fixed at three and cannot be added, renamed, or deleted.
+File uploads, in-app notifications, password change while signed in (reset it instead), OAuth/SSO, MFA, @mentions, due-date reminders, digest emails, labels, filtering, activity feeds, realtime/websockets, an admin panel, billing, a dark-mode toggle, i18n, analytics, a rich-text editor, avatars, and any public REST/JSON API — `/api/mcp` is the only route handler, it speaks MCP rather than REST, and it is closed to anyone without a session token. Board columns are fixed at three and cannot be added, renamed, or deleted.
 
 Reminders and digests are absent for one shared reason: both need a scheduler, and the app deliberately has none — cycles are generated lazily on read so that nothing has to run on a timer.
 
@@ -89,6 +89,7 @@ Register an account at `/register`, and you will be sent straight to the organiz
 | `bun run mcp:smoke` | End-to-end check of `/api/mcp` against a running server. Needs `FLONE_MCP_TOKEN`. |
 | `bun run email:dev` | react-email's preview server for the templates in `src/emails/`. |
 | `bun run check:email` | Asserts the transport and templates. The one-time-token checks need a reachable database and are skipped, not failed, without one. |
+| `bun run check:markdown` | Asserts what the comment renderer does with hostile input: raw HTML stays inert, `javascript:` links are dropped. |
 
 ## MCP access
 
@@ -207,7 +208,7 @@ What is deliberately **not** implemented, and what that means for you:
 - **Rate limiting is in-process only.** Login, registration, reset and resend throttles live in the memory of a single Node process, so a redeploy or crash resets every counter, and running more than one replica multiplies every limit by the replica count. scrypt's cost is the real floor here. Move the counters into Postgres before scaling out.
 - **Email delivery is best-effort and unretried.** Sending happens after the response via `after()`, and a failure is logged rather than raised — an issue that was assigned stays assigned whether or not Resend was reachable. There is no queue and no retry, on the grounds that every message is re-requestable by the user. A confirmation or reset link lost to a provider outage is recovered by asking for another.
 - **Deliverability is a domain problem, not a code problem.** If `EMAIL_FROM` is on a domain without SPF/DKIM set up in Resend, mail is rejected or lands in spam, and the app cannot tell the difference — the log line says the send failed and nothing more.
-- **The CSP is not nonce-based**, so `script-src` allows inline scripts and is not XSS protection. The app is defended by React's escaping instead: it never constructs HTML from user input, uses no markdown renderer or sanitizer, and `dangerouslySetInnerHTML` is banned.
+- **The CSP is not nonce-based**, so `script-src` allows inline scripts and is not XSS protection. The app is defended by React's escaping instead: it never constructs HTML from user input, and `dangerouslySetInnerHTML` is banned. Descriptions and comments are Markdown, rendered by `react-markdown` into React elements — raw HTML in a body is escaped rather than parsed, because `rehype-raw` is deliberately absent. `bun run check:markdown` is what holds that line.
 - **No audit log and no account deletion.** `/tokens` lists your live sessions and revokes any of them, but it shows only when each was created — there is no device, IP, or last-used detail to tell two of them apart, and no way to scope a token to less than your full access.
 
 ## Data model

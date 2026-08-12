@@ -1,5 +1,8 @@
 import { Children, Fragment, type HTMLAttributes, type ReactNode } from 'react';
 import NextLink from 'next/link';
+import Markdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
+import remarkGfm from 'remark-gfm';
 import { Badge as UntitledBadge } from '@/components/base/badges/badges';
 import { Label } from '@/components/base/input/label';
 import { cx } from '@/lib/utils/cx';
@@ -259,12 +262,31 @@ export function FormError({
 /* -------------------------------------------------------------------------- */
 
 /**
- * Multi-line user text. React escapes the child, so no sanitization is needed
- * and none is performed -- `dangerouslySetInnerHTML` is banned project-wide.
- * `.pre-wrap` preserves the author's line breaks with CSS instead of markup.
+ * Multi-line user text, rendered as Markdown.
+ *
+ * `react-markdown` builds React ELEMENTS -- it never produces an HTML string,
+ * and without `rehype-raw` any HTML in the source is dropped rather than
+ * parsed. So `dangerouslySetInnerHTML` stays banned project-wide and the XSS
+ * posture is unchanged: the app still never constructs HTML from user input.
+ * URLs are filtered by react-markdown's default transform (`javascript:` and
+ * friends are stripped).
+ *
+ * Two plugins, both from the same authors as the parser:
+ *   `remark-gfm`    -- tables, strikethrough, task lists, bare URLs.
+ *   `remark-breaks` -- a single newline is a line break. Commonmark would fold
+ *                      it into a space, which is not what someone typing into a
+ *                      textarea means, and would reflow every comment written
+ *                      back when this rendered as plain `pre-wrap` text.
+ *
+ * The tags come out of the parser, so they cannot carry Tailwind classes at a
+ * call site; the `markdown` utility in `globals.css` styles them.
  */
-export function Prose({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cx('pre-wrap text-sm leading-relaxed', className)}>{children}</div>;
+export function Prose({ children, className }: { children: string; className?: string }) {
+  return (
+    <div className={cx('markdown text-sm leading-relaxed', className)}>
+      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{children}</Markdown>
+    </div>
+  );
 }
 
 /* -------------------------------------------------------------------------- */

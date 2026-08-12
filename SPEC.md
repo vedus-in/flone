@@ -30,6 +30,9 @@ filtering · activity feeds · websockets · realtime · drag-and-drop · admin 
 dark-mode toggle · i18n · analytics · markdown/rich text rendering · avatars · REST/JSON API ·
 route handlers (`route.ts`) · `middleware.ts` · tests beyond what is explicitly asked for.
 
+> **AMENDED 2026-08-12.** Markdown rendering is off this list for descriptions and comments —
+> read-side only, and no rich-text editor: the input is still a plain `<textarea>`. See §4.9.
+>
 > **AMENDED 2026-08-11.** `route.ts` is off this list for two files only — the MCP endpoint and
 > CLI sign-in. A REST/JSON API remains out: neither exposes a resource, and every board, issue
 > and comment still moves through MCP or a Server Action. See §5.
@@ -618,10 +621,25 @@ bypass via `x-middleware-subrequest`).
 ### 4.9 XSS posture
 
 React escapes text children; `{comment.body}` needs zero sanitization. Make the ban mechanical:
-ESLint `react/no-danger: 'error'`, `no-eval`, `no-new-func`. Render multi-line user text as plain
-text inside an element styled `white-space: pre-wrap; overflow-wrap: anywhere;`. No markdown
-renderer, no autolinker, no HTML sanitizer — the app never constructs HTML from user input.
-Normalize `\r\n` → `\n` in the zod transform for `description` and `body`.
+ESLint `react/no-danger: 'error'`, `no-eval`, `no-new-func`. No HTML sanitizer — the app never
+constructs HTML from user input. Normalize `\r\n` → `\n` in the zod transform for `description`
+and `body`.
+
+> **AMENDED 2026-08-12.** Multi-line user text was rendered as plain text inside a
+> `white-space: pre-wrap` element. It is now Markdown, via `Prose` in `src/components/ui.tsx`.
+>
+> This does not relax the rule above, because `react-markdown` produces React ELEMENTS and never
+> an HTML string. `rehype-raw` is deliberately absent, so raw HTML in a body is escaped as text
+> rather than parsed, and `dangerouslySetInnerHTML` remains banned everywhere. URLs go through
+> react-markdown's default transform, which drops `javascript:`.
+>
+> Two remark plugins, no others: `remark-gfm` (tables, strikethrough, task lists, bare URLs) and
+> `remark-breaks` (a single newline stays a line break — without it, every comment written under
+> the old `pre-wrap` rendering silently reflows). The parser's tags are styled by the `markdown`
+> utility in `globals.css`, the one place the app styles elements it does not write.
+>
+> `scripts/check-markdown.ts` (`bun run check:markdown`) asserts all four properties. Adding
+> `rehype-raw` fails it, and nothing else in the repo would notice.
 
 ### 4.10 Shared validation primitives (`src/lib/validation.ts`)
 

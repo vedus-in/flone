@@ -36,14 +36,180 @@
 }
 
 /*
- * User-authored text. React escapes the child, so the author's line breaks are
- * preserved with CSS instead of markup -- `dangerouslySetInnerHTML` is banned
- * project-wide. `anywhere` stops an unbroken 5000-character comment from
- * blowing out the column it sits in.
+ * Markdown output (`Prose` in `src/components/ui.tsx`).
+ *
+ * The one exception to "layout is done at the call site": these tags are built
+ * by the parser from what someone typed, so no call site exists to hang a
+ * Tailwind class on. Every value is a theme token, and every rule is here
+ * because Tailwind's preflight zeroed it -- headings, list markers, table
+ * borders and blockquote rules all come back to life below.
+ *
+ * Sizes are in `em` so the block scales with whatever `text-*` the caller sets.
  */
-@utility pre-wrap {
-    white-space: pre-wrap;
+@utility markdown {
+    /* An unbroken 5000-character comment must not blow out its column. */
     overflow-wrap: anywhere;
+
+    & > :first-child {
+        margin-top: 0;
+    }
+
+    & > :last-child {
+        margin-bottom: 0;
+    }
+
+    & p,
+    & ul,
+    & ol,
+    & pre,
+    & blockquote,
+    & table {
+        margin: 0.75em 0;
+    }
+
+    & h1,
+    & h2,
+    & h3,
+    & h4,
+    & h5,
+    & h6 {
+        margin: 1.5em 0 0.5em;
+        font-weight: 600;
+        line-height: 1.35;
+        color: var(--color-text-primary);
+    }
+
+    & h1 {
+        font-size: 1.3em;
+    }
+
+    & h2 {
+        font-size: 1.15em;
+    }
+
+    & h3 {
+        font-size: 1.05em;
+    }
+
+    & strong {
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+
+    & a {
+        color: var(--color-text-brand-secondary);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+
+    & ul,
+    & ol {
+        padding-left: 1.5em;
+    }
+
+    & ul {
+        list-style: disc;
+    }
+
+    & ol {
+        list-style: decimal;
+    }
+
+    & li {
+        margin: 0.25em 0;
+    }
+
+    & li::marker {
+        color: var(--color-text-tertiary);
+    }
+
+    & li > ul,
+    & li > ol,
+    & li > p {
+        margin: 0.25em 0;
+    }
+
+    /*
+     * GFM task lists. The checkbox replaces the bullet, and react-markdown
+     * renders it disabled -- ticking a box in a comment must not look like it
+     * saves something, because nothing here writes back.
+     */
+    & li:has(> input[type="checkbox"]) {
+        margin-left: -1.25em;
+        list-style: none;
+    }
+
+    & input[type="checkbox"] {
+        margin-right: 0.5em;
+        accent-color: var(--color-text-brand-secondary);
+    }
+
+    & code {
+        padding: 0.1em 0.35em;
+        font-family: var(--font-mono);
+        font-size: 0.875em;
+        background-color: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-secondary);
+        border-radius: var(--radius-xs);
+    }
+
+    & pre {
+        padding: 0.75em 1em;
+        overflow-x: auto;
+        background-color: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-secondary);
+        border-radius: var(--radius-md);
+    }
+
+    /* Inside a fence the block already carries the frame. */
+    & pre code {
+        padding: 0;
+        background: none;
+        border: 0;
+    }
+
+    & blockquote {
+        padding-left: 1em;
+        color: var(--color-text-tertiary);
+        border-left: 2px solid var(--color-border-secondary);
+    }
+
+    /*
+     * `display: block` + `max-content` is what lets a wide table scroll inside
+     * its column instead of stretching the page.
+     */
+    & table {
+        display: block;
+        width: max-content;
+        max-width: 100%;
+        overflow-x: auto;
+        border-collapse: collapse;
+    }
+
+    & th,
+    & td {
+        padding: 0.4em 0.6em;
+        text-align: left;
+        vertical-align: top;
+        border: 1px solid var(--color-border-secondary);
+    }
+
+    & th {
+        font-weight: 600;
+        background-color: var(--color-bg-secondary);
+    }
+
+    & hr {
+        margin: 1.5em 0;
+        border: 0;
+        border-top: 1px solid var(--color-border-secondary);
+    }
+
+    & img {
+        max-width: 100%;
+        height: auto;
+        border-radius: var(--radius-md);
+    }
 }
 
 /*

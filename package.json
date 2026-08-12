@@ -15,15 +15,16 @@
     "email:dev": "email dev --dir src/emails",
     "check:boundary": "node scripts/check-client-boundary.mjs",
     "check:model": "node scripts/check-model.ts",
-    "check:email": "bun scripts/check-email.ts"
+    "check:email": "bun scripts/check-email.ts",
+    "check:markdown": "bun scripts/check-markdown.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@dnd-kit/core": "^6.3.1",
-    "@internationalized/date": "^3.12.3",
     "@dnd-kit/modifiers": "^9.0.0",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@internationalized/date": "^3.12.3",
     "@prisma/client": "^6.19.3",
     "@untitledui/file-icons": "^0.0.9",
     "@untitledui/icons": "^0.0.22",
@@ -33,6 +34,9 @@
     "react-aria-components": "^1.20.0",
     "react-dom": "^19.2.0",
     "react-email": "^6.9.1",
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
     "tailwind-merge": "^3.6.0",
     "zod": "^3.25.76"
