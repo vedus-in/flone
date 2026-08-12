@@ -36,8 +36,9 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 declare const Bun: {
   serve(options: {
     port: number;
+    hostname: string;
     fetch: (request: Request) => Response | Promise<Response>;
-  }): { port: number };
+  }): { port: number; hostname: string };
 };
 
 const SID = process.env.TWILIO_ACCOUNT_SID?.trim();
@@ -191,6 +192,17 @@ const configured = Boolean(SID && AUTH_TOKEN && FROM && SECRET);
 
 const server = Bun.serve({
   port: Number(process.env.PORT ?? 3001),
+
+  /**
+   * `::`, NOT the `0.0.0.0` Bun defaults to.
+   *
+   * Railway's private network is IPv6-only. A process bound to `0.0.0.0` is
+   * listening on IPv4 only, so `voice.railway.internal` resolves, connects to
+   * nothing, and every reminder call fails with a connection error that looks
+   * like a wrong hostname. `::` accepts both families and is what makes this
+   * service reachable without a public domain.
+   */
+  hostname: '::',
 
   async fetch(request) {
     const { pathname } = new URL(request.url);
