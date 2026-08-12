@@ -22,11 +22,25 @@ import 'server-only';
  */
 
 /**
- * Amazon Polly's Indian-English voice. The default in `services/voice` is
- * `Polly.Joanna` (US); reminders pick this one because it reads names, digits
- * and times far better for the numbers this instance actually calls.
+ * The voice every reminder and verification call is read in.
+ *
+ * NEURAL TIER, not standard. Amazon Polly ships the same names in three
+ * generations -- `Polly.Joanna` (standard), `-Neural`, and `-Generative` -- and
+ * the suffix is the whole difference between a 2004 IVR and something a person
+ * will sit through. Standard voices flatten prosody, which is worst exactly
+ * where this feature needs clarity: a six-digit verification code read as a
+ * monotone run of syllables is one somebody has to ask to hear again, and there
+ * is nobody to ask.
+ *
+ * Neural rather than `-Generative` because generative bills highest per
+ * character and a recurring reminder repeats forever; the gap between neural
+ * and generative is smaller than the gap between standard and neural.
+ *
+ * Locale-neutral en-US on purpose. `Polly.Kajal-Neural` (en-IN) reads Indian
+ * names and numbers more naturally and is the swap to make if that becomes the
+ * main audience -- this constant is the only place it is named.
  */
-export const REMINDER_VOICE = 'Polly.Raveena';
+export const REMINDER_VOICE = 'Polly.Joanna-Neural';
 
 /**
  * Long enough for a provider hiccup, short enough that a batch of 100 reminders
