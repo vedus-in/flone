@@ -1,10 +1,15 @@
 import type { Metadata } from 'next';
 
-import { Card, PageHeader, SubmitButton } from '@/components/ui';
+import { Badge, Card, Field, Input, PageHeader, SubmitButton } from '@/components/ui';
 import { loadPage, requireUser } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { ActionForm } from '../action-form';
-import { updateNotificationPreferences } from './actions';
+import {
+  removePhone,
+  requestPhoneCode,
+  updateNotificationPreferences,
+  verifyPhoneCode,
+} from './actions';
 
 export const metadata: Metadata = {
   title: 'Account',
@@ -52,8 +57,20 @@ export default async function AccountPage() {
       notifyAssigned: true,
       notifyComments: true,
       notifyOrgMembership: true,
+      phone: true,
+      phoneVerified: true,
+      // Never the hash and never the expiry -- only whether a call is
+      // outstanding, which is all the form needs to decide what to show.
+      phoneCodeExpiresAt: true,
     },
   });
+
+  const phone = user?.phone ?? null;
+  const phoneVerified = Boolean(user?.phoneVerified);
+  const awaitingCode =
+    Boolean(phone) &&
+    !phoneVerified &&
+    (user?.phoneCodeExpiresAt?.getTime() ?? 0) > Date.now();
 
   const current = {
     notifyAssigned: user?.notifyAssigned ?? true,
@@ -65,7 +82,7 @@ export default async function AccountPage() {
     <div className="flex flex-col gap-8">
       <PageHeader
         title="Account"
-        description={`Email preferences for ${user?.email ?? session.email}.`}
+        description={`Notification settings for ${user?.email ?? session.email}.`}
       />
 
       <section aria-labelledby="notifications-heading">
@@ -112,6 +129,143 @@ export default async function AccountPage() {
               <SubmitButton pendingLabel="Saving...">Save preferences</SubmitButton>
             </div>
           </ActionForm>
+        </Card>
+      </section>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Phone                                                               */}
+      {/*                                                                     */}
+      {/* On `/account` and nowhere else, because a number is set only by its  */}
+      {/* owner. There is no admin screen for this and no field on the invite  */}
+      {/* form: the moment somebody else can type your number in, a reminder   */}
+      {/* becomes a way to make a stranger's phone ring every morning.         */}
+      {/* ------------------------------------------------------------------ */}
+      <section aria-labelledby="phone-heading">
+        <Card className="gap-4 p-6">
+          <Card.Header>
+            <Card.Title id="phone-heading" className="text-base">
+              Phone number
+            </Card.Title>
+            <Card.Description>
+              Used only by reminders you or a teammate schedule as a call. We confirm it by
+              phoning you once with a six-digit code.
+            </Card.Description>
+          </Card.Header>
+
+          {phone ? (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Rendered as plain text in a fixed direction: a phone number
+                    is a left-to-right sequence whatever the surrounding copy
+                    does, and `+91...` reorders visually without this. */}
+                <span dir="ltr" className="font-medium text-primary tabular-nums">
+                  {phone}
+                </span>
+                {phoneVerified ? (
+                  <Badge tone="success">Confirmed</Badge>
+                ) : (
+                  <Badge tone="warning">Not confirmed</Badge>
+                )}
+              </div>
+
+              {phoneVerified ? null : (
+                <p className="text-sm text-error-primary">
+                  Until this number is confirmed, no reminder will call it.
+                </p>
+              )}
+
+              {awaitingCode ? (
+                <ActionForm
+                  action={verifyPhoneCode}
+                  className="flex flex-col gap-4"
+                  aria-label="Confirm your phone number"
+                >
+                  <Field
+                    htmlFor="phone-code"
+                    label="Code from the call"
+                    hint="You get one attempt per call, so take a moment. The code expires after ten minutes."
+                  >
+                    <Input
+                      id="phone-code"
+                      name="code"
+                      required
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      placeholder="123456"
+                      className="max-w-40 tabular-nums"
+                    />
+                  </Field>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <SubmitButton pendingLabel="Confirming...">Confirm number</SubmitButton>
+                  </div>
+                </ActionForm>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-2 border-t border-secondary pt-4">
+                <ActionForm
+                  action={requestPhoneCode}
+                  className="flex flex-wrap items-end gap-2"
+                  aria-label="Change your phone number"
+                >
+                  <Field htmlFor="phone-new" label="Change or re-confirm">
+                    <Input
+                      id="phone-new"
+                      name="phone"
+                      required
+                      type="tel"
+                      dir="ltr"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      defaultValue={phone}
+                      placeholder="+14155550100"
+                      className="max-w-56"
+                    />
+                  </Field>
+                  <SubmitButton color="secondary" pendingLabel="Calling...">
+                    Call me with a code
+                  </SubmitButton>
+                </ActionForm>
+
+                <ActionForm action={removePhone} aria-label="Remove your phone number">
+                  <SubmitButton color="secondary-destructive" pendingLabel="Removing...">
+                    Remove
+                  </SubmitButton>
+                </ActionForm>
+              </div>
+            </div>
+          ) : (
+            <ActionForm
+              action={requestPhoneCode}
+              className="flex flex-col gap-4"
+              aria-label="Add your phone number"
+            >
+              <Field
+                htmlFor="phone"
+                label="Phone number"
+                /* No default country and no local formats. `8448417051` is a
+                   valid Indian mobile AND a valid US toll-free number, and
+                   guessing between them silently phones a stranger. The `+`
+                   makes the user say which they meant. */
+                hint="International format, starting with the country code — for example +14155550100 or +919876543210."
+              >
+                <Input
+                  id="phone"
+                  name="phone"
+                  required
+                  type="tel"
+                  dir="ltr"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="+14155550100"
+                  className="max-w-56"
+                />
+              </Field>
+              <div className="flex flex-wrap items-center gap-2">
+                <SubmitButton pendingLabel="Calling...">Call me with a code</SubmitButton>
+              </div>
+            </ActionForm>
+          )}
         </Card>
       </section>
     </div>

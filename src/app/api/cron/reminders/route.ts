@@ -67,9 +67,12 @@ export async function POST(request: Request): Promise<Response> {
     // against the same instant and the counts in the log add up.
     const result = await runDueReminders(new Date());
     if (result.claimed > 0) {
-      // Counts only -- never a title, an address or an organization.
+      // Counts only -- never a title, an address, a phone number or an
+      // organization. `emailed + called` can exceed `claimed` (a BOTH reminder
+      // does two things); `skipped` counts rows that reached nobody at all, so
+      // `delivered + skipped === claimed` is the line that has to add up.
       console.info(
-        `[cron] reminders claimed=${result.claimed} sent=${result.sent} skipped=${result.skipped}`,
+        `[cron] reminders claimed=${result.claimed} emailed=${result.emailed} called=${result.called} skipped=${result.skipped}`,
       );
     }
     return Response.json({ ok: true, ...result }, { headers: NO_STORE });

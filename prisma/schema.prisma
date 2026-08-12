@@ -74,6 +74,24 @@ model User {
   /// link, and accepting an invitation -- all three prove the address receives
   /// mail, which is the whole claim the column makes.
   emailVerified DateTime?
+
+  /// E.164, and set ONLY by its owner on `/account`. Reminder calls go here.
+  ///
+  /// Nobody else may write it, and nothing may be called until `phoneVerified`
+  /// is stamped: without both rules this column is a robocall vector, because
+  /// scheduling a daily reminder for yourself is something any member may do.
+  phone         String?
+  /// Null means the number has never answered a verification call. The exact
+  /// counterpart of `emailVerified`, enforced in the same place -- the
+  /// scheduler -- so a new call site cannot forget it.
+  phoneVerified DateTime?
+  /// sha256 of the 6-digit code the verification call speaks. Hashed for the
+  /// same reason session tokens are, and CLEARED ON THE FIRST ATTEMPT whether
+  /// or not it matched: one guess per placed call is what makes six digits
+  /// enough without an attempt counter or a rate limiter.
+  phoneCodeHash      String?
+  phoneCodeExpiresAt DateTime?
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -472,6 +490,14 @@ enum ReminderRepeat {
   WEEKLY
 }
 
+/// How a reminder reaches its recipient. `BOTH` is one row and one claim, so a
+/// reminder that emails and calls still fires at most once.
+enum ReminderChannel {
+  EMAIL
+  CALL
+  BOTH
+}
+
 /// A scheduled email nudge. PURELY ADDITIVE: nothing in the reminder flow reads
 /// or writes a Ticket, a Board or a WorkflowState, so this table cannot change
 /// what any existing view shows.
@@ -506,6 +532,10 @@ model Reminder {
   project        Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   title          String
   repeat         ReminderRepeat @default(ONCE)
+  /// Defaulted to EMAIL, which is what every pre-existing row becomes: the
+  /// migration adds the column with a default and rewrites nothing, so no
+  /// reminder scheduled before this feature suddenly starts phoning anyone.
+  channel        ReminderChannel @default(EMAIL)
   nextRunAt      DateTime?
   lastSentAt     DateTime?
   tzOffsetMinutes Int           @default(0)

@@ -39,6 +39,7 @@ import { toInstant } from '@/lib/reminder-math';
 import {
   cuid,
   localDateTimeSchema,
+  reminderChannelSchema,
   reminderRepeatSchema,
   reminderTitleSchema,
   slugSchema,
@@ -73,6 +74,14 @@ const createSchema = z.object({
   runAt: localDateTimeSchema,
   tzOffsetMinutes: tzOffsetSchema,
   repeat: reminderRepeatSchema,
+  /**
+   * EMAIL, CALL or BOTH. Not gated by role: a call is a nudge in a different
+   * medium, not access to anything. What it IS gated by is the recipient having
+   * confirmed a number -- enforced in the scheduler rather than here, so a
+   * teammate who confirms their phone next week starts getting the calls a
+   * reminder scheduled today already promised.
+   */
+  channel: reminderChannelSchema,
   scope: z.union([z.literal(ORG_SCOPE), cuid]),
   /**
    * ONE REMINDER PER PERSON, not one reminder with many recipients.
@@ -103,6 +112,7 @@ export async function createReminder(
       runAt: field(formData, 'runAt'),
       tzOffsetMinutes: field(formData, 'tzOffsetMinutes'),
       repeat: field(formData, 'repeat'),
+      channel: field(formData, 'channel'),
       scope: field(formData, 'scope'),
       // Unchecked boxes submit nothing, so an empty list is the ordinary way to
       // get this wrong -- it earns a sentence rather than the generic message.
@@ -146,6 +156,7 @@ export async function createReminder(
         projectId: project?.id ?? null,
         title: input.title,
         repeat: input.repeat,
+        channel: input.channel,
         nextRunAt: runAt,
         tzOffsetMinutes: input.tzOffsetMinutes,
         recipientId,
@@ -157,10 +168,14 @@ export async function createReminder(
 
     const count = input.recipientIds.length;
     if (count === 1) {
+      // Deliberately does not name the channel. The row that appears below says
+      // what will happen AND warns when the recipient has no confirmed address
+      // or number -- which is the part worth reading, and which this sentence
+      // cannot know without a second query.
       return ok(
         input.recipientIds[0] === ctx.user.id
           ? 'Reminder scheduled.'
-          : 'Reminder scheduled. They will get an email when it is due.',
+          : 'Reminder scheduled. They will be notified when it is due.',
       );
     }
     return ok(`Reminder scheduled for ${count} people.`);

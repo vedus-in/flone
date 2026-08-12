@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { ReminderRepeat, Role } from '@prisma/client';
+import { ReminderChannel, ReminderRepeat, Role } from '@prisma/client';
 
 import {
   TableBody,
@@ -12,7 +12,13 @@ import {
 import { Badge, Breadcrumbs, Card, Field, Input, Label, PageHeader, SubmitButton } from '@/components/ui';
 import { atLeast, loadPage, orgPath, requireOrgBySlug } from '@/lib/authz';
 import { prisma } from '@/lib/db';
-import { REPEAT_LABEL, formatWhen } from '@/lib/reminder-math';
+import {
+  CHANNEL_CALLS,
+  CHANNEL_EMAILS,
+  CHANNEL_LABEL,
+  REPEAT_LABEL,
+  formatWhen,
+} from '@/lib/reminder-math';
 import { ActionForm } from '../../../action-form';
 import { createReminder, deleteReminder } from './actions';
 import { RunAtField } from './run-at-field';
@@ -64,6 +70,12 @@ const REPEAT_ORDER: ReminderRepeat[] = [
   ReminderRepeat.WEEKLY,
 ];
 
+const CHANNEL_ORDER: ReminderChannel[] = [
+  ReminderChannel.EMAIL,
+  ReminderChannel.CALL,
+  ReminderChannel.BOTH,
+];
+
 export default async function RemindersPage({
   params,
 }: {
@@ -82,12 +94,18 @@ export default async function RemindersPage({
         id: true,
         title: true,
         repeat: true,
+        channel: true,
         nextRunAt: true,
         lastSentAt: true,
         tzOffsetMinutes: true,
         createdById: true,
         project: { select: { name: true, key: true } },
-        recipient: { select: { id: true, name: true, emailVerified: true } },
+        // `phoneVerified` only -- never the number itself. Every member can
+        // read this page, and a roster of colleagues' phone numbers is not
+        // something scheduling a reminder should hand out.
+        recipient: {
+          select: { id: true, name: true, emailVerified: true, phoneVerified: true },
+        },
         createdBy: { select: { name: true } },
       },
     }),
@@ -116,7 +134,7 @@ export default async function RemindersPage({
 
         <PageHeader
           title="Reminders"
-          description="Scheduled emails for you or a teammate, about this organization or one of its projects."
+          description="Scheduled emails and calls for you or a teammate, about this organization or one of its projects."
         />
       </div>
 
@@ -134,8 +152,8 @@ export default async function RemindersPage({
                 lateness. Promising the exact minute here would be a promise the
                 deployment cannot keep. */}
             <Card.Description>
-              The email arrives at the time you pick, in your own timezone, within a few minutes.
-              Recurring reminders keep that time.
+              The email or call arrives at the time you pick, in your own timezone, within a few
+              minutes. Recurring reminders keep that time.
             </Card.Description>
           </Card.Header>
 
@@ -186,6 +204,26 @@ export default async function RemindersPage({
                 </select>
                 <span className="text-xs text-tertiary">
                   A recurring reminder keeps sending until it is deleted.
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="reminder-channel">How</Label>
+                <select
+                  id="reminder-channel"
+                  name="channel"
+                  defaultValue={ReminderChannel.EMAIL}
+                  className={`${SELECT_CLASS} w-full`}
+                >
+                  {CHANNEL_ORDER.map((channel) => (
+                    <option key={channel} value={channel}>
+                      {CHANNEL_LABEL[channel]}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-tertiary">
+                  A call needs a confirmed number on the recipient&rsquo;s account. Anyone without
+                  one is flagged in the list below.
                 </span>
               </div>
 
@@ -275,6 +313,7 @@ export default async function RemindersPage({
                 </TableHead>
                 <TableHead className="whitespace-nowrap">Next</TableHead>
                 <TableHead className="whitespace-nowrap">Repeats</TableHead>
+                <TableHead className="whitespace-nowrap">How</TableHead>
                 <TableHead className="whitespace-nowrap">To</TableHead>
                 <TableHead className="whitespace-nowrap text-end">Manage</TableHead>
               </TableHeader>
@@ -291,6 +330,27 @@ export default async function RemindersPage({
                   const scope = reminder.project
                     ? `${reminder.project.key} — ${reminder.project.name}`
                     : ctx.org.name;
+
+                  // What this row will ACTUALLY do, which is not the same as
+                  // what it was set to. A channel whose destination has never
+                  // been confirmed is claimed, advanced and delivered nowhere --
+                  // the feature's one silent failure, and the reason each of
+                  // these gets a sentence rather than being left to look fine.
+                  const needsEmail = CHANNEL_EMAILS[reminder.channel];
+                  const needsCall = CHANNEL_CALLS[reminder.channel];
+                  const noEmail = needsEmail && !reminder.recipient.emailVerified;
+                  const noPhone = needsCall && !reminder.recipient.phoneVerified;
+                  const who = isSelf ? 'Your' : 'Their';
+                  // Both missing is one sentence, not two stacked warnings that
+                  // say the same thing about the same person.
+                  const undeliverable =
+                    noEmail && noPhone
+                      ? `${who} email address and phone number are both unconfirmed, so nothing will be delivered.`
+                      : noEmail
+                        ? `${who} email address is not confirmed yet, so ${reminder.channel === ReminderChannel.BOTH ? 'no email will be sent' : 'nothing will be delivered'}.`
+                        : noPhone
+                          ? `${who} phone number is not confirmed yet, so ${reminder.channel === ReminderChannel.BOTH ? 'no call will be placed' : 'nothing will be delivered'}.`
+                          : null;
 
                   return (
                     <TableRow key={reminder.id} id={reminder.id}>
@@ -310,16 +370,9 @@ export default async function RemindersPage({
                               </>
                             ) : null}
                           </span>
-                          {/* The one silent failure this feature has: a
-                              reminder addressed to an unconfirmed mailbox is
-                              scheduled, advanced and never delivered. Say so
-                              here rather than let it look like it worked. */}
-                          {reminder.recipient.emailVerified ? null : (
-                            <span className="text-xs text-error-primary">
-                              {isSelf ? 'Your' : 'Their'} email address is not confirmed yet, so
-                              nothing will be delivered.
-                            </span>
-                          )}
+                          {undeliverable ? (
+                            <span className="text-xs text-error-primary">{undeliverable}</span>
+                          ) : null}
                         </div>
                       </TableCell>
 
@@ -334,6 +387,20 @@ export default async function RemindersPage({
                       <TableCell className="whitespace-nowrap align-top">
                         <Badge tone={reminder.repeat === ReminderRepeat.ONCE ? 'neutral' : 'accent'}>
                           {REPEAT_LABEL[reminder.repeat]}
+                        </Badge>
+                      </TableCell>
+
+                      <TableCell className="whitespace-nowrap align-top">
+                        <Badge
+                          tone={
+                            undeliverable
+                              ? 'danger'
+                              : reminder.channel === ReminderChannel.EMAIL
+                                ? 'neutral'
+                                : 'accent'
+                          }
+                        >
+                          {CHANNEL_LABEL[reminder.channel]}
                         </Badge>
                       </TableCell>
 

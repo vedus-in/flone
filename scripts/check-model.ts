@@ -68,11 +68,16 @@ import {
   isClearingColumn,
 } from '../src/lib/challenges.ts';
 import {
+  CHANNEL_CALLS,
+  CHANNEL_EMAILS,
+  CHANNEL_LABEL,
   REPEAT_LABEL,
   formatLocalDateTime,
   formatOffset,
   formatWhen,
   nextRun,
+  speechFor,
+  speechForCode,
   stepClock,
   toInstant,
   typeClockDigit,
@@ -626,6 +631,113 @@ ok('what the field submits is exactly what the action parses', () => {
     formatLocalDateTime({ year: 999, month: 1, day: 2, hour: 3, minute: 4 }),
     '0999-01-02T03:04',
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* 7. Reminder channels and what a call actually says                          */
+/*                                                                             */
+/* A phone call has no scrollback. If the wording is wrong the recipient hears  */
+/* it once, at whatever hour they asked to be reminded, and has no way to look  */
+/* at it again -- so the script is asserted here rather than trusted.           */
+/* -------------------------------------------------------------------------- */
+
+console.log('\nreminder channels');
+
+const CHANNELS = ['EMAIL', 'CALL', 'BOTH'] as const;
+
+ok('every channel has a label and a delivery rule', () => {
+  for (const channel of CHANNELS) {
+    assert.ok(CHANNEL_LABEL[channel], `${channel} has no label`);
+    assert.equal(typeof CHANNEL_EMAILS[channel], 'boolean');
+    assert.equal(typeof CHANNEL_CALLS[channel], 'boolean');
+  }
+});
+
+ok('no channel delivers nothing', () => {
+  // A channel that neither emails nor calls would be claimed by the scheduler,
+  // advanced, and silently dropped on every occurrence forever.
+  for (const channel of CHANNELS) {
+    assert.ok(
+      CHANNEL_EMAILS[channel] || CHANNEL_CALLS[channel],
+      `${channel} reaches nobody`,
+    );
+  }
+});
+
+ok('the channels do what their names say', () => {
+  assert.deepEqual([CHANNEL_EMAILS.EMAIL, CHANNEL_CALLS.EMAIL], [true, false]);
+  assert.deepEqual([CHANNEL_EMAILS.CALL, CHANNEL_CALLS.CALL], [false, true]);
+  assert.deepEqual([CHANNEL_EMAILS.BOTH, CHANNEL_CALLS.BOTH], [true, true]);
+});
+
+console.log('\nreminder speech');
+
+ok('the title is spoken twice, and never first', () => {
+  const say = speechFor({ title: 'Post the deploy notes', scope: 'Engineering', setBy: null });
+
+  // Twilio and the carrier routinely clip the opening moment of a call. A
+  // script that leads with the important part reliably loses it, and the
+  // recipient cannot ask for a replay.
+  assert.ok(!say.startsWith('Post the deploy notes'), 'the title is exposed to the clip');
+  assert.equal(say.match(/Post the deploy notes/g)?.length, 2, 'the title is not repeated');
+  assert.ok(say.includes('Again.'), 'the repeat is not announced');
+});
+
+ok('a self-scheduled reminder drops the "scheduled by" clause', () => {
+  const own = speechFor({ title: 'Water the plants', scope: 'Acme', setBy: null });
+  const theirs = speechFor({ title: 'Water the plants', scope: 'Acme', setBy: 'Sam' });
+
+  assert.ok(!own.includes('scheduled for you by'));
+  assert.ok(theirs.includes('scheduled for you by Sam.'));
+});
+
+ok('every clause ends in a full stop, because Polly pauses at one', () => {
+  // Without the stops the clauses run together into one unintelligible breath.
+  const say = speechFor({ title: 'Ship it', scope: 'Acme', setBy: 'Sam' });
+  for (const clause of say.split(' ').join(' ').split('. ')) {
+    assert.ok(clause.trim().length > 0, 'an empty clause reached the script');
+  }
+  assert.ok(say.endsWith('Goodbye.'));
+});
+
+ok('a title with newlines or runs of space is flattened', () => {
+  const say = speechFor({ title: 'Line one\n\n   Line two', scope: 'Acme', setBy: null });
+  assert.ok(!say.includes('\n'), 'a newline reached the spoken text');
+  assert.ok(!say.includes('  '), 'a double space reached the spoken text');
+  assert.ok(say.includes('Line one Line two.'));
+});
+
+ok('a title that already ends in punctuation gains no second stop', () => {
+  const say = speechFor({ title: 'Are we shipping?', scope: 'Acme', setBy: null });
+  assert.ok(!say.includes('?.'), 'punctuation was doubled');
+});
+
+ok('the whole script fits the voice service bound', () => {
+  // `services/voice` rejects anything over 1000 characters, and a rejected call
+  // is a reminder that never rings. 200 is the schema cap on a title.
+  const say = speechFor({
+    title: 'x'.repeat(200),
+    scope: 'y'.repeat(80),
+    setBy: 'z'.repeat(80),
+  });
+  assert.ok(say.length <= 1000, `the longest possible script is ${say.length} characters`);
+});
+
+ok('a verification code is read one digit at a time, twice', () => {
+  const say = speechForCode('102345');
+
+  // "102345" spoken as a number is "one hundred two thousand three hundred
+  // forty-five", which nobody can type back.
+  assert.ok(!say.includes('102345'), 'the code was left as one number');
+  assert.ok(say.includes('1. 0. 2. 3. 4. 5.'), 'the digits are not separated');
+  assert.equal(say.match(/1\. 0\. 2\. 3\. 4\. 5/g)?.length, 2, 'the code is not repeated');
+});
+
+ok('a leading zero survives into the spoken code', () => {
+  // `mintCode` pads to six, so `000123` is a real code and must not be read
+  // as "one hundred twenty-three".
+  const say = speechForCode('000123');
+  assert.ok(say.includes('0. 0. 0. 1. 2. 3.'));
 });
 
 console.log(`\nAll good — ${checks} checks.\n`);

@@ -3,7 +3,15 @@ import 'server-only';
 import { prisma } from '@/lib/db';
 import { appUrl } from '@/lib/email';
 import { sendReminderMail } from '@/lib/mailer';
-import { REPEAT_LABEL, formatWhen, nextRun } from '@/lib/reminder-math';
+import {
+  CHANNEL_CALLS,
+  CHANNEL_EMAILS,
+  REPEAT_LABEL,
+  formatWhen,
+  nextRun,
+  speechFor,
+} from '@/lib/reminder-math';
+import { REMINDER_VOICE, placeCall } from '@/lib/voice';
 
 /**
  * The scheduler tick.
@@ -42,8 +50,15 @@ export type TickResult = {
   /** Rows this tick won the compare-and-swap for. */
   claimed: number;
   /** Of those, the ones an email was actually composed for. */
-  sent: number;
-  /** Claimed but not sent: the recipient has never confirmed their address. */
+  emailed: number;
+  /** Of those, the ones the voice service accepted a call for. */
+  called: number;
+  /**
+   * Claimed but delivered NOWHERE -- an unconfirmed address, an unverified
+   * phone, or a voice service that would not take the call. A claimed row is
+   * always exactly one of delivered or skipped, so the counts in the cron log
+   * add up to `claimed` and a number that does not is a bug worth chasing.
+   */
   skipped: number;
 };
 
@@ -56,17 +71,27 @@ export async function runDueReminders(now: Date): Promise<TickResult> {
       id: true,
       title: true,
       repeat: true,
+      channel: true,
       nextRunAt: true,
       tzOffsetMinutes: true,
       createdById: true,
-      recipient: { select: { id: true, name: true, email: true, emailVerified: true } },
+      recipient: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          emailVerified: true,
+          phone: true,
+          phoneVerified: true,
+        },
+      },
       createdBy: { select: { name: true } },
       organization: { select: { name: true, slug: true } },
       project: { select: { name: true } },
     },
   });
 
-  const result: TickResult = { claimed: 0, sent: 0, skipped: 0 };
+  const result: TickResult = { claimed: 0, emailed: 0, called: 0, skipped: 0 };
 
   for (const reminder of due) {
     // Narrowing only: `nextRunAt <= now` cannot match null, so this is never hit.
@@ -85,26 +110,68 @@ export async function runDueReminders(now: Date): Promise<TickResult> {
     if (claim.count === 0) continue;
     result.claimed += 1;
 
+    const scope = reminder.project?.name ?? reminder.organization.name;
+    // Null when they scheduled it themselves, which changes the copy on both
+    // the email and the call.
+    const setBy =
+      reminder.createdById === reminder.recipient.id ? null : reminder.createdBy.name;
+
+    // Whether ANY channel got through. A claimed row is delivered or skipped,
+    // never both and never neither.
+    let delivered = false;
+
+    // ---- Email --------------------------------------------------------------
+    //
     // App-wide rule: never send to an address nobody has confirmed. Applied
-    // AFTER the claim on purpose -- skipping it before would leave the row
-    // permanently due and re-read by every tick forever.
-    if (!reminder.recipient.emailVerified) {
-      result.skipped += 1;
-      continue;
+    // AFTER the claim on purpose -- filtering unverified recipients out of the
+    // due query instead would leave those rows permanently due and re-read by
+    // every tick forever.
+    if (CHANNEL_EMAILS[reminder.channel] && reminder.recipient.emailVerified) {
+      await sendReminderMail({
+        email: reminder.recipient.email,
+        title: reminder.title,
+        when: formatWhen(dueAt, reminder.tzOffsetMinutes),
+        scope,
+        repeat: REPEAT_LABEL[reminder.repeat],
+        setBy,
+        url: appUrl(`/orgs/${encodeURIComponent(reminder.organization.slug)}/reminders`),
+      });
+      result.emailed += 1;
+      delivered = true;
     }
 
-    await sendReminderMail({
-      email: reminder.recipient.email,
-      title: reminder.title,
-      when: formatWhen(dueAt, reminder.tzOffsetMinutes),
-      scope: reminder.project?.name ?? reminder.organization.name,
-      repeat: REPEAT_LABEL[reminder.repeat],
-      // Null when they scheduled it themselves, which changes the copy.
-      setBy:
-        reminder.createdById === reminder.recipient.id ? null : reminder.createdBy.name,
-      url: appUrl(`/orgs/${encodeURIComponent(reminder.organization.slug)}/reminders`),
-    });
-    result.sent += 1;
+    // ---- Call ---------------------------------------------------------------
+    //
+    // SECOND, not first, and that order is the point: for a BOTH reminder the
+    // cheap reliable channel goes out before the one that depends on a separate
+    // service and a carrier. If the voice service is down, the email has already
+    // left.
+    //
+    // `phoneVerified` is the exact counterpart of `emailVerified` and is
+    // enforced here for the same reason -- it is the only thing standing between
+    // this feature and a robocall vector, since scheduling a daily reminder for
+    // yourself is something every member may do.
+    if (
+      CHANNEL_CALLS[reminder.channel] &&
+      reminder.recipient.phone &&
+      reminder.recipient.phoneVerified
+    ) {
+      const placed = await placeCall({
+        to: reminder.recipient.phone,
+        say: speechFor({ title: reminder.title, scope, setBy }),
+        voice: REMINDER_VOICE,
+      });
+      // A refused call is NOT retried and NOT re-queued. The schedule was
+      // advanced by the claim above, and the alternative -- rewinding
+      // `nextRunAt` -- is how one unreachable provider turns into the same
+      // person being phoned repeatedly once it recovers.
+      if (placed) {
+        result.called += 1;
+        delivered = true;
+      }
+    }
+
+    if (!delivered) result.skipped += 1;
   }
 
   return result;

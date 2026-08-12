@@ -16,7 +16,8 @@
     "check:boundary": "node scripts/check-client-boundary.mjs",
     "check:model": "node scripts/check-model.ts",
     "check:email": "bun scripts/check-email.ts",
-    "check:markdown": "bun scripts/check-markdown.ts"
+    "check:markdown": "bun scripts/check-markdown.ts",
+    "check:voice": "bun services/voice/check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

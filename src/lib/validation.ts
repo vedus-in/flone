@@ -1,7 +1,7 @@
 import 'server-only';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { BoardStatus, ReminderRepeat, Role, WorkflowStateType } from '@prisma/client';
+import { BoardStatus, ReminderChannel, ReminderRepeat, Role, WorkflowStateType } from '@prisma/client';
 import { COLOR_TOKENS, ISSUE_TABS } from '@/lib/model';
 import { MAX_TZ_OFFSET_MINUTES, toInstant } from '@/lib/reminder-math';
 
@@ -277,6 +277,47 @@ export const tzOffsetSchema = z.coerce
 
 /** Same cap as an issue title: it is the subject line of the email. */
 export const reminderTitleSchema = safeText(1, 200);
+
+export const reminderChannelSchema = z.nativeEnum(ReminderChannel);
+
+/* -------------------------------------------------------------------------- */
+/* Phone                                                                       */
+/* -------------------------------------------------------------------------- */
+
+const PHONE_HINT = 'Enter the number in international format, like +14155550100.';
+
+/**
+ * E.164, the only format a carrier accepts and therefore the only one stored.
+ *
+ * NO LOCAL FORMATS AND NO DEFAULT COUNTRY. Guessing a country from the server's
+ * locale is how `8448417051` becomes a US toll-free number instead of an Indian
+ * mobile -- both are valid readings of the same ten digits, and the wrong one
+ * silently phones a stranger. Demanding the `+` makes the user state which they
+ * meant, once, at the only moment they can.
+ *
+ * Spaces, dashes and brackets are stripped rather than rejected: everybody
+ * pastes a number with them in, and refusing the paste teaches nothing.
+ */
+export const e164Schema = z
+  .string()
+  .trim()
+  .transform((value) => value.replace(/[\s()\-.]/g, ''))
+  .pipe(z.string().regex(/^\+[1-9]\d{6,14}$/, PHONE_HINT));
+
+/**
+ * The six digits a verification call speaks back.
+ *
+ * Only one guess is ever accepted -- the stored hash is cleared on the first
+ * attempt whether or not it matched -- so six digits is a one-in-a-million shot
+ * per call actually placed, and every retry rings the real handset. That is what
+ * makes an attempt counter and a rate limiter unnecessary here rather than
+ * merely absent.
+ */
+export const phoneCodeSchema = z
+  .string()
+  .trim()
+  .transform((value) => value.replace(/\s/g, ''))
+  .pipe(z.string().regex(/^\d{6}$/, 'The code is six digits.'));
 
 /* -------------------------------------------------------------------------- */
 /* Named length caps (SPEC 4.10, final)                                        */

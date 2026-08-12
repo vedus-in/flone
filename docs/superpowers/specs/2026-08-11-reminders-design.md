@@ -212,7 +212,7 @@ A second service in the same project, on the `buildpack-deps:curl` image:
 ```
 start:    curl -fsS --retry 3 --retry-delay 5 --max-time 60 \
             -X POST --oauth2-bearer <the literal secret> \
-            https://flow.vedus.in/api/cron/reminders
+            https://flone.run/api/cron/reminders
 schedule: */5 * * * *
 restart:  NEVER
 ```

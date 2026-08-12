@@ -17,7 +17,7 @@
  * recompute the local wall time per occurrence if that hour ever matters.
  */
 
-import type { ReminderRepeat } from '@prisma/client';
+import type { ReminderChannel, ReminderRepeat } from '@prisma/client';
 
 const MINUTE_MS = 60_000;
 
@@ -38,6 +38,25 @@ export const REPEAT_LABEL: Record<ReminderRepeat, string> = {
   ONCE: 'Once',
   DAILY: 'Every day',
   WEEKLY: 'Every week',
+};
+
+export const CHANNEL_LABEL: Record<ReminderChannel, string> = {
+  EMAIL: 'Email',
+  CALL: 'Phone call',
+  BOTH: 'Email and call',
+};
+
+/** Total `Record`s again, so a new enum value is a type error, not a silent skip. */
+export const CHANNEL_EMAILS: Record<ReminderChannel, boolean> = {
+  EMAIL: true,
+  CALL: false,
+  BOTH: true,
+};
+
+export const CHANNEL_CALLS: Record<ReminderChannel, boolean> = {
+  EMAIL: false,
+  CALL: true,
+  BOTH: true,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -208,4 +227,66 @@ export function formatOffset(tzOffsetMinutes: number): string {
 /** The two together, which is how every surface actually shows a time. */
 export function formatWhen(instant: Date, tzOffsetMinutes: number): string {
   return `${formatLocal(instant, tzOffsetMinutes)} (${formatOffset(tzOffsetMinutes)})`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Speech                                                                      */
+/*                                                                             */
+/* What a phone call actually says. Pure and here rather than in `voice.ts` so  */
+/* `scripts/check-model.ts` can assert it from plain Node -- the wording is the */
+/* entire user-visible product of a call, and every way it can go wrong is      */
+/* silent to everyone except the person whose phone just rang.                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Collapses whitespace and guarantees a sentence ends in a full stop.
+ *
+ * The full stop is not punctuation, it is TIMING: Amazon Polly pauses at one,
+ * and without it two clauses run together into a single unintelligible breath.
+ * Newlines in a title would otherwise be read as nothing at all.
+ */
+function sentence(text: string): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  return /[.!?]$/.test(clean) ? clean : `${clean}.`;
+}
+
+/**
+ * The script for a reminder call.
+ *
+ * THE TITLE IS SPOKEN TWICE, with the second pass introduced by "Again". The
+ * first second or so of a Twilio call is routinely clipped by the carrier while
+ * the audio path settles, so a message that opens with the important part
+ * reliably loses it. The preamble is there to be sacrificed; the repeat is there
+ * because a person who missed it has no way to ask.
+ */
+export function speechFor(input: {
+  title: string;
+  /** Project or organization name -- the reason the nudge exists. */
+  scope: string;
+  /** Null when the recipient scheduled it themselves, which drops the clause. */
+  setBy: string | null;
+}): string {
+  return [
+    'Hello. This is a reminder from Flone.',
+    `Your reminder is. ${sentence(input.title)}`,
+    sentence(`This is about ${input.scope}`),
+    input.setBy ? sentence(`It was scheduled for you by ${input.setBy}`) : '',
+    `Again. ${sentence(input.title)}`,
+    'Goodbye.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/**
+ * A verification code, read one digit at a time.
+ *
+ * `123456` spoken as a number is "one hundred twenty-three thousand four hundred
+ * fifty-six", which nobody can type. The full stops force a pause between
+ * digits, and the code is repeated for the same reason a reminder's title is.
+ */
+export function speechForCode(code: string): string {
+  const digits = code.split('').join('. ');
+  return `Hello. This is Flone with your phone verification code. ${digits}. Again. ${digits}. Goodbye.`;
 }
