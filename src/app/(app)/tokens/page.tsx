@@ -10,9 +10,10 @@ import {
 } from '@/components/table';
 import { loadPage, requireUser } from '@/lib/authz';
 import { prisma } from '@/lib/db';
-import { Badge, Card, PageHeader, SubmitButton } from '@/components/ui';
+import { Badge, PageHeader, SubmitButton } from '@/components/ui';
 import { ActionForm } from '../action-form';
-import { createMcpToken, revokeSession } from './actions';
+import { McpSetup } from './mcp-setup';
+import { revokeSession } from './actions';
 
 /**
  * MCP access — mint a token, see what is live, revoke anything.
@@ -56,60 +57,7 @@ export default async function TokensPage() {
         description="Let an AI assistant read and update your boards through the Model Context Protocol."
       />
 
-      <section aria-labelledby="create-heading">
-        <Card className="gap-4 p-6">
-          <Card.Header>
-            <Card.Title id="create-heading" className="text-base">
-              Create a token
-            </Card.Title>
-            <Card.Description>
-              A token has the same access as signing in: every organization you belong to, and
-              everything you can do there. It is shown once, right here, and never again.
-            </Card.Description>
-          </Card.Header>
-
-          <ActionForm action={createMcpToken} aria-label="Create an MCP token">
-            <div className="flex flex-wrap items-center gap-2">
-              <SubmitButton pendingLabel="Creating...">Create token</SubmitButton>
-            </div>
-          </ActionForm>
-
-          <p className="max-w-prose text-xs text-tertiary">
-            It expires 30 days after its last use, and stays alive as long as it keeps being
-            used. Revoke it below at any time.
-          </p>
-        </Card>
-      </section>
-
-      <section className="flex flex-col gap-4" aria-labelledby="connect-heading">
-        <h2 id="connect-heading" className="text-sm font-medium text-primary">
-          Connect a client
-        </h2>
-
-        <Card className="gap-4 p-6">
-          <p className="text-sm text-tertiary">
-            One command in Claude Code, with the token you just copied:
-          </p>
-          <pre className="overflow-x-auto rounded-lg bg-secondary p-4 text-xs">
-            <code>{`claude mcp add --transport http flone ${endpoint} \\\n  --header "Authorization: Bearer <your-token>"`}</code>
-          </pre>
-
-          <p className="text-sm text-tertiary">
-            Or, for any client that reads a config file:
-          </p>
-          <pre className="overflow-x-auto rounded-lg bg-secondary p-4 text-xs">
-            <code>{`{
-  "mcpServers": {
-    "flone": {
-      "type": "http",
-      "url": "${endpoint}",
-      "headers": { "Authorization": "Bearer <your-token>" }
-    }
-  }
-}`}</code>
-          </pre>
-        </Card>
-      </section>
+      <McpSetup endpoint={endpoint} />
 
       <section className="flex flex-col gap-4" aria-labelledby="sessions-heading">
         <h2 id="sessions-heading" className="text-sm font-medium text-primary">

@@ -104,8 +104,7 @@ A token *is* a session — the same `Session` row a browser sign-in creates, wit
 ### Connect a client
 
 ```bash
-claude mcp add --transport http flone https://your-flone.example.com/api/mcp \
-  --header "Authorization: Bearer <your-token>"
+claude mcp add --transport http flone https://your-flone.example.com/api/mcp --header "Authorization: Bearer <your-token>"
 ```
 
 Or install this repository as a plugin, which brings the server and a skill that teaches the model how to use it:
