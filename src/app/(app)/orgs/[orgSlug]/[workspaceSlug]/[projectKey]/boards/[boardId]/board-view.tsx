@@ -22,6 +22,14 @@
  *
  * Keyboard dragging comes from dnd-kit underneath: Space lifts a card, arrows
  * move it, Space drops, Escape cancels.
+ *
+ * The card itself is Linear-shaped: key and parent breadcrumb up top, status
+ * icon beside the title, property chips below. Status, priority and assignee
+ * are edited in place through `PropertyPicker` popups on the card -- the same
+ * Server Actions the context menu calls, with failures landing in the board's
+ * one error slot. The cards keep no property state of their own: revalidation
+ * delivers each edit back down as props. On the drag overlay the same layout
+ * renders as plain spans, because the overlay is a picture, not a control.
  */
 
 import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'react';
@@ -38,11 +46,17 @@ import {
   KanbanOverlay,
 } from '@/components/reui/kanban';
 import { PriorityIcon, StateIcon } from '@/components/issue-row';
+import {
+  PropertyPicker,
+  assigneeOptions,
+  priorityOptions,
+  stateOptions,
+} from '@/components/property-picker';
 import { FormError } from '@/components/ui';
 import { colorClass } from '@/lib/model';
 import { cx } from '@/lib/utils/cx';
 
-import { placeIssue } from '../../issue-actions';
+import { placeIssue, setIssueAssignee, setIssuePriority } from '../../issue-actions';
 import {
   IssueContextMenu,
   IssueMenuButton,
@@ -61,7 +75,10 @@ export type BoardIssue = {
   number: number;
   title: string;
   href: string;
+  assigneeId: string | null;
   assigneeName: string | null;
+  /** The parent issue's title, shown as breadcrumb context beside the key. */
+  parentTitle: string | null;
   commentCount: number;
   priority: Priority;
   labels: MenuLabel[];
@@ -70,6 +87,7 @@ export type BoardIssue = {
   dueDateLabel: string | null;
   /** True when the due date is in the past. */
   overdue: boolean;
+  createdAtLabel: string;
   updatedAtLabel: string;
   /**
    * Author-or-privileged, computed on the SERVER exactly as the issue page
@@ -116,28 +134,138 @@ function toRecords(columns: BoardStateColumn[]): Record<string, BoardIssue[]> {
 /* Card                                                                        */
 /* -------------------------------------------------------------------------- */
 
+/** What a card needs to know about the state it currently sits in. */
+type CardColumn = Pick<BoardStateColumn, 'id' | 'name' | 'type' | 'color'>;
+
+/** Runs one Server Action; failures land in the board's error slot. */
+type RunAction = (action: () => Promise<{ ok: boolean; error?: string }>) => void;
+
+/** The bordered chip the priority/due/comment row is made of. */
+const PILL =
+  'flex h-[22px] items-center gap-1 rounded border border-secondary px-1.5 text-[0.6875rem] text-tertiary';
+
+function AssigneeAvatar({ name }: { name: string | null }) {
+  return name ? (
+    <span
+      title={name}
+      className="grid size-5 place-items-center rounded-full bg-secondary text-[0.625rem] font-medium text-tertiary"
+    >
+      {initials(name)}
+    </span>
+  ) : (
+    <span className="grid size-5 place-items-center rounded-full border border-dashed border-secondary text-[0.625rem] text-tertiary">
+      &ndash;
+    </span>
+  );
+}
+
 function IssueCard({
   issue,
   projectKey,
+  column,
+  columns,
+  members,
+  run,
   overlay = false,
   action,
 }: {
   issue: BoardIssue;
   projectKey: string;
+  /** The state this card is in right now; drives the status trigger icon. */
+  column: CardColumn;
+  /** Live columns in board order. Omitted on the drag overlay. */
+  columns?: BoardStateColumn[];
+  members?: BoardMember[];
+  run?: RunAction;
   overlay?: boolean;
   /** The `⋮` trigger. Omitted on the drag overlay, where it is inert. */
   action?: ReactNode;
 }) {
+  const issueKey = `${projectKey}-${issue.number}`;
+  // The overlay is a picture of the card mid-flight, not a control surface, so
+  // it gets the same layout with plain spans where the pickers would be.
+  const pickers = !overlay && columns && members && run ? { columns, members, run } : null;
+
   return (
     <div
       className={cx(
-        'no-native-drag flex flex-col gap-2.5 rounded-lg border bg-primary p-3 transition-colors',
+        'no-native-drag flex flex-col gap-2 rounded-lg border bg-primary p-3 transition-colors',
         overlay
           ? 'rotate-2 border-brand shadow-lg'
           : 'border-secondary shadow-xs hover:border-tertiary',
       )}
     >
-      <div className="flex items-start gap-1">
+      <div className="flex items-center gap-1">
+        <span className="shrink-0 font-mono text-[0.6875rem] text-tertiary">{issueKey}</span>
+
+        {issue.parentTitle ? (
+          <>
+            <span aria-hidden="true" className="shrink-0 text-[0.6875rem] text-tertiary opacity-60">
+              &rsaquo;
+            </span>
+            <span className="min-w-0 truncate text-[0.6875rem] text-tertiary">
+              {issue.parentTitle}
+            </span>
+          </>
+        ) : null}
+
+        {pickers ? (
+          <PropertyPicker
+            options={assigneeOptions(pickers.members)}
+            currentId={issue.assigneeId ?? ''}
+            placeholder="Assign to..."
+            shortcutHint="A"
+            onSelect={(id) =>
+              pickers.run(() => setIssueAssignee({ ticketId: issue.id, assigneeId: id }))
+            }
+            ariaLabel={`Set assignee for ${issueKey}`}
+            triggerClassName="ms-auto shrink-0 rounded-full"
+          >
+            <AssigneeAvatar name={issue.assigneeName} />
+          </PropertyPicker>
+        ) : (
+          <span
+            className="ms-auto shrink-0"
+            aria-label={issue.assigneeName ? `Assigned to ${issue.assigneeName}` : 'Unassigned'}
+          >
+            <AssigneeAvatar name={issue.assigneeName} />
+          </span>
+        )}
+
+        {action}
+      </div>
+
+      <div className="flex items-start gap-2">
+        {pickers ? (
+          <PropertyPicker
+            options={stateOptions(pickers.columns)}
+            currentId={column.id}
+            placeholder="Change status..."
+            shortcutHint="S"
+            onSelect={(stateId) => {
+              const target = pickers.columns.find((c) => c.id === stateId);
+              if (!target) return;
+              pickers.run(() =>
+                placeIssue({
+                  ticketId: issue.id,
+                  toStateId: stateId,
+                  // Append; a precise index is what dragging is for.
+                  toIndex: target.issues.length,
+                  visibleIds: target.issues.map((i) => i.id).filter((id) => id !== issue.id),
+                }),
+              );
+            }}
+            ariaLabel={`Set status for ${issueKey}`}
+            triggerClassName="mt-0.5 shrink-0 rounded"
+          >
+            <StateIcon type={column.type} color={column.color} />
+          </PropertyPicker>
+        ) : (
+          <span className="mt-0.5 shrink-0">
+            <StateIcon type={column.type} color={column.color} />
+          </span>
+        )}
+
         <Link
           href={issue.href}
           // Keep the title clickable: without this the drag sensor claims the
@@ -146,49 +274,62 @@ function IssueCard({
           onPointerDown={(event) => event.stopPropagation()}
           draggable={false}
           onDragStart={(event) => event.preventDefault()}
-          className="min-w-0 flex-1 text-sm leading-snug font-medium text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          className="line-clamp-3 min-w-0 flex-1 text-sm leading-snug font-medium text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           {issue.title}
         </Link>
-        {action}
       </div>
 
-      {issue.labels.length > 0 ? (
-        <div className="flex flex-wrap gap-1">
-          {issue.labels.slice(0, 3).map((label) => (
+      <div className="flex flex-wrap items-center gap-1">
+        {pickers ? (
+          <PropertyPicker
+            options={priorityOptions()}
+            currentId={issue.priority}
+            placeholder="Change priority to..."
+            shortcutHint="P"
+            onSelect={(id) =>
+              pickers.run(() => setIssuePriority({ ticketId: issue.id, priority: id as Priority }))
+            }
+            ariaLabel={`Set priority for ${issueKey}`}
+            triggerClassName={cx(PILL, 'transition-colors hover:bg-secondary')}
+          >
+            <PriorityIcon priority={issue.priority} />
+          </PropertyPicker>
+        ) : (
+          <span className={PILL}>
+            <PriorityIcon priority={issue.priority} />
+          </span>
+        )}
+
+        {issue.labels.slice(0, 3).map((label) => (
+          <span
+            key={label.id}
+            className="flex items-center gap-1 rounded-full border border-secondary px-1.5 py-px text-[0.625rem] text-tertiary"
+          >
             <span
-              key={label.id}
-              className="flex items-center gap-1 rounded-full border border-secondary px-1.5 py-px text-[0.625rem] text-tertiary"
-            >
-              <span
-                aria-hidden="true"
-                className={cx('size-1.5 rounded-full', colorClass(label.color).dot)}
-              />
-              {label.name}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="flex items-center gap-2 text-xs text-tertiary">
-        <PriorityIcon priority={issue.priority} className="size-3" />
-
-        <span className="font-mono tabular-nums">
-          {projectKey}-{issue.number}
-        </span>
+              aria-hidden="true"
+              className={cx('size-1.5 rounded-full', colorClass(label.color).dot)}
+            />
+            {label.name}
+          </span>
+        ))}
 
         {issue.dueDateLabel ? (
           <span
-            className={cx('whitespace-nowrap', issue.overdue && 'font-medium text-error-primary')}
             title={issue.overdue ? 'Overdue' : 'Due date'}
+            className={cx(
+              PILL,
+              'whitespace-nowrap',
+              issue.overdue && 'font-medium text-error-primary',
+            )}
           >
             {issue.dueDateLabel}
           </span>
         ) : null}
 
         {issue.commentCount > 0 ? (
-          <span className="flex items-center gap-1 tabular-nums">
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3.5">
+          <span className={cx(PILL, 'tabular-nums')}>
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3">
               <path
                 d="M14 9.5a2 2 0 0 1-2 2H5.5L2 14V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"
                 stroke="currentColor"
@@ -199,26 +340,9 @@ function IssueCard({
             {issue.commentCount}
           </span>
         ) : null}
-
-        <span className="ms-auto">
-          {issue.assigneeName ? (
-            <span
-              title={issue.assigneeName}
-              aria-label={`Assigned to ${issue.assigneeName}`}
-              className="grid size-6 place-items-center rounded-full bg-secondary text-[0.625rem] font-medium text-tertiary"
-            >
-              {initials(issue.assigneeName)}
-            </span>
-          ) : (
-            <span
-              aria-label="Unassigned"
-              className="grid size-6 place-items-center rounded-full border border-dashed border-secondary text-[0.625rem] text-tertiary"
-            >
-              &ndash;
-            </span>
-          )}
-        </span>
       </div>
+
+      <p className="text-[0.6875rem] text-tertiary">Created {issue.createdAtLabel}</p>
     </div>
   );
 }
@@ -270,6 +394,18 @@ export function BoardView({
     () => columns.map((column) => ({ ...column, issues: records[column.id] ?? [] })),
     [columns, records],
   );
+
+  /**
+   * One funnel for every on-card property edit, feeding the same error slot as
+   * a rejected drag. No optimistic patching: revalidation delivers the new
+   * value as props, and the `useEffect` above folds it into `records`.
+   */
+  function run(action: () => Promise<{ ok: boolean; error?: string }>) {
+    startTransition(async () => {
+      const result = await action();
+      setError(result.ok ? null : (result.error ?? 'Something went wrong.'));
+    });
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -353,6 +489,10 @@ export function BoardView({
                             <IssueCard
                               issue={issue}
                               projectKey={projectKey}
+                              column={column}
+                              columns={liveColumns}
+                              members={members}
+                              run={run}
                               // Touch has no right-click, and long-press is
                               // already the drag gesture, so the button is the
                               // only way in on a phone.
@@ -379,9 +519,13 @@ export function BoardView({
           {({ value }) => {
             const issue = byId.get(String(value));
             if (!issue) return null;
+            // Mid-drag the live records still hold the card somewhere; that
+            // column's icon is what the overlay shows.
+            const column = liveColumns.find((c) => c.issues.some((i) => i.id === issue.id));
+            if (!column) return null;
             return (
               <div className="w-72">
-                <IssueCard issue={issue} projectKey={projectKey} overlay />
+                <IssueCard issue={issue} projectKey={projectKey} column={column} overlay />
               </div>
             );
           }}

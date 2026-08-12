@@ -2,12 +2,10 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { Badge, Card, PageHeader, Prose, Separator } from '@/components/ui';
-import { StateIcon, PriorityIcon } from '@/components/issue-row';
+import { Card, Separator } from '@/components/ui';
+import { StateIcon } from '@/components/issue-row';
 import {
   atLeast,
-  boardPath,
-  cyclePath,
   issuesPath,
   loadPage,
   projectPath,
@@ -15,23 +13,18 @@ import {
   ticketPath,
 } from '@/lib/authz';
 import { prisma } from '@/lib/db';
-import { PRIORITY_LABEL, colorClass, isDone, sortStatesForBoard } from '@/lib/model';
+import { isDone, sortStatesForBoard } from '@/lib/model';
 import { ticketNumberSchema } from '@/lib/validation';
 import { loadWorkspace } from '@/lib/workspace';
-import { cx } from '@/lib/utils/cx';
 
-import {
-  CommentThread,
-  TicketAssignForm,
-  TicketBoardForm,
-  TicketDeleteForm,
-  TicketEditForm,
-  TicketStateForm,
-  type CommentItem,
-} from './comments';
+import { CommentThread, TicketDeleteForm, type CommentItem } from './comments';
+import { InlineDescription, InlineTitle, PropertiesPanel } from './properties';
 
 /**
- * Issue detail + comment thread.
+ * Issue detail + comment thread, laid out the way Linear does it: the title
+ * and description edit in place in the main column, and the right-hand
+ * "Properties" sidebar changes status, priority, assignee, cycle, labels and
+ * board through popup pickers.
  *
  * The URL is `/orgs/<org>/<KEY>/issue/<number>` -- no board segment, because an
  * issue need not be on a board and requiring one would make those permanently
@@ -40,9 +33,9 @@ import {
  * membership, so a mismatch anywhere in the tuple returns `null`, which
  * `loadPage` renders as a plain 404.
  *
- * Presentation only: this page stays a Server Component. Every Untitled UI
- * module ships its own `'use client'`, and the interactive parts of the route
- * live in `comments.tsx`.
+ * Presentation only: this page stays a Server Component. The interactive parts
+ * of the route live in `properties.tsx` (editors and pickers) and
+ * `comments.tsx` (thread and delete).
  */
 
 type TicketParams = { orgSlug: string; workspaceSlug: string; projectKey: string; ticketNumber: string };
@@ -111,7 +104,7 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
         assignee: { select: { id: true, name: true } },
         state: { select: { id: true, name: true, type: true, color: true } },
         board: { select: { id: true, name: true, color: true } },
-        cycle: { select: { number: true, name: true } },
+        cycle: { select: { id: true, number: true, name: true } },
         parent: { select: { number: true, title: true } },
         labels: { orderBy: [{ name: 'asc' }], select: { id: true, name: true, color: true } },
         comments: {
@@ -193,61 +186,20 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
         </Link>
       ) : null}
 
-      <PageHeader title={ctx.ticket.title}>
-        <Badge className="font-mono">{label}</Badge>
-        <span className="flex items-center gap-1.5 text-sm text-tertiary">
-          <StateIcon type={detail.state.type} color={detail.state.color} />
-          {detail.state.name}
-        </span>
-        <span className="flex items-center gap-1.5 text-sm text-tertiary">
-          <PriorityIcon priority={detail.priority} />
-          {PRIORITY_LABEL[detail.priority]}
-        </span>
-        <span className="text-sm text-tertiary">
-          Opened by {detail.createdBy.name} on{' '}
-          <time dateTime={detail.createdAt.toISOString()}>{formatDateTime(detail.createdAt)}</time>
-        </span>
-      </PageHeader>
-
-      {detail.labels.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {detail.labels.map((label) => (
-            <span
-              key={label.id}
-              className="flex items-center gap-1.5 rounded-full border border-secondary px-2 py-0.5 text-[0.6875rem] text-tertiary"
-            >
-              <span
-                aria-hidden="true"
-                className={cx('size-1.5 rounded-full', colorClass(label.color).dot)}
-              />
-              {label.name}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-6">
-          <Card>
-            <Card.Header>
-              <SectionHeading>Description</SectionHeading>
-            </Card.Header>
-            <Card.Content className="gap-4">
-              {ctx.ticket.description ? (
-                <Prose>{ctx.ticket.description}</Prose>
-              ) : (
-                <p className="text-sm text-tertiary">No description yet.</p>
-              )}
-
-              <Separator />
-
-              <TicketEditForm
-                ticketId={ctx.ticket.id}
-                title={ctx.ticket.title}
-                description={ctx.ticket.description ?? ''}
-              />
-            </Card.Content>
-          </Card>
+          <div className="flex flex-col gap-3">
+            <InlineTitle
+              ticketId={ctx.ticket.id}
+              title={ctx.ticket.title}
+              description={ctx.ticket.description ?? ''}
+            />
+            <InlineDescription
+              ticketId={ctx.ticket.id}
+              title={ctx.ticket.title}
+              description={ctx.ticket.description ?? ''}
+            />
+          </div>
 
           {children.length > 0 ? (
             <Card>
@@ -277,7 +229,7 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
 
           <Card>
             <Card.Header>
-              <SectionHeading>Comments</SectionHeading>
+              <SectionHeading>Activity</SectionHeading>
               <Card.Description>
                 {comments.length === 0
                   ? 'Nothing here yet'
@@ -294,93 +246,58 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
           </Card>
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-4">
-          <Card>
-            <Card.Header>
-              <SectionHeading>Details</SectionHeading>
-            </Card.Header>
-            <Card.Content className="gap-4">
-              <TicketStateForm
-                ticketId={ctx.ticket.id}
-                stateId={detail.state.id}
-                states={sortStatesForBoard(workspace.states)}
-              />
+        <aside className="flex min-w-0 flex-col gap-5">
+          <PropertiesPanel
+            ticketId={ctx.ticket.id}
+            stateId={detail.state.id}
+            priority={detail.priority}
+            assigneeId={detail.assignee?.id ?? null}
+            boardId={detail.board?.id ?? null}
+            cycleId={detail.cycle?.id ?? null}
+            labelIds={detail.labels.map((item) => item.id)}
+            states={sortStatesForBoard(workspace.states)}
+            members={workspace.members}
+            boards={workspace.boards}
+            cycles={workspace.cycles.map(({ id, number, name }) => ({ id, number, name }))}
+            labels={workspace.labels}
+          />
 
-              <TicketAssignForm
-                ticketId={ctx.ticket.id}
-                assigneeId={detail.assignee?.id ?? null}
-                members={workspace.members}
-              />
+          <Separator />
 
-              <TicketBoardForm
-                ticketId={ctx.ticket.id}
-                boardId={detail.board?.id ?? null}
-                boards={workspace.boards}
-              />
-
-              <Separator />
-
-              <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 text-sm">
-                <Fact term="Assignee">{detail.assignee?.name ?? 'Unassigned'}</Fact>
-                <Fact term="Reporter">{detail.createdBy.name}</Fact>
-                <Fact term="Board">
-                  {detail.board ? (
-                    <Link
-                      href={boardPath(ctx.org, ctx.project, detail.board)}
-                      className="no-underline hover:underline"
-                    >
-                      {detail.board.name}
-                    </Link>
-                  ) : (
-                    <span className="text-tertiary">None</span>
-                  )}
-                </Fact>
-                <Fact term="Cycle">
-                  {detail.cycle ? (
-                    <Link
-                      href={cyclePath(ctx.org, ctx.project, detail.cycle.number)}
-                      className="no-underline hover:underline"
-                    >
-                      {detail.cycle.name ?? `Cycle ${detail.cycle.number}`}
-                    </Link>
-                  ) : (
-                    <span className="text-tertiary">None</span>
-                  )}
-                </Fact>
-                <Fact term="Due">
-                  {detail.dueDate ? (
-                    <time dateTime={detail.dueDate.toISOString()}>{DATE.format(detail.dueDate)}</time>
-                  ) : (
-                    <span className="text-tertiary">No due date</span>
-                  )}
-                </Fact>
-                {detail.startedAt ? (
-                  <Fact term="Started">
-                    <time dateTime={detail.startedAt.toISOString()}>
-                      {DATE.format(detail.startedAt)}
-                    </time>
-                  </Fact>
-                ) : null}
-                {detail.completedAt ? (
-                  <Fact term="Completed">
-                    <time dateTime={detail.completedAt.toISOString()}>
-                      {DATE.format(detail.completedAt)}
-                    </time>
-                  </Fact>
-                ) : null}
-                <Fact term="Created">
-                  <time dateTime={detail.createdAt.toISOString()}>
-                    {formatDateTime(detail.createdAt)}
-                  </time>
-                </Fact>
-                <Fact term="Updated">
-                  <time dateTime={detail.updatedAt.toISOString()}>
-                    {formatDateTime(detail.updatedAt)}
-                  </time>
-                </Fact>
-              </dl>
-            </Card.Content>
-          </Card>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 text-sm">
+            <Fact term="Reporter">{detail.createdBy.name}</Fact>
+            <Fact term="Due">
+              {detail.dueDate ? (
+                <time dateTime={detail.dueDate.toISOString()}>{DATE.format(detail.dueDate)}</time>
+              ) : (
+                <span className="text-tertiary">No due date</span>
+              )}
+            </Fact>
+            {detail.startedAt ? (
+              <Fact term="Started">
+                <time dateTime={detail.startedAt.toISOString()}>
+                  {DATE.format(detail.startedAt)}
+                </time>
+              </Fact>
+            ) : null}
+            {detail.completedAt ? (
+              <Fact term="Completed">
+                <time dateTime={detail.completedAt.toISOString()}>
+                  {DATE.format(detail.completedAt)}
+                </time>
+              </Fact>
+            ) : null}
+            <Fact term="Created">
+              <time dateTime={detail.createdAt.toISOString()}>
+                {formatDateTime(detail.createdAt)}
+              </time>
+            </Fact>
+            <Fact term="Updated">
+              <time dateTime={detail.updatedAt.toISOString()}>
+                {formatDateTime(detail.updatedAt)}
+              </time>
+            </Fact>
+          </dl>
 
           {canDeleteTicket ? (
             <Card>

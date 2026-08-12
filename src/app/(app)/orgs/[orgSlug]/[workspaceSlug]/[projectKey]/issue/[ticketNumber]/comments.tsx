@@ -1,11 +1,12 @@
 'use client';
 
 /**
- * The single `'use client'` island for the ticket route: the comment thread plus
- * the ticket's small edit forms. They live together because each one needs
- * `useActionState` (React's `<form action>` prop rejects value-returning
- * functions, and every Server Action here returns an `ActionResult`), and
- * keeping them in one module keeps the route's client bundle to one file.
+ * The comment thread plus the ticket's delete disclosure -- the parts of the
+ * route that still submit through `<form action>`. They live together because
+ * each needs `useActionState` (React's `<form action>` prop rejects
+ * value-returning functions, and every Server Action here returns an
+ * `ActionResult`). The inline title/description editors and the properties
+ * sidebar live in `properties.tsx`.
  *
  * `useFormStatus` -- via `SubmitButton` -- is the only pending primitive: no
  * `useTransition`, no `useOptimistic` (SPEC 7.11). Disabling while pending is
@@ -19,38 +20,20 @@
  *
  * Permission flags (`canManage`, `canDelete`) are computed on the SERVER and
  * passed down. They are politeness only -- every action re-checks the role.
- *
- * The two selects here stay NATIVE `<select>` elements wearing Untitled UI's field
- * styles. "Unassigned" submits the empty string, which is the exact value
- * `assignTicket`'s schema accepts to clear the assignee; a listbox keyed by a
- * blank id would be a wire-format change, and this file may not change wire
- * formats.
  */
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Avatar } from '@/components/base/avatar/avatar';
 
-import {
-  Field,
-  FormError,
-  Input,
-  Prose,
-  Separator,
-  SubmitButton,
-  Textarea,
-} from '@/components/ui';
+import { FormError, Prose, Separator, SubmitButton, Textarea } from '@/components/ui';
 import type { ActionResult } from '@/lib/result';
 // Issue writes live at PROJECT scope now; only the comment actions are local.
-import { assignIssue, boardIssue, deleteIssue, moveIssue, updateIssue } from '../../issue-actions';
+import { deleteIssue } from '../../issue-actions';
 import { createComment, deleteComment, updateComment } from './actions';
 
 /* -------------------------------------------------------------------------- */
 /* Shared shapes                                                               */
 /* -------------------------------------------------------------------------- */
-
-export type StateOption = { id: string; name: string };
-export type MemberOption = { id: string; name: string };
-export type BoardOption = { id: string; name: string };
 
 export type CommentItem = {
   id: string;
@@ -76,12 +59,6 @@ function resultMessage(state: ActionResult | null): string | null {
   return state && state.ok && state.message ? state.message : null;
 }
 
-const NO_FIELD_ERRORS: Record<string, string> = {};
-
-function fieldErrorsOf(state: ActionResult | null): Record<string, string> {
-  return state && !state.ok && state.fieldErrors ? state.fieldErrors : NO_FIELD_ERRORS;
-}
-
 /**
  * `Array.from` rather than indexing: a name may begin with an astral character,
  * and `name[0]` would slice a surrogate pair in half.
@@ -93,10 +70,6 @@ function initials(name: string): string {
   const last = parts.length > 1 ? (Array.from(parts[parts.length - 1])[0] ?? '') : '';
   return (first + last).toLocaleUpperCase();
 }
-
-/** Native `<select>` wearing Untitled UI's field styles, sized to match a `sm` button. */
-const SELECT_CLASS =
-  'h-9 w-full min-w-0 rounded-lg border border-primary bg-primary px-3 py-0 text-sm text-primary shadow-xs outline-focus-ring transition-colors hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-offset-2 md:h-8';
 
 /* -------------------------------------------------------------------------- */
 /* Disclosure                                                                  */
@@ -167,207 +140,6 @@ function Initials({ name, className }: { name: string; className?: string }) {
     <span aria-hidden="true" className={cx('mt-0.5 shrink-0', className)}>
       <Avatar size="xs" initials={initials(name)} contentClassName="text-xs" />
     </span>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Ticket edit                                                                 */
-/* -------------------------------------------------------------------------- */
-
-type TicketEditFormProps = {
-  ticketId: string;
-  title: string;
-  description: string;
-};
-
-export function TicketEditForm({ ticketId, title, description }: TicketEditFormProps) {
-  const [state, action] = useActionState(updateIssue, null);
-  const errors = fieldErrorsOf(state);
-
-  return (
-    <Collapsible summary="Edit title and description">
-      <form action={action} className="flex flex-col gap-4">
-        <input type="hidden" name="ticketId" value={ticketId} />
-
-        <Field htmlFor="ticket-title" label="Title" error={errors.title}>
-          <Input
-            id="ticket-title"
-            name="title"
-            defaultValue={title}
-            maxLength={200}
-            required
-            autoComplete="off"
-          />
-        </Field>
-
-        <Field
-          htmlFor="ticket-description"
-          label="Description"
-          hint="Markdown. Line breaks are kept."
-          error={errors.description}
-        >
-          <Textarea
-            id="ticket-description"
-            name="description"
-            defaultValue={description}
-            maxLength={10000}
-            rows={8}
-            placeholder="What needs to happen?"
-          />
-        </Field>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <SubmitButton size="sm" pendingLabel="Saving...">
-            Save changes
-          </SubmitButton>
-          <StatusNote>{resultMessage(state)}</StatusNote>
-        </div>
-
-        <FormError>{resultError(state)}</FormError>
-      </form>
-    </Collapsible>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Status                                                                      */
-/* -------------------------------------------------------------------------- */
-
-type TicketStateFormProps = {
-  ticketId: string;
-  stateId: string;
-  states: StateOption[];
-};
-
-/**
- * The issue's status.
- *
- * These are the PROJECT's workflow states, not a board's columns -- an issue has
- * exactly one status wherever it is looked at from, which is why this control
- * exists on an issue that is on no board at all.
- */
-export function TicketStateForm({ ticketId, stateId, states }: TicketStateFormProps) {
-  const [state, action] = useActionState(moveIssue, null);
-
-  return (
-    <form action={action} className="flex flex-col gap-2">
-      <input type="hidden" name="ticketId" value={ticketId} />
-
-      <Field htmlFor="ticket-state" label="Status">
-        <div className="flex items-center gap-2">
-          <select
-            id="ticket-state"
-            className={SELECT_CLASS}
-            name="toStateId"
-            defaultValue={stateId}
-          >
-            {states.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-          <SubmitButton color="secondary" size="sm" pendingLabel="Moving...">
-            Move
-          </SubmitButton>
-        </div>
-      </Field>
-
-      <FormError>{resultError(state)}</FormError>
-    </form>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Assignee                                                                    */
-/* -------------------------------------------------------------------------- */
-
-type TicketAssignFormProps = {
-  ticketId: string;
-  assigneeId: string | null;
-  members: MemberOption[];
-};
-
-export function TicketAssignForm({ ticketId, assigneeId, members }: TicketAssignFormProps) {
-  const [state, action] = useActionState(assignIssue, null);
-
-  return (
-    <form action={action} className="flex flex-col gap-2">
-      <input type="hidden" name="ticketId" value={ticketId} />
-
-      <Field htmlFor="ticket-assignee" label="Assignee">
-        <div className="flex items-center gap-2">
-          <select
-            id="ticket-assignee"
-            className={SELECT_CLASS}
-            name="assigneeId"
-            defaultValue={assigneeId ?? ''}
-          >
-            <option value="">Unassigned</option>
-            {members.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.name}
-              </option>
-            ))}
-          </select>
-          <SubmitButton color="secondary" size="sm" pendingLabel="Saving...">
-            Save
-          </SubmitButton>
-        </div>
-      </Field>
-
-      <StatusNote>{resultMessage(state)}</StatusNote>
-
-      <FormError>{resultError(state)}</FormError>
-    </form>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Board                                                                       */
-/* -------------------------------------------------------------------------- */
-
-type TicketBoardFormProps = {
-  ticketId: string;
-  boardId: string | null;
-  boards: BoardOption[];
-};
-
-/**
- * Which board the issue is filed under, or none.
- *
- * The board card menu could already do this; the issue page could not, which
- * left an issue on no board -- or on the wrong one -- with nowhere to fix it.
- * "No board" submits the empty string, the exact value `setIssueBoard` accepts
- * to clear the field.
- */
-export function TicketBoardForm({ ticketId, boardId, boards }: TicketBoardFormProps) {
-  const [state, action] = useActionState(boardIssue, null);
-
-  return (
-    <form action={action} className="flex flex-col gap-2">
-      <input type="hidden" name="ticketId" value={ticketId} />
-
-      <Field htmlFor="ticket-board" label="Board">
-        <div className="flex items-center gap-2">
-          <select id="ticket-board" className={SELECT_CLASS} name="boardId" defaultValue={boardId ?? ''}>
-            <option value="">No board</option>
-            {boards.map((board) => (
-              <option key={board.id} value={board.id}>
-                {board.name}
-              </option>
-            ))}
-          </select>
-          <SubmitButton color="secondary" size="sm" pendingLabel="Saving...">
-            Save
-          </SubmitButton>
-        </div>
-      </Field>
-
-      <StatusNote>{resultMessage(state)}</StatusNote>
-
-      <FormError>{resultError(state)}</FormError>
-    </form>
   );
 }
 

@@ -243,7 +243,7 @@ function IssueMenuItems({
               className={ITEM}
               onClick={() => run(() => setIssueAssignee({ ticketId: issue.id, assigneeId: '' }))}
             >
-              <Tick on={issue.assigneeName === null} />
+              <Tick on={issue.assigneeId === null} />
               <span className="text-tertiary">Unassigned</span>
             </Menu.Item>
             {members.map((member) => (
@@ -254,7 +254,7 @@ function IssueMenuItems({
                   run(() => setIssueAssignee({ ticketId: issue.id, assigneeId: member.id }))
                 }
               >
-                <Tick on={issue.assigneeName === member.name} />
+                <Tick on={issue.assigneeId === member.id} />
                 {member.name}
               </Menu.Item>
             ))}
