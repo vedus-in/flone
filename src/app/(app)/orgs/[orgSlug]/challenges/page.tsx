@@ -107,7 +107,15 @@ export default async function ChallengesPage({
         },
       },
     },
-    orderBy: [{ ticket: { priority: 'desc' } }, { ticket: { updatedAt: 'desc' } }, { id: 'asc' }],
+    // The arrangement first, then the default for a board nobody has dragged:
+    // every `position` is 0 until the first drop, so the fallback IS the order
+    // until someone expresses a preference.
+    orderBy: [
+      { position: 'asc' },
+      { ticket: { priority: 'desc' } },
+      { ticket: { updatedAt: 'desc' } },
+      { id: 'asc' },
+    ],
     select: {
       ticket: {
         select: {

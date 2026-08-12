@@ -1800,7 +1800,14 @@ export const TOOLS: Tool[] = [
           userId: ctx.user.id,
           ticket: { project: { organizationId: ctx.org.id } },
         },
-        orderBy: [{ ticket: { priority: 'desc' } }, { ticket: { updatedAt: 'desc' } }, { id: 'asc' }],
+        // Same order the page renders in, arrangement included, so a caller
+        // reads the board the person actually sees.
+        orderBy: [
+          { position: 'asc' },
+          { ticket: { priority: 'desc' } },
+          { ticket: { updatedAt: 'desc' } },
+          { id: 'asc' },
+        ],
         select: {
           ticket: {
             select: {

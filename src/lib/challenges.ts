@@ -109,6 +109,23 @@ export function columnForStateType(type: WorkflowStateType): ChallengeColumnId {
   return column.id;
 }
 
+/**
+ * The `ChallengePick.position` writes a drop implies, one per card the board
+ * showed, read top-left to bottom-right.
+ *
+ * Each pair is numbered from its index BEFORE the sort, so writing the rows in
+ * id order changes only which order they are LOCKED in -- never the number each
+ * one gets. That ordering is what stops two boards open at once from taking the
+ * same locks in opposite directions and deadlocking.
+ */
+export function positionWrites(
+  ticketIds: readonly string[],
+): Array<{ ticketId: string; position: number }> {
+  return ticketIds
+    .map((ticketId, position) => ({ ticketId, position }))
+    .sort((a, b) => (a.ticketId < b.ticketId ? -1 : 1));
+}
+
 /** Null for anything that is not a column id, so a forged value is rejected. */
 export function challengeColumn(id: string): ChallengeColumn | null {
   return CHALLENGE_COLUMNS.find((column) => column.id === id) ?? null;

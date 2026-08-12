@@ -38,7 +38,8 @@
 // deleting either the person or the issue should take it with them.
 //
 // `position` is never unique-constrained. It is a sort hint (SPEC §6.10),
-// dense within a (projectId, stateId) pair.
+// dense within a (projectId, stateId) pair on Ticket, and across one person's
+// whole Daily Challenges board on ChallengePick.
 
 generator client {
   provider      = "prisma-client-js"
@@ -441,6 +442,12 @@ model ChallengePick {
   ticketId  String
   ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+
+  /// Where this card sits on the owner's board, read top-left to bottom-right
+  /// across ALL columns -- picks span projects, so `Ticket.position` (dense per
+  /// project and state) cannot say it. Defaults to 0, which leaves a board
+  /// nobody has dragged sorted by priority, exactly as before.
+  position  Int      @default(0)
 
   /// One pick per person per issue, so picking something twice is a no-op rather
   /// than a duplicate card. Per the index rationale at the top of this file

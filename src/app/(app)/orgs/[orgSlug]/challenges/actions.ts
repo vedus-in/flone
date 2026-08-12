@@ -20,7 +20,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { challengesPath, requireTicket, requireUser, runAction } from '@/lib/authz';
-import { challengeColumn } from '@/lib/challenges';
+import { challengeColumn, positionWrites } from '@/lib/challenges';
 import { prisma } from '@/lib/db';
 import { fail, ok, type ActionResult } from '@/lib/result';
 import { INVALID_INPUT, fieldErrorsOf } from '@/lib/action-input';
@@ -35,6 +35,31 @@ import { setIssueState } from '../[workspaceSlug]/[projectKey]/issue-actions';
 const NO_STATE = "That issue's project has no status matching this column.";
 
 const ticketOnly = z.object({ ticketId: cuid });
+
+/** The board, in the order it now reads. Bounded like any other client array. */
+const order = z.array(cuid).max(500);
+
+/**
+ * Persist the arrangement of the caller's OWN board.
+ *
+ * `ChallengePick.position` is dense across the whole board rather than per
+ * column: the client sends every card it can see, read top-left to
+ * bottom-right, so one renumbering settles both the order within a column and
+ * where a card landed after changing column. Picks span projects, so
+ * `Ticket.position` -- dense per (project, state) -- cannot express this.
+ *
+ * Every write is scoped to the session user, so an id the caller does not own
+ * matches no row and reorders nothing. That is the whole authorization here.
+ */
+async function writeOrder(userId: string, ticketIds: string[]): Promise<void> {
+  if (ticketIds.length === 0) return;
+
+  await prisma.$transaction(
+    positionWrites(ticketIds).map(({ ticketId, position }) =>
+      prisma.challengePick.updateMany({ where: { userId, ticketId }, data: { position } }),
+    ),
+  );
+}
 
 /* -------------------------------------------------------------------------- */
 /* addChallenge                                                                */
@@ -99,10 +124,48 @@ export async function removeChallenge(input: { ticketId: string }): Promise<Acti
 }
 
 /* -------------------------------------------------------------------------- */
+/* reorderChallenges                                                           */
+/* -------------------------------------------------------------------------- */
+
+const reorderSchema = z.object({ ticketIds: order.min(1) });
+
+/**
+ * Rearrange the board without touching a single issue.
+ *
+ * This is what a drop that stayed inside its column means, and it deliberately
+ * does NOT go near `setIssueState`: a column admits more than one state -- To-do
+ * holds backlog and unstarted, In Progress holds every STARTED state a project
+ * has -- so writing the column's canonical status on a reorder would quietly
+ * promote a backlog issue or collapse "In Review" into "In Progress".
+ */
+export async function reorderChallenges(input: { ticketIds: string[] }): Promise<ActionResult> {
+  return runAction(async () => {
+    const user = await requireUser();
+
+    const parsed = reorderSchema.safeParse(input);
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    // Solely to name the organization to revalidate. The reorder itself is
+    // scoped to the session user, so this cannot reach another person's board.
+    const ctx = await requireTicket(parsed.data.ticketIds[0]);
+
+    await writeOrder(user.id, parsed.data.ticketIds);
+
+    revalidatePath(challengesPath(ctx.org));
+    return ok();
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* moveChallenge -- the drop handler                                           */
 /* -------------------------------------------------------------------------- */
 
-const moveSchema = z.object({ ticketId: cuid, column: z.string().min(1).max(20) });
+const moveSchema = z.object({
+  ticketId: cuid,
+  column: z.string().min(1).max(20),
+  /** Optional: MCP moves a card without knowing where the board scrolled to. */
+  order: order.optional(),
+});
 
 /**
  * Move a card between columns.
@@ -121,6 +184,7 @@ const moveSchema = z.object({ ticketId: cuid, column: z.string().min(1).max(20) 
 export async function moveChallenge(input: {
   ticketId: string;
   column: string;
+  order?: string[];
 }): Promise<ActionResult> {
   return runAction(async () => {
     const user = await requireUser();
@@ -132,6 +196,10 @@ export async function moveChallenge(input: {
     if (!column) return fail(INVALID_INPUT);
 
     const ctx = await requireTicket(parsed.data.ticketId);
+
+    // Where the card landed in its new column, from the same drop. Written
+    // first so it holds even if the status write below is refused.
+    await writeOrder(user.id, parsed.data.order ?? []);
 
     if (column.sets === null) {
       await prisma.challengePick.deleteMany({

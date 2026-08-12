@@ -11,11 +11,13 @@
  *     thing on two cards here. `moveChallenge` resolves the column back to a
  *     state of each issue's own project.
  *
- *   - There is no reordering WITHIN a column. `Ticket.position` is dense within
- *     a (projectId, stateId) pair and simply has no meaning across projects, so
- *     an index here would be a number the server could not honour. Cards sort by
- *     priority then last-updated, on the server. That also means none of the
- *     `visibleIds` / `resolveIndex` machinery the project board needs applies.
+ *   - Reordering is persisted on the PICK, not the issue. `Ticket.position` is
+ *     dense within a (projectId, stateId) pair and has no meaning across
+ *     projects, so a drop here renumbers `ChallengePick.position` across the
+ *     whole board instead -- every card the board shows, in one list. The board
+ *     is the complete set of the owner's picks in this organization, so there is
+ *     nothing off-screen to land among and none of the `visibleIds` /
+ *     `resolveIndex` machinery the project board needs applies.
  *
  * Each card still shows the status its OWN project calls the issue, because
  * "Done" here may well be "Shipped" there and the column name alone would be a
@@ -41,7 +43,7 @@ import { CHALLENGE_COLUMNS, type ChallengeColumnId } from '@/lib/challenges';
 import { colorClass } from '@/lib/model';
 import { cx } from '@/lib/utils/cx';
 
-import { moveChallenge, removeChallenge } from './actions';
+import { moveChallenge, removeChallenge, reorderChallenges } from './actions';
 
 export type ChallengeCard = {
   id: string;
@@ -167,12 +169,25 @@ export function ChallengeBoard({ data }: { data: ChallengeBoardData }) {
           // Dropping into Completed removes the pick, so the card must not sit
           // in that column even for the moment before revalidation lands --
           // "it disappears" is the whole contract of the column.
-          if (column === 'completed') {
-            setRecords({ ...next, completed: [] });
-          }
+          const board = column === 'completed' ? { ...next, completed: [] } : next;
+          if (column === 'completed') setRecords(board);
+
+          // The whole board, read top-left to bottom-right. One list settles
+          // both the order within a column and where a card landed in the
+          // column it moved to.
+          const ticketIds = CHALLENGE_COLUMNS.flatMap((c) =>
+            (board[c.id] ?? []).map((card) => card.id),
+          );
 
           startTransition(async () => {
-            const result = await moveChallenge({ ticketId, column });
+            // A drop that stayed in its column is an ARRANGEMENT, never a
+            // status: the column it sits in admits several states, and asking
+            // for the column again would resolve to the canonical one -- out of
+            // the backlog, or out of "In Review".
+            const result =
+              column === meta.activeContainer
+                ? await reorderChallenges({ ticketIds })
+                : await moveChallenge({ ticketId, column, order: ticketIds });
             if (!result.ok) {
               setRecords(meta.previousValue);
               setError(result.error);

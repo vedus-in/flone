@@ -63,6 +63,7 @@ import {
 import {
   CHALLENGE_COLUMNS,
   challengeColumn,
+  positionWrites,
   columnForStateType,
   isClearingColumn,
 } from '../src/lib/challenges.ts';
@@ -452,6 +453,22 @@ ok('challengeColumn accepts every id and rejects anything else', () => {
   assert.equal(challengeColumn('COMPLETED'), null);
   assert.equal(challengeColumn(''), null);
   assert.equal(challengeColumn('__proto__'), null);
+});
+
+ok('a reorder numbers by arrangement and writes in id order', () => {
+  const writes = positionWrites(['c', 'a', 'b']);
+  // Locked ascending by id, so two boards open at once cannot deadlock...
+  assert.deepEqual(
+    writes.map((write) => write.ticketId),
+    ['a', 'b', 'c'],
+  );
+  // ...while each card keeps the number its place on the board gave it. Sorting
+  // before numbering instead would silently alphabetize everyone's board.
+  assert.deepEqual(
+    writes.map((write) => `${write.ticketId}=${write.position}`),
+    ['a=1', 'b=2', 'c=0'],
+  );
+  assert.deepEqual(positionWrites([]), []);
 });
 
 console.log('\nreminders');
