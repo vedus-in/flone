@@ -17,6 +17,7 @@
     "check:model": "node scripts/check-model.ts",
     "check:email": "bun scripts/check-email.ts",
     "check:markdown": "bun scripts/check-markdown.ts",
+    "check:mentions": "bun scripts/check-mentions.ts",
     "check:voice": "bun services/voice/check.ts"
   },
   "dependencies": {

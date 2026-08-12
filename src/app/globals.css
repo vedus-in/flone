@@ -102,6 +102,20 @@
         text-underline-offset: 2px;
     }
 
+    /*
+     * An @mention (`remarkMentions` in `src/lib/mentions.ts`). Not a link --
+     * there is no page for a person -- so it reads as a chip rather than
+     * something clickable, and it is what tells the author their tag was
+     * recognised: a misspelt name stays plain text and emails nobody.
+     */
+    & .mention {
+        padding: 0.05em 0.3em;
+        font-weight: 500;
+        color: var(--color-text-brand-secondary);
+        background-color: var(--color-bg-brand-primary);
+        border-radius: var(--radius-xs);
+    }
+
     & ul,
     & ol {
         padding-left: 1.5em;

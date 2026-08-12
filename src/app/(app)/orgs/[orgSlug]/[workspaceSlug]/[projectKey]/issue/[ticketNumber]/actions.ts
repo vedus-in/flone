@@ -31,7 +31,7 @@ import {
 } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { appUrl } from '@/lib/email';
-import { notifyNewComment } from '@/lib/mailer';
+import { notifyCommentEdited, notifyNewComment } from '@/lib/mailer';
 import { fail, ok, type ActionResult } from '@/lib/result';
 import { INVALID_INPUT, field, fieldErrorsOf } from '@/lib/action-input';
 import { commentBodySchema, cuid } from '@/lib/validation';
@@ -70,11 +70,14 @@ export async function createComment(
     });
 
     // The thread: whoever filed it, whoever owns it, everyone who has already
-    // commented. `notifyNewComment` resolves and deduplicates that set, drops
-    // the author, and drops anyone who has muted comment mail -- so a
-    // self-comment on your own issue sends nothing.
+    // commented, plus anyone the body @mentioned. `notifyNewComment` resolves
+    // and deduplicates that set, drops the author, and drops anyone who has
+    // muted comment mail -- so a self-comment on your own issue sends nothing.
+    // The mentions are re-derived there from the stored body against THIS
+    // organization's members; nothing about who was tagged comes off the form.
     await notifyNewComment({
       ticketId: ctx.ticket.id,
+      organizationId: ctx.org.id,
       actorId: user.id,
       actorName: user.name,
       body: parsed.data.body,
@@ -120,6 +123,23 @@ export async function updateComment(
     await prisma.comment.update({
       where: { id: ctx.comment.id },
       data: { body: parsed.data.body },
+    });
+
+    // Tagging someone you forgot is the ordinary reason a comment gets edited,
+    // and after posting it is the only way to do it. Only the mentions the edit
+    // ADDED are mailed -- `ctx.comment.body` is the pre-edit text.
+    await notifyCommentEdited({
+      organizationId: ctx.org.id,
+      actorId: ctx.user.id,
+      actorName: ctx.user.name,
+      previousBody: ctx.comment.body,
+      body: parsed.data.body,
+      issue: {
+        issueKey: `${ctx.project.key}-${ctx.ticket.number}`,
+        issueTitle: ctx.ticket.title,
+        projectName: ctx.project.name,
+        url: appUrl(ticketPath(ctx.org, ctx.project, ctx.ticket.number)),
+      },
     });
 
     for (const path of ticketSurfaces(ctx)) revalidatePath(path);

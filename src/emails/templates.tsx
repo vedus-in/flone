@@ -2,7 +2,7 @@ import { Action, Card, EmailLayout, Eyebrow, FallbackLink, Meta, Note, Paragraph
 import { PRODUCT_NAME } from './theme';
 
 /**
- * The ten messages.
+ * The eleven messages.
  *
  * All in one file on purpose: they are short, they share a vocabulary, and the
  * thing most worth reviewing about them is that the copy is CONSISTENT --
@@ -324,6 +324,59 @@ NewCommentEmail.PreviewProps = {
   issueTitle: 'Flaky import on first boot',
   projectName: 'Engineering',
   body: 'Reproduced on a clean container — it only happens when the migration runs in the same boot as the seed.',
+  url: 'https://flone.example.com/orgs/acme/ENG/issue/42',
+};
+
+/* -------------------------------------------------------------------------- */
+/* 8b. Mentioned in a comment                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Sent INSTEAD of the new-comment message to anyone the body tagged, never as
+ * well as it: being named is the stronger signal, and two emails about one
+ * comment is how a notification system teaches people to filter it.
+ */
+export function mentionSubject(actorName: string, key: string): string {
+  return `${actorName} mentioned you on ${key}`;
+}
+
+export function MentionEmail({
+  actorName,
+  issueKey,
+  issueTitle,
+  projectName,
+  body,
+  url,
+}: {
+  actorName: string;
+  issueKey: string;
+  issueTitle: string;
+  projectName: string;
+  body: string;
+  url: string;
+}) {
+  return (
+    <EmailLayout preview={`${actorName} mentioned you on ${issueKey}`} context={projectName}>
+      <Card>
+        <Eyebrow>You were mentioned</Eyebrow>
+        <Title>{issueTitle}</Title>
+        <Meta>
+          {actorName} on {issueKey}
+        </Meta>
+        <Quote>{body}</Quote>
+        <Action href={url}>Reply on {issueKey}</Action>
+        <Note>Do not want these? Turn off comment emails in your account settings.</Note>
+      </Card>
+    </EmailLayout>
+  );
+}
+
+MentionEmail.PreviewProps = {
+  actorName: 'Dana Reed',
+  issueKey: 'ENG-42',
+  issueTitle: 'Flaky import on first boot',
+  projectName: 'Engineering',
+  body: '@Sam Okoro any idea why the migration only fails on a cold container?',
   url: 'https://flone.example.com/orgs/acme/ENG/issue/42',
 };
 

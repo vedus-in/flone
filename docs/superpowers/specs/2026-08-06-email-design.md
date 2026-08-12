@@ -356,6 +356,7 @@ address. Actions import from `mailer.ts`; nothing in `mailer.ts` is an action.
 | ----------------- | ------------------------------------- | --------------------- |
 | Assigned an issue | `createIssue`, `setIssueAssignee`     | `notifyAssigned`      |
 | New comment       | `createComment`                       | `notifyComments`      |
+| Mentioned         | `createComment`, `updateComment`      | `notifyComments`      |
 | Added to an org   | `addMember`                           | `notifyOrgMembership` |
 | MCP token created | `createMcpToken`                      | none — security mail  |
 
@@ -366,6 +367,17 @@ including MCP, without a hook per caller.
 
 Comment recipients are the issue's creator, its assignee, and every prior
 comment author, deduplicated.
+
+**AMENDED.** A comment body may `@mention` any member of the organization, and
+whoever it names gets the mention message **instead of** the new-comment one —
+the two sets overlap on almost every real comment, and two emails about one
+comment is how people learn to filter a product's mail. Who was mentioned is
+re-derived server-side from the stored body (`src/lib/mentions.ts`) against this
+organization's members, so nothing about it comes off the form and a mention
+cannot name its way out of the tenant. `updateComment` mails the mentions an
+edit ADDED and no others, so fixing a typo does not re-notify the thread. The
+gate stays `notifyComments`: a mention is comment activity, and a fifth switch
+for it would be a schema migration to say the same thing.
 
 Two rules are applied once, inside `notify.ts`, and hold for every message:
 

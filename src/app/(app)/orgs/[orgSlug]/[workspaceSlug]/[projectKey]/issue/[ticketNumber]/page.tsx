@@ -240,6 +240,9 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
               <CommentThread
                 ticketId={ctx.ticket.id}
                 comments={comments}
+                // Everyone a comment may @mention. The same list the assignee
+                // picker uses -- the organization's members, and nobody else.
+                members={workspace.members}
                 currentUserName={ctx.user.name}
               />
             </Card.Content>

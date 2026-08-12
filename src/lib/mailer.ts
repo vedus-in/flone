@@ -4,12 +4,14 @@ import { EmailTokenPurpose, type Role } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { appUrl, queueMail, renderAndSend, tokenUrl } from '@/lib/email';
 import { issueToken } from '@/lib/email-token';
+import { findMentions } from '@/lib/mentions';
 import {
   AccountExistsEmail,
   AddedToOrgEmail,
   InviteEmail,
   IssueAssignedEmail,
   McpTokenCreatedEmail,
+  MentionEmail,
   NewCommentEmail,
   PasswordChangedEmail,
   PasswordResetEmail,
@@ -20,6 +22,7 @@ import {
   inviteSubject,
   issueAssignedSubject,
   mcpTokenCreatedSubject,
+  mentionSubject,
   newCommentSubject,
   passwordChangedSubject,
   passwordResetSubject,
@@ -253,8 +256,52 @@ export async function notifyIssueAssigned(input: {
 /** Longer comment bodies are cut here rather than in the template. */
 const COMMENT_PREVIEW_CHARS = 600;
 
+function preview(body: string): string {
+  return body.length > COMMENT_PREVIEW_CHARS
+    ? `${body.slice(0, COMMENT_PREVIEW_CHARS)}...`
+    : body;
+}
+
+/**
+ * Everyone a `@mention` in this organization could name.
+ *
+ * `organizationId` always arrives from an authorized upward walk, which is what
+ * confines a mention to the tenant: a body naming someone from another
+ * organization matches nobody, because they are not in this list.
+ */
+async function orgMembers(organizationId: string): Promise<Array<{ id: string; name: string }>> {
+  const rows = await prisma.membership.findMany({
+    where: { organizationId },
+    select: { user: { select: { id: true, name: true } } },
+  });
+  return rows.map((row) => row.user);
+}
+
+function mentionedIds(body: string, members: Array<{ id: string; name: string }>): string[] {
+  return findMentions(body, members).map((member) => member.id);
+}
+
+function queueMention(
+  target: { email: string },
+  input: { actorName: string; body: string; issue: IssueContext },
+): void {
+  queueMail(
+    target.email,
+    mentionSubject(input.actorName, input.issue.issueKey),
+    MentionEmail({
+      actorName: input.actorName,
+      issueKey: input.issue.issueKey,
+      issueTitle: input.issue.issueTitle,
+      projectName: input.issue.projectName,
+      body: preview(input.body),
+      url: input.issue.url,
+    }),
+  );
+}
+
 export async function notifyNewComment(input: {
   ticketId: string;
+  organizationId: string;
   actorId: string;
   actorName: string;
   body: string;
@@ -263,28 +310,36 @@ export async function notifyNewComment(input: {
   // The thread: whoever filed it, whoever owns it, and everyone who has already
   // said something. Deduplication and the two standing rules happen in
   // `recipients`.
-  const ticket = await prisma.ticket.findUnique({
-    where: { id: input.ticketId },
-    select: {
-      createdById: true,
-      assigneeId: true,
-      comments: { select: { authorId: true }, distinct: ['authorId'] },
-    },
-  });
+  const [ticket, members] = await Promise.all([
+    prisma.ticket.findUnique({
+      where: { id: input.ticketId },
+      select: {
+        createdById: true,
+        assigneeId: true,
+        comments: { select: { authorId: true }, distinct: ['authorId'] },
+      },
+    }),
+    orgMembers(input.organizationId),
+  ]);
   if (!ticket) return;
 
-  const targets = await recipients(
-    [ticket.createdById, ticket.assigneeId, ...ticket.comments.map((c) => c.authorId)],
-    input.actorId,
-    'notifyComments',
-  );
+  const [mentions, thread] = await Promise.all([
+    recipients(mentionedIds(input.body, members), input.actorId, 'notifyComments'),
+    recipients(
+      [ticket.createdById, ticket.assigneeId, ...ticket.comments.map((c) => c.authorId)],
+      input.actorId,
+      'notifyComments',
+    ),
+  ]);
 
-  const body =
-    input.body.length > COMMENT_PREVIEW_CHARS
-      ? `${input.body.slice(0, COMMENT_PREVIEW_CHARS)}...`
-      : input.body;
+  // A tagged participant gets the mention message and NOT the thread one: the
+  // two sets overlap on almost every real comment.
+  const tagged = new Set(mentions.map((target) => target.id));
 
-  for (const target of targets) {
+  for (const target of mentions) queueMention(target, input);
+
+  for (const target of thread) {
+    if (tagged.has(target.id)) continue;
     queueMail(
       target.email,
       newCommentSubject(input.issue.issueKey, input.issue.issueTitle),
@@ -293,11 +348,37 @@ export async function notifyNewComment(input: {
         issueKey: input.issue.issueKey,
         issueTitle: input.issue.issueTitle,
         projectName: input.issue.projectName,
-        body,
+        body: preview(input.body),
         url: input.issue.url,
       }),
     );
   }
+}
+
+/**
+ * An edit that ADDS a mention notifies the person it added -- tagging someone
+ * you forgot is the ordinary way this happens, and an edit is the only way to
+ * do it once a comment is posted.
+ *
+ * Only the difference is mailed. Fixing a typo in a comment that already tagged
+ * three people must not tag them again, which is the failure mode that makes
+ * people mute a product's mail.
+ */
+export async function notifyCommentEdited(input: {
+  organizationId: string;
+  actorId: string;
+  actorName: string;
+  previousBody: string;
+  body: string;
+  issue: IssueContext;
+}): Promise<void> {
+  const members = await orgMembers(input.organizationId);
+  const known = new Set(mentionedIds(input.previousBody, members));
+  const added = mentionedIds(input.body, members).filter((id) => !known.has(id));
+  if (added.length === 0) return;
+
+  const targets = await recipients(added, input.actorId, 'notifyComments');
+  for (const target of targets) queueMention(target, input);
 }
 
 /* -------------------------------------------------------------------------- */

@@ -357,6 +357,18 @@ const RENDERABLE = [
     true,
   ],
   [
+    'MentionEmail',
+    templates.MentionEmail({
+      actorName: 'Dana',
+      issueKey: 'ENG-42',
+      issueTitle: 'Title',
+      projectName: 'Eng',
+      body: '@Sam Okoro have a look?',
+      url: LINK,
+    }),
+    true,
+  ],
+  [
     'McpTokenCreatedEmail',
     templates.McpTokenCreatedEmail({ name: 'Dana', tokensUrl: LINK }),
     true,

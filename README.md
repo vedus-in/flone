@@ -10,18 +10,19 @@ A small, multi-tenant Kanban application. People sign up with an email address a
 - **Users** — register, sign in, sign out. Name, email, and password; nothing else. Registering sends a confirmation link, and an account cannot sign in until the address is confirmed.
 - **Password reset** — "Forgot your password?" on the sign-in form. The emailed link is single use, expires in an hour, and completing a reset signs out every other session, MCP tokens included.
 - **Memberships** — `OWNER`, `ADMIN`, and `MEMBER` roles. Owners and admins can add someone by email, change roles, and remove members. If the address has no account yet it gets an invitation instead, valid for 7 days; pending invitations can be resent or revoked from the organization's settings.
-- **Email notifications** — when an issue is assigned to you, when someone comments on an issue you are involved in, and when you are added to an organization. Each is a separate switch on `/account`. Security messages (password changed, MCP token created) are always sent.
+- **Email notifications** — when an issue is assigned to you, when someone comments on an issue you are involved in, when a comment mentions you, and when you are added to an organization. Each is a separate switch on `/account`. Security messages (password changed, MCP token created) are always sent.
 - **Projects** — many per organization, with a name, an uppercase key (`ENG`, `WEB`), and an optional description.
 - **Boards** — many per project. Every new board is seeded with the three columns `To Do`, `In Progress`, `Done`.
 - **Tickets** — title, optional description, a per-board sequential number, an optional assignee. Moved between columns and reordered within a column using buttons on the card.
-- **Comments** — plain-text comments on a ticket. You can edit and delete your own; admins and owners can moderate any.
+- **Comments** — Markdown comments on a ticket, edited in place: press Edit and the comment itself becomes the editor, Ctrl/Cmd+Enter or Save commits, Escape reverts. You can edit and delete your own; admins and owners can moderate any.
+- **@mentions** — type `@` in a comment to tag any member of the organization, and they get an email about it. The name is stored as plain text in the body, so who was tagged is re-derived from the comment itself — including after an edit, which mails only the people it newly named.
 - **MCP** — one authenticated endpoint (`/api/mcp`) exposing the whole application to an AI assistant: organizations, members, projects, boards, tickets, comments and site administration. See [MCP access](#mcp-access).
 
 ### Not included, on purpose
 
-File uploads, in-app notifications, password change while signed in (reset it instead), OAuth/SSO, MFA, @mentions, due-date reminders, digest emails, labels, filtering, activity feeds, realtime/websockets, an admin panel, billing, a dark-mode toggle, i18n, analytics, a rich-text editor, avatars, and any public REST/JSON API — `/api/mcp` is the only route handler, it speaks MCP rather than REST, and it is closed to anyone without a session token. Board columns are fixed at three and cannot be added, renamed, or deleted.
+File uploads, in-app notifications, password change while signed in (reset it instead), OAuth/SSO, MFA, digest emails, labels, filtering, activity feeds, realtime/websockets, an admin panel, billing, a dark-mode toggle, i18n, analytics, a rich-text editor, avatars, and any public REST/JSON API — `/api/mcp` is the only route handler, it speaks MCP rather than REST, and it is closed to anyone without a session token. Board columns are fixed at three and cannot be added, renamed, or deleted.
 
-Reminders and digests are absent for one shared reason: both need a scheduler, and the app deliberately has none — cycles are generated lazily on read so that nothing has to run on a timer.
+Digests are absent because they need a scheduler on a timer for something nobody asked to be woken by; reminders, which people do ask for, have one.
 
 ## Stack
 
@@ -90,6 +91,7 @@ Register an account at `/register`, and you will be sent straight to the organiz
 | `bun run email:dev` | react-email's preview server for the templates in `src/emails/`. |
 | `bun run check:email` | Asserts the transport and templates. The one-time-token checks need a reachable database and are skipped, not failed, without one. |
 | `bun run check:markdown` | Asserts what the comment renderer does with hostile input: raw HTML stays inert, `javascript:` links are dropped. |
+| `bun run check:mentions` | Asserts the @mention tokenizer — who a body tags, who it must not (`dana@acme.com`, `@Dan`), and that the highlight and the email agree. |
 
 ## MCP access
 

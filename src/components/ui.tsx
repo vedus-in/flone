@@ -1,10 +1,17 @@
-import { Children, Fragment, type HTMLAttributes, type ReactNode } from 'react';
+import {
+  Children,
+  Fragment,
+  type ComponentProps,
+  type HTMLAttributes,
+  type ReactNode,
+} from 'react';
 import NextLink from 'next/link';
 import Markdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { Badge as UntitledBadge } from '@/components/base/badges/badges';
 import { Label } from '@/components/base/input/label';
+import { remarkMentions } from '@/lib/mentions';
 import { cx } from '@/lib/utils/cx';
 
 /**
@@ -280,11 +287,27 @@ export function FormError({
  *
  * The tags come out of the parser, so they cannot carry Tailwind classes at a
  * call site; the `markdown` utility in `globals.css` styles them.
+ *
+ * `mentions` is the list of names a `@mention` may name -- the organization's
+ * members. Passing it highlights them; leaving it out renders the text exactly
+ * as before. It is presentation only: `notifyNewComment` re-derives the same
+ * set server-side from the same tokenizer.
  */
-export function Prose({ children, className }: { children: string; className?: string }) {
+export function Prose({
+  children,
+  className,
+  mentions,
+}: {
+  children: string;
+  className?: string;
+  mentions?: readonly string[];
+}) {
+  const plugins: ComponentProps<typeof Markdown>['remarkPlugins'] = [remarkGfm, remarkBreaks];
+  if (mentions?.length) plugins.push(remarkMentions(mentions));
+
   return (
     <div className={cx('markdown text-sm leading-relaxed', className)}>
-      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{children}</Markdown>
+      <Markdown remarkPlugins={plugins}>{children}</Markdown>
     </div>
   );
 }

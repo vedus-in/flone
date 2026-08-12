@@ -30,6 +30,13 @@ filtering · activity feeds · websockets · realtime · drag-and-drop · admin 
 dark-mode toggle · i18n · analytics · markdown/rich text rendering · avatars · REST/JSON API ·
 route handlers (`route.ts`) · `middleware.ts` · tests beyond what is explicitly asked for.
 
+> **AMENDED 2026-08-12.** @mentions are off this list. A comment body may name any member of
+> the organization as the literal text `@Their Name`, which is highlighted on read and mails
+> that person — gated by the existing `notifyComments` switch, so no new preference and no
+> migration. There is still no mention table and no id in the body: `src/lib/mentions.ts`
+> re-derives who was tagged from the stored text, so the highlight and the email cannot
+> disagree. The input remains a plain `<textarea>`; the `@` list only types the name for you.
+>
 > **AMENDED 2026-08-12.** Markdown rendering is off this list for descriptions and comments —
 > read-side only, and no rich-text editor: the input is still a plain `<textarea>`. See §4.9.
 >
@@ -1061,6 +1068,13 @@ but left the door open for optimistic comment appends. **Resolved: cut that too.
 the only pending primitive; there are exactly three `'use client'` files. Intercepting routes for a
 ticket modal are also cut — they add `@modal` slots, `default.tsx`, and a soft/hard-navigation
 divergence that breaks progressive enhancement, in exchange for one URL segment.
+
+> **AMENDED 2026-08-12.** `useTransition` is back for the CLICK-TO-EDIT surfaces only — the
+> title and description editors and the property pickers in `properties.tsx`, and the comment
+> editor and delete in `comments.tsx`. Not for optimism: React 19 resets a `<form action>` to
+> its defaults once the action settles, so an inline editor built on one visibly snaps back to
+> the stale text on every save. Everything that posts and clears — the comment composer, every
+> settings form — is still a `<form action>` with `useFormStatus`, and `useOptimistic` stays cut.
 
 ### 7.12 Password minimum length: 10 vs. 12 — **12**
 
