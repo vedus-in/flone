@@ -1,15 +1,17 @@
 import 'server-only';
 
-import { Priority, Role } from '@prisma/client';
+import { Priority, ReminderRepeat, Role } from '@prisma/client';
 
 import {
   AuthzError,
   boardPath,
+  challengesPath,
   cyclesPath,
   isNextControlFlowError,
   issuesPath,
   orgPath,
   projectPath,
+  remindersPath,
   requireAdmin,
   requireBoard,
   requireOrgBySlug,
@@ -20,12 +22,15 @@ import {
   requireTicket,
   requireUser,
   ticketPath,
+  viewsPath,
   type BoardCtx,
   type TicketCtx,
 } from '@/lib/authz';
 import { prisma } from '@/lib/db';
+import { CHALLENGE_COLUMNS, columnForStateType } from '@/lib/challenges';
 import { ensureCycles } from '@/lib/cycles';
 import { listNavTree } from '@/lib/nav';
+import { REPEAT_LABEL, formatWhen } from '@/lib/reminder-math';
 import type { ActionResult } from '@/lib/result';
 import { getAppSettings, isRegistrationOpen } from '@/lib/settings';
 import { listStates } from '@/lib/states';
@@ -44,11 +49,22 @@ import {
 } from '@/app/(app)/orgs/[orgSlug]/settings/actions';
 import {
   createBoard,
+  createSavedView,
   deleteBoard,
   deleteProject,
+  deleteSavedView,
   renameBoard,
   updateProject,
 } from '@/app/(app)/orgs/[orgSlug]/[workspaceSlug]/[projectKey]/actions';
+import {
+  addChallenge,
+  moveChallenge,
+  removeChallenge,
+} from '@/app/(app)/orgs/[orgSlug]/challenges/actions';
+import {
+  createReminder,
+  deleteReminder,
+} from '@/app/(app)/orgs/[orgSlug]/reminders/actions';
 import {
   createIssue,
   deleteIssue,
@@ -72,7 +88,8 @@ import {
  * The MCP tool surface (transport lives in `src/app/api/mcp/route.ts`).
  *
  * It covers the whole application: organizations, members, projects, workflow
- * states, labels, cycles, boards, issues, comments and site administration.
+ * states, labels, cycles, boards, issues, comments, the per-person Daily
+ * Challenges board, scheduled reminders, saved views and site administration.
  * Everything the web UI can do, a model can do — under exactly the same rules.
  *
  * THIS FILE ADDS NO AUTHORIZATION OF ITS OWN, and that is the point. Every read
@@ -378,6 +395,63 @@ function enumOf<T extends string>(values: readonly T[], label: string, value: st
 
 const PRIORITIES = Object.values(Priority);
 const ROLES = Object.values(Role);
+const REPEATS = Object.values(ReminderRepeat);
+const CHALLENGE_COLUMN_IDS = CHALLENGE_COLUMNS.map((column) => column.id);
+
+/**
+ * A reminder's recipient, addressed the way a model has one to hand: an email,
+ * a userId, or nothing at all for the caller themselves.
+ *
+ * Resolved through the MEMBERSHIP table of an organization the caller has
+ * already been authorized for, so an address outside it is simply not found --
+ * this cannot be turned into a way to discover who holds an account elsewhere.
+ * `createReminder` re-checks membership with `assertOrgMember` regardless; this
+ * only spares the caller having to look an id up first.
+ */
+async function resolveRecipient(
+  organizationId: string,
+  needle: string | undefined,
+): Promise<string> {
+  const user = await requireUser();
+  if (needle === undefined || needle.trim() === '') return user.id;
+
+  const wanted = needle.trim();
+  const membership = await prisma.membership.findFirst({
+    where: {
+      organizationId,
+      OR: [{ userId: wanted }, { user: { email: wanted.toLowerCase() } }],
+    },
+    select: { userId: true },
+  });
+  if (!membership) {
+    throw new ToolError(
+      `No member "${needle}" in this organization. Use get_organization to list who is in it.`,
+    );
+  }
+  return membership.userId;
+}
+
+/**
+ * The wall clock `createReminder` expects: `YYYY-MM-DDTHH:mm`.
+ *
+ * Models reach for a full ISO instant far more often than for this, so a
+ * trailing `:ss` and a trailing `Z` are trimmed rather than rejected. Both are
+ * safe to drop: seconds are below a reminder's resolution, and `Z` agrees with
+ * the UTC default that `tzOffsetMinutes` already carries. Anything else is an
+ * error the model can act on rather than a time silently landing elsewhere.
+ */
+function reminderWallClock(raw: string): string {
+  // Captured rather than trimmed: a bare `2026-08-20T09:00` ends in `:00` too,
+  // so stripping a trailing `:\d\d` would eat the MINUTES and schedule the
+  // reminder for midnight.
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2})?(?:\.\d+)?Z?$/.exec(raw.trim());
+  if (!match) {
+    throw new ToolError(
+      `"runAt" must look like 2026-08-20T09:00 (a wall clock, not an instant). Got "${raw}".`,
+    );
+  }
+  return `${match[1]}T${match[2]}`;
+}
 
 function boardSummary(ctx: BoardCtx) {
   return {
@@ -1663,6 +1737,465 @@ export const TOOLS: Tool[] = [
       const commentId = requiredId(args, 'commentId');
       must(await deleteComment(null, form({ commentId })));
       return { ok: true, deleted: commentId };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Daily Challenges                                                    */
+  /*                                                                     */
+  /* PRIVATE BY CONSTRUCTION. Every query below is keyed on the session's */
+  /* own user id, so there is no argument anywhere in this section that   */
+  /* could name another person's board -- no filter to forget and no role */
+  /* to check. Picking is per-person; the status a move writes is not.    */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'list_challenges',
+    title: 'Read your Daily Challenges board',
+    description:
+      "The signed-in user's own cherry-picked board for one organization, grouped by column. Picks are private: this is never anyone else's board.",
+    inputSchema: {
+      type: 'object',
+      properties: { orgSlug: ORG_SLUG },
+      required: ['orgSlug'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    run: async (args) => {
+      const ctx = await requireOrgBySlug(requiredString(args, 'orgSlug'));
+
+      const picks = await prisma.challengePick.findMany({
+        where: {
+          userId: ctx.user.id,
+          ticket: { project: { organizationId: ctx.org.id } },
+        },
+        orderBy: [{ ticket: { priority: 'desc' } }, { ticket: { updatedAt: 'desc' } }, { id: 'asc' }],
+        select: {
+          ticket: {
+            select: {
+              id: true,
+              number: true,
+              title: true,
+              priority: true,
+              state: { select: { name: true, type: true } },
+              project: {
+                select: { name: true, key: true, workspace: { select: { slug: true } } },
+              },
+            },
+          },
+        },
+      });
+
+      const columns = Object.fromEntries(
+        CHALLENGE_COLUMNS.map((column) => [column.id, [] as unknown[]]),
+      );
+
+      for (const { ticket } of picks) {
+        columns[columnForStateType(ticket.state.type)].push({
+          ticketId: ticket.id,
+          ref: `${ticket.project.key}-${ticket.number}`,
+          title: ticket.title,
+          status: ticket.state.name,
+          priority: ticket.priority,
+          project: ticket.project.name,
+          url: ticketPath(
+            ctx.org,
+            {
+              id: '',
+              name: ticket.project.name,
+              key: ticket.project.key,
+              description: null,
+              workspaceSlug: ticket.project.workspace.slug,
+            },
+            ticket.number,
+          ),
+        });
+      }
+
+      return {
+        organization: ctx.org.name,
+        url: challengesPath(ctx.org),
+        // Named so a caller knows what each column MEANS before moving a card
+        // into it -- in particular that "completed" writes no status at all.
+        columns: CHALLENGE_COLUMNS.map((column) => ({
+          id: column.id,
+          name: column.name,
+          meaning: column.hint,
+          setsStatus: column.sets,
+          issues: columns[column.id],
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'add_challenge',
+    title: 'Pick up an issue',
+    description:
+      "Put an issue on the signed-in user's own Daily Challenges board. Writes nothing to the issue, so nobody else's view changes. Picking the same issue twice is a no-op.",
+    inputSchema: {
+      type: 'object',
+      properties: { ticketId: TICKET_ID },
+      required: ['ticketId'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      const ctx = await requireTicketArg(args);
+      must(await addChallenge({ ticketId: ctx.ticket.id }));
+      return {
+        ok: true,
+        ticketId: ctx.ticket.id,
+        ref: `${ctx.project.key}-${ctx.ticket.number}`,
+        url: challengesPath(ctx.org),
+      };
+    },
+  },
+
+  {
+    name: 'remove_challenge',
+    title: 'Drop an issue from your board',
+    description:
+      "Take an issue off the signed-in user's own board. Writes nothing to the issue itself — its status is untouched.",
+    inputSchema: {
+      type: 'object',
+      properties: { ticketId: TICKET_ID },
+      required: ['ticketId'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      const ctx = await requireTicketArg(args);
+      must(await removeChallenge({ ticketId: ctx.ticket.id }));
+      return { ok: true, ticketId: ctx.ticket.id, removed: true };
+    },
+  },
+
+  {
+    name: 'move_challenge',
+    title: 'Move a card on your board',
+    description:
+      'Move a picked issue between columns. To-do, In Progress and Done change the issue\'s REAL status, visible to everyone; "completed" writes no status at all and only clears the card from your own board.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ticketId: TICKET_ID,
+        column: {
+          ...STRING,
+          enum: CHALLENGE_COLUMN_IDS,
+          description: 'todo, in-progress, done, or completed (clears it from your board only).',
+        },
+      },
+      required: ['ticketId', 'column'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireTicketArg(args);
+      const column = requiredString(args, 'column').trim().toLowerCase();
+      if (!(CHALLENGE_COLUMN_IDS as readonly string[]).includes(column)) {
+        throw new ToolError(`"column" must be one of: ${CHALLENGE_COLUMN_IDS.join(', ')}.`);
+      }
+      must(await moveChallenge({ ticketId: ctx.ticket.id, column }));
+      return { ok: true, ticketId: ctx.ticket.id, column };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Reminders                                                           */
+  /*                                                                     */
+  /* Scheduled email, at organization or project scope, addressed to any */
+  /* member. There is no browser here to supply a timezone, so a wall    */
+  /* clock is read as UTC unless `tzOffsetMinutes` says otherwise.       */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'list_reminders',
+    title: 'List reminders',
+    description:
+      'Every scheduled reminder in one organization — what it says, when it next sends, how often, and who receives it. Everyone in the organization can see all of them.',
+    inputSchema: {
+      type: 'object',
+      properties: { orgSlug: ORG_SLUG },
+      required: ['orgSlug'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    run: async (args) => {
+      const ctx = await requireOrgBySlug(requiredString(args, 'orgSlug'));
+
+      const reminders = await prisma.reminder.findMany({
+        where: { organizationId: ctx.org.id },
+        orderBy: [{ nextRunAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }],
+        select: {
+          id: true,
+          title: true,
+          repeat: true,
+          nextRunAt: true,
+          lastSentAt: true,
+          tzOffsetMinutes: true,
+          project: { select: { name: true, key: true } },
+          recipient: { select: { id: true, name: true, email: true, emailVerified: true } },
+          createdBy: { select: { name: true } },
+        },
+      });
+
+      return {
+        organization: ctx.org.name,
+        url: remindersPath(ctx.org),
+        reminders: reminders.map((reminder) => ({
+          reminderId: reminder.id,
+          title: reminder.title,
+          repeat: reminder.repeat,
+          repeatLabel: REPEAT_LABEL[reminder.repeat],
+          // Both: the instant is what to reason about, the label is what the
+          // recipient will actually read in the message.
+          nextRunAt: reminder.nextRunAt?.toISOString() ?? null,
+          nextRunLocal: reminder.nextRunAt
+            ? formatWhen(reminder.nextRunAt, reminder.tzOffsetMinutes)
+            : null,
+          lastSentAt: reminder.lastSentAt?.toISOString() ?? null,
+          scope: reminder.project ? 'project' : 'organization',
+          projectKey: reminder.project?.key ?? null,
+          recipient: reminder.recipient.name,
+          recipientEmail: reminder.recipient.email,
+          // The feature's one silent failure: scheduled, advanced, never sent.
+          deliverable: reminder.recipient.emailVerified !== null,
+          setBy: reminder.createdBy.name,
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'create_reminder',
+    title: 'Schedule a reminder',
+    description:
+      'Schedule an email reminder for yourself or a teammate, about the whole organization or one project. `runAt` is a wall clock (2026-08-20T09:00), read as UTC unless `tzOffsetMinutes` is given. It must be in the future. Any member may schedule one, for anyone in the organization.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        title: { ...STRING, description: 'What to be reminded about. Becomes the subject line.' },
+        runAt: { ...STRING, description: 'First send, as 2026-08-20T09:00.' },
+        repeat: {
+          ...STRING,
+          enum: REPEATS,
+          description: 'ONCE, DAILY or WEEKLY. Defaults to ONCE.',
+        },
+        projectKey: {
+          ...STRING,
+          description: 'Scope it to one project. Omit for the whole organization.',
+        },
+        recipient: {
+          ...STRING,
+          description: "Email or userId of a member. Omit to remind yourself.",
+        },
+        tzOffsetMinutes: {
+          type: 'integer',
+          description:
+            "The recipient's UTC offset in minutes as getTimezoneOffset() reports it — Berlin in summer is -120. Defaults to 0, i.e. runAt is UTC.",
+        },
+      },
+      required: ['orgSlug', 'title', 'runAt'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireOrgBySlug(requiredString(args, 'orgSlug'));
+
+      const repeat = (optionalString(args, 'repeat') ?? ReminderRepeat.ONCE).toUpperCase();
+      if (!(REPEATS as string[]).includes(repeat)) {
+        throw new ToolError(`"repeat" must be one of: ${REPEATS.join(', ')}.`);
+      }
+
+      const projectKey = optionalString(args, 'projectKey');
+      // Resolved through the membership-scoped loader, so a key from another
+      // tenant is not found rather than silently scoped to the wrong project.
+      const scope = projectKey
+        ? (await requireProjectByKeyInOrg(ctx.org.slug, projectKey.toUpperCase())).project.id
+        : 'ORG';
+
+      const recipientId = await resolveRecipient(ctx.org.id, optionalString(args, 'recipient'));
+
+      // Signed, so a negative offset survives `optionalInt`'s non-negative rule.
+      const rawOffset = args.tzOffsetMinutes;
+      if (rawOffset !== undefined && rawOffset !== null && !Number.isInteger(rawOffset)) {
+        throw new ToolError('"tzOffsetMinutes" must be a whole number of minutes.');
+      }
+      const tzOffsetMinutes = typeof rawOffset === 'number' ? rawOffset : 0;
+
+      must(
+        await createReminder(
+          null,
+          form({
+            orgSlug: ctx.org.slug,
+            title: requiredString(args, 'title'),
+            runAt: reminderWallClock(requiredString(args, 'runAt')),
+            repeat,
+            scope,
+            recipientId,
+            tzOffsetMinutes: String(tzOffsetMinutes),
+          }),
+        ),
+      );
+
+      return { ok: true, url: remindersPath(ctx.org) };
+    },
+  },
+
+  {
+    name: 'delete_reminder',
+    title: 'Delete a reminder',
+    description:
+      'Stop a reminder. Whoever set it, whoever receives it, and any admin may delete one. There is no edit — delete and schedule another.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        reminderId: { ...STRING, description: 'From list_reminders.' },
+      },
+      required: ['orgSlug', 'reminderId'],
+      additionalProperties: false,
+    },
+    annotations: { destructiveHint: true },
+    run: async (args) => {
+      const orgSlug = requiredString(args, 'orgSlug');
+      const reminderId = requiredId(args, 'reminderId');
+      must(await deleteReminder(null, form({ orgSlug, reminderId })));
+      return { ok: true, deleted: reminderId };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Saved views                                                         */
+  /*                                                                     */
+  /* A view is a stored Issues-list query string and nothing more, so    */
+  /* there is no second filter language here either -- `query` is the    */
+  /* same thing search_tickets filters by, spelled as a URL.             */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'list_views',
+    title: 'List saved views',
+    description:
+      "A project's saved issue filters: the shared ones, plus the signed-in user's own private ones. Never anyone else's private view.",
+    inputSchema: {
+      type: 'object',
+      properties: { orgSlug: ORG_SLUG, projectKey: PROJECT_KEY },
+      required: ['orgSlug', 'projectKey'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey'),
+      );
+
+      const views = await prisma.savedView.findMany({
+        where: {
+          projectId: ctx.project.id,
+          // Shared, or your own. The same clause the views page uses.
+          OR: [{ isShared: true }, { createdById: ctx.user.id }],
+        },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          name: true,
+          query: true,
+          isShared: true,
+          createdBy: { select: { name: true } },
+        },
+      });
+
+      return {
+        project: ctx.project.name,
+        projectKey: ctx.project.key,
+        url: viewsPath(ctx.org, ctx.project),
+        views: views.map((view) => ({
+          viewId: view.id,
+          name: view.name,
+          query: view.query,
+          shared: view.isShared,
+          createdBy: view.createdBy.name,
+          url: `${issuesPath(ctx.org, ctx.project)}${view.query ? `?${view.query}` : ''}`,
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'create_view',
+    title: 'Save an issue filter',
+    description:
+      'Save an Issues-list filter under a name. `query` is the query string only — e.g. "tab=active&assignee=me" — with no leading "?" and no path. Any member may save one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        name: STRING,
+        query: {
+          ...STRING,
+          description: 'The Issues-list query string, e.g. tab=active&priority=HIGH.',
+        },
+        shared: {
+          type: 'boolean',
+          description: 'Visible to everyone in the project. Defaults to true.',
+        },
+      },
+      required: ['orgSlug', 'projectKey', 'name', 'query'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey'),
+      );
+
+      const shared = args.shared === undefined ? true : requiredBoolean(args, 'shared');
+
+      must(
+        await createSavedView(
+          null,
+          form({
+            projectId: ctx.project.id,
+            name: requiredString(args, 'name'),
+            query: requiredString(args, 'query'),
+            // The action reads a checkbox: present-and-"on" is true, absent is
+            // false. There is no "off" to send.
+            ...(shared ? { isShared: 'on' } : {}),
+          }),
+        ),
+      );
+
+      return { ok: true, shared, url: viewsPath(ctx.org, ctx.project) };
+    },
+  },
+
+  {
+    name: 'delete_view',
+    title: 'Delete a saved view',
+    description:
+      'Remove a saved filter. Your own are yours to delete; anyone else\'s needs ADMIN.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        viewId: { ...STRING, description: 'From list_views.' },
+      },
+      required: ['orgSlug', 'projectKey', 'viewId'],
+      additionalProperties: false,
+    },
+    annotations: { destructiveHint: true },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey'),
+      );
+      const viewId = requiredId(args, 'viewId');
+      must(await deleteSavedView(null, form({ projectId: ctx.project.id, viewId })));
+      return { ok: true, deleted: viewId };
     },
   },
 

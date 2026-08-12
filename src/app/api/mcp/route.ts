@@ -37,9 +37,11 @@ const SERVER_INFO = {
 };
 
 const INSTRUCTIONS =
-  'Boards, tickets and comments for the signed-in user. Call list_boards first to get ids, ' +
-  'then get_board or search_tickets. Ticket ids are opaque: never invent one. ' +
-  'Every call acts as the person who issued the token and is limited to their organizations.';
+  'Boards, tickets, comments, reminders, saved views and the Daily Challenges board for the ' +
+  'signed-in user. Call list_boards first to get ids, then get_board or search_tickets. ' +
+  'Ticket ids are opaque: never invent one, though a ref like ENG-12 is accepted anywhere ' +
+  'a ticketId is. Every call acts as the person who issued the token and is limited to ' +
+  'their organizations.';
 
 type JsonRpcId = string | number | null;
 
