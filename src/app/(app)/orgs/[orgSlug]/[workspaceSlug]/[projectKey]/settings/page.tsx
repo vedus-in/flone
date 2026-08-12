@@ -8,7 +8,6 @@ import { prisma } from '@/lib/db';
 import { COLOR_TOKENS, colorClass } from '@/lib/model';
 import { listStates } from '@/lib/states';
 import { cx } from '@/lib/utils/cx';
-import { WORKSPACE_ORDER } from '@/lib/validation';
 
 import { ActionForm } from '../../../../../action-form';
 import {
@@ -17,7 +16,6 @@ import {
   deleteLabel,
   deleteProject,
   deleteState,
-  moveProjectToWorkspace,
   moveState,
   updateCycleConfig,
   updateLabel,
@@ -117,7 +115,7 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
   // A 404, not a 403: the same shape every other refusal in this app takes.
   if (!atLeast(ctx.role, Role.ADMIN)) notFound();
 
-  const [states, labels, cadence, counts, workspaces] = await Promise.all([
+  const [states, labels, cadence, counts] = await Promise.all([
     listStates(ctx.project.id),
     prisma.label.findMany({
       where: { projectId: ctx.project.id },
@@ -137,16 +135,6 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
       by: ['stateId'],
       where: { projectId: ctx.project.id },
       _count: { _all: true },
-    }),
-    // Move-to destinations. Scoped to the org from the upward walk, with the
-    // membership predicate carried along so the read is safe in isolation.
-    prisma.workspace.findMany({
-      where: {
-        organizationId: ctx.org.id,
-        organization: { memberships: { some: { userId: ctx.user.id } } },
-      },
-      orderBy: WORKSPACE_ORDER,
-      select: { id: true, name: true, slug: true },
     }),
   ]);
 
@@ -195,45 +183,6 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
 
             <div className="flex">
               <SubmitButton color="secondary">Save</SubmitButton>
-            </div>
-          </ActionForm>
-        </Card>
-
-        {/* Its own form: moving changes the project's URL and so ends in a
-            redirect, which a shared submit button could not express. */}
-        <Card className="gap-4 p-5">
-          <ActionForm
-            action={moveProjectToWorkspace}
-            className="flex flex-col gap-4"
-            aria-label="Move project to another workspace"
-          >
-            <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-            <input type="hidden" name="projectKey" value={ctx.project.key} />
-
-            <Field
-              htmlFor="project-workspace"
-              label="Workspace"
-              hint="Changes this project's URL and every link under it. Old links keep working."
-              className="max-w-md"
-            >
-              <select
-                id="project-workspace"
-                name="workspaceSlug"
-                defaultValue={ctx.workspace.slug}
-                className={SELECT}
-              >
-                {workspaces.map((workspace) => (
-                  <option key={workspace.id} value={workspace.slug}>
-                    {workspace.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <div className="flex">
-              <SubmitButton color="secondary" pendingLabel="Moving...">
-                Move project
-              </SubmitButton>
             </div>
           </ActionForm>
         </Card>

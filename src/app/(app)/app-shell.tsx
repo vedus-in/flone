@@ -14,20 +14,25 @@
  * look. The active row is a neutral wash rather than an accent tint -- colour in
  * the sidebar competes with colour on the board.
  *
- * A client module for exactly four reasons: the drawer needs open/closed state,
- * the sections and the project tree need expand/collapse state, and the active
- * item is derived from `usePathname()`. Everything it renders is data the SERVER
- * resolved; it performs no data access and makes no authorization decision.
- * `@/lib/authz` is `server-only`, so hrefs arrive already built.
+ * A client module for exactly five reasons: the drawer needs open/closed state,
+ * the sections and the project tree need expand/collapse state, the active item
+ * is derived from `usePathname()`, and dragging a project onto another
+ * workspace is a pointer gesture. Everything it renders is data the SERVER
+ * resolved; it performs no data access, and the one role check here hides an
+ * affordance rather than guarding anything -- `moveProjectToWorkspace` proves
+ * membership and ADMIN again on its own. `@/lib/authz` is `server-only`, so
+ * hrefs arrive already built.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Button as AriaButton } from 'react-aria-components';
 import { Dropdown } from '@/components/base/dropdown/dropdown';
+import type { ActionResult } from '@/lib/result';
 
 import { signOut } from './actions';
+import { moveProjectToWorkspace } from './orgs/[orgSlug]/[workspaceSlug]/[projectKey]/actions';
 
 /**
  * The fixed destinations under a project. Built on the SERVER (`@/lib/authz` is
@@ -294,6 +299,44 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
     });
   }
 
+  /*
+   * Regrouping a project: drag its row onto another workspace.
+   *
+   * Native HTML5 drag rather than the board's dnd-kit setup -- this is one row
+   * onto one row, and the sidebar already carries both ids, so there is nothing
+   * a sensor library would add.
+   *
+   * ponytail: no touch and no keyboard path -- native drag has neither, and the
+   * settings dropdown this replaced was the accessible one. Give the workspace
+   * row a "Move project here" menu if either is ever wanted.
+   *
+   * Gated on ADMIN so a member is not shown an affordance the action will
+   * refuse. The server re-proves it; this only hides the handle.
+   */
+  const canArrange = activeOrg?.role === 'OWNER' || activeOrg?.role === 'ADMIN';
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+
+  function dropProject(workspaceId: string) {
+    const projectId = dragging;
+    setDragging(null);
+    setDropTarget(null);
+    if (!projectId) return;
+    startTransition(async () => {
+      // `follow` only when the page being read is the one whose URL is about to
+      // change: the action answers with a redirect, and a redirect resolves the
+      // call with nothing, hence the widened type.
+      const result: ActionResult | undefined = await moveProjectToWorkspace({
+        projectId,
+        workspaceId,
+        follow: activeProject?.id === projectId,
+      });
+      setMoveError(result && !result.ok ? result.error : null);
+    });
+  }
+
   const sidebar = (
     <div className="flex h-full flex-col">
       {/* Workspace switcher */}
@@ -422,14 +465,41 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                 />
               }
             >
+              {/* A refused move -- the row snaps back on its own when the
+                  layout revalidates, so this only has to say why. */}
+              {moveError ? (
+                <li className="px-2 py-1 text-[0.6875rem] text-error-primary">{moveError}</li>
+              ) : null}
               {activeOrg.workspaces.length === 0 ? (
                 <li className="px-2 py-1 text-[0.8125rem] text-tertiary">No workspaces yet</li>
               ) : (
                 activeOrg.workspaces.map((workspace) => {
                   const wsOpen = expanded.has(workspace.id);
                   const wsActive = pathname === workspace.href;
+                  // The whole group is the target, not just its header row, so
+                  // a drop anywhere in an expanded workspace lands.
+                  const owns = workspace.projects.some((project) => project.id === dragging);
                   return (
-                    <li key={workspace.id}>
+                    <li
+                      key={workspace.id}
+                      // Without preventDefault the browser refuses the drop, so
+                      // this is also what makes the source workspace inert.
+                      onDragOver={(event) => {
+                        if (!dragging || owns) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                        setDropTarget(workspace.id);
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        dropProject(workspace.id);
+                      }}
+                      className={cx(
+                        'rounded-md',
+                        dropTarget === workspace.id &&
+                          'outline-2 outline-offset-[-2px] outline-focus-ring',
+                      )}
+                    >
                       <div
                         className={cx(
                           'flex h-7 items-center gap-0.5 rounded-md pe-2 ps-0.5 transition-colors',
@@ -478,9 +548,22 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                   return (
                     <li key={project.id}>
                       <div
+                        draggable={canArrange}
+                        onDragStart={(event) => {
+                          // Firefox will not start a drag with an empty payload.
+                          event.dataTransfer.setData('text/plain', project.key);
+                          event.dataTransfer.effectAllowed = 'move';
+                          setDragging(project.id);
+                        }}
+                        onDragEnd={() => {
+                          setDragging(null);
+                          setDropTarget(null);
+                        }}
+                        title={canArrange ? 'Drag onto a workspace to move it' : undefined}
                         className={cx(
                           'flex h-7 items-center gap-0.5 rounded-md pe-2 ps-0.5 transition-colors',
                           isActive ? 'bg-secondary' : 'hover:bg-secondary',
+                          dragging === project.id && 'opacity-50',
                         )}
                       >
                         <button
@@ -499,6 +582,9 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                           href={project.href}
                           onClick={closeDrawer}
                           aria-current={isActive ? 'page' : undefined}
+                          // Otherwise the anchor drags its own URL instead of
+                          // the row.
+                          draggable={false}
                           className={cx(
                             'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
                             isActive ? 'font-medium text-primary' : 'text-tertiary',

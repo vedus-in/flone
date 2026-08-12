@@ -34,12 +34,11 @@ import {
   requireRole,
   requireStateInProject,
   requireUser,
-  requireWorkspaceBySlug,
   runAction,
   viewsPath,
   workspacePath,
 } from '@/lib/authz';
-import { fail, ok, type ActionResult } from '@/lib/result';
+import { ERRORS, fail, ok, type ActionResult } from '@/lib/result';
 import { INVALID_INPUT, field, fieldErrorsOf, optionalField } from '@/lib/action-input';
 import {
   DEFAULT_STATES,
@@ -123,68 +122,67 @@ export async function updateProject(
 }
 
 const moveProjectSchema = z.object({
-  orgSlug: slugSchema,
-  projectKey: projectKeySchema,
-  workspaceSlug: slugSchema,
+  projectId: cuid,
+  workspaceId: cuid,
+  follow: z.boolean().optional(),
 });
 
 /**
- * Regroup a project into another workspace.
+ * Regroup a project into another workspace. Called by dragging its sidebar row
+ * onto a workspace, so it takes ids rather than the URL tuple -- the sidebar
+ * has both to hand and no path to parse.
  *
  * This changes the project's URL and the URL of every issue, board, cycle and
- * view under it, so it ends in a redirect rather than a quiet `ok()` -- leaving
- * the caller on a path that no longer resolves would read as the project having
- * been deleted. Old links keep working through the `/go` trampoline, which
- * resolves the key rather than the path.
+ * view under it. Only the viewer knows whether they are STANDING on one of
+ * those, so `follow` is theirs to set: without it a drag from elsewhere in the
+ * app quietly regroups the tree, and with it the page you are reading follows
+ * the project instead of 404ing, which would read as it having been deleted.
+ * Old links keep working through the `/go` trampoline, which resolves the key
+ * rather than the path.
  *
- * The destination workspace is resolved through `requireWorkspaceBySlug`, so a
- * slug naming another tenant's workspace is a NOT_FOUND, not a cross-tenant
- * move.
+ * The destination is looked up inside the organization the project's own
+ * upward walk yielded, so a workspace id from another tenant is simply absent.
  */
-export async function moveProjectToWorkspace(
-  _prev: ActionResult | null,
-  formData: FormData,
-): Promise<ActionResult> {
+export async function moveProjectToWorkspace(input: {
+  projectId: string;
+  workspaceId: string;
+  follow?: boolean;
+}): Promise<ActionResult> {
   const nav: { to?: string } = {};
 
   const result = await runAction(async () => {
     await requireUser();
 
-    const parsed = moveProjectSchema.safeParse({
-      orgSlug: formData.get('orgSlug'),
-      projectKey: formData.get('projectKey'),
-      workspaceSlug: formData.get('workspaceSlug'),
-    });
+    const parsed = moveProjectSchema.safeParse(input);
     if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
 
-    const ctx = await requireProjectByKeyInOrg(parsed.data.orgSlug, parsed.data.projectKey);
+    const ctx = await requireProject(parsed.data.projectId);
     requireRole(ctx, Role.ADMIN);
 
-    const destination = await requireWorkspaceBySlug(
-      parsed.data.orgSlug,
-      parsed.data.workspaceSlug,
-    );
-    requireRole(destination, Role.ADMIN);
+    if (parsed.data.workspaceId === ctx.workspace.id) return ok();
 
-    if (destination.workspace.id === ctx.workspace.id) return ok('Project updated.');
+    const destination = await prisma.workspace.findFirst({
+      where: { id: parsed.data.workspaceId, organizationId: ctx.org.id },
+      select: { id: true, name: true, slug: true },
+    });
+    if (!destination) return fail(ERRORS.NOT_FOUND);
 
     await prisma.project.updateMany({
       where: {
         id: ctx.project.id,
         organization: { memberships: { some: { userId: ctx.user.id } } },
       },
-      data: { workspaceId: destination.workspace.id },
+      data: { workspaceId: destination.id },
     });
 
     revalidatePath('/', 'layout');
     revalidatePath(orgPath(ctx.org));
     revalidatePath(workspacePath(ctx.org, ctx.workspace));
-    revalidatePath(workspacePath(ctx.org, destination.workspace));
-    nav.to = projectPath(ctx.org, {
-      ...ctx.project,
-      workspaceSlug: destination.workspace.slug,
-    });
-    return ok();
+    revalidatePath(workspacePath(ctx.org, destination));
+    if (parsed.data.follow) {
+      nav.to = projectPath(ctx.org, { ...ctx.project, workspaceSlug: destination.slug });
+    }
+    return ok(`Moved to ${destination.name}.`);
   });
 
   if (!result.ok) return result;
