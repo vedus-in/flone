@@ -238,10 +238,19 @@ function requiredBoolean(args: Args, key: string): boolean {
   return value;
 }
 
-/** FormData is the Server Action calling convention; these are its only inputs. */
-function form(values: Record<string, string>): FormData {
+/**
+ * FormData is the Server Action calling convention; these are its only inputs.
+ *
+ * An array value is APPENDED once per entry, because that is how a browser
+ * submits a repeated field -- a checkbox group, a multi-select -- and how
+ * `fieldList` on the other side expects to read it back.
+ */
+function form(values: Record<string, string | string[]>): FormData {
   const formData = new FormData();
-  for (const [key, value] of Object.entries(values)) formData.set(key, value);
+  for (const [key, value] of Object.entries(values)) {
+    if (Array.isArray(value)) for (const entry of value) formData.append(key, entry);
+    else formData.set(key, value);
+  }
   return formData;
 }
 
@@ -408,13 +417,7 @@ const CHALLENGE_COLUMN_IDS = CHALLENGE_COLUMNS.map((column) => column.id);
  * `createReminder` re-checks membership with `assertOrgMember` regardless; this
  * only spares the caller having to look an id up first.
  */
-async function resolveRecipient(
-  organizationId: string,
-  needle: string | undefined,
-): Promise<string> {
-  const user = await requireUser();
-  if (needle === undefined || needle.trim() === '') return user.id;
-
+async function resolveRecipient(organizationId: string, needle: string): Promise<string> {
   const wanted = needle.trim();
   const membership = await prisma.membership.findFirst({
     where: {
@@ -429,6 +432,34 @@ async function resolveRecipient(
     );
   }
   return membership.userId;
+}
+
+/**
+ * The recipient list, from either `recipients` (an array) or `recipient` (one),
+ * defaulting to the caller. Both spellings are accepted because the single form
+ * was published first and a client may already be calling it.
+ */
+async function resolveRecipients(organizationId: string, args: Args): Promise<string[]> {
+  const many = args.recipients;
+  if (many !== undefined && many !== null) {
+    if (!Array.isArray(many) || many.some((value) => typeof value !== 'string')) {
+      throw new ToolError('"recipients" must be an array of emails or userIds.');
+    }
+    const names = (many as string[]).map((value) => value.trim()).filter(Boolean);
+    if (names.length === 0) throw new ToolError('"recipients" must name at least one person.');
+    const ids = await Promise.all(names.map((name) => resolveRecipient(organizationId, name)));
+    // Two spellings of the same person -- an email and their userId -- must not
+    // become two identical reminders.
+    return [...new Set(ids)];
+  }
+
+  const one = optionalString(args, 'recipient');
+  if (one !== undefined && one.trim() !== '') {
+    return [await resolveRecipient(organizationId, one)];
+  }
+
+  const user = await requireUser();
+  return [user.id];
 }
 
 /**
@@ -1970,7 +2001,7 @@ export const TOOLS: Tool[] = [
     name: 'create_reminder',
     title: 'Schedule a reminder',
     description:
-      'Schedule an email reminder for yourself or a teammate, about the whole organization or one project. `runAt` is a wall clock (2026-08-20T09:00), read as UTC unless `tzOffsetMinutes` is given. It must be in the future. Any member may schedule one, for anyone in the organization.',
+      'Schedule an email reminder for yourself or any number of teammates, about the whole organization or one project. Each recipient gets their own reminder. `runAt` is a wall clock (2026-08-20T09:00), read as UTC unless `tzOffsetMinutes` is given. It must be in the future. Any member may schedule one, for anyone in the organization.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1986,9 +2017,15 @@ export const TOOLS: Tool[] = [
           ...STRING,
           description: 'Scope it to one project. Omit for the whole organization.',
         },
+        recipients: {
+          type: 'array',
+          items: STRING,
+          description:
+            'Emails or userIds of members to remind. Each gets their own reminder, which they can delete without affecting the others. Omit to remind yourself.',
+        },
         recipient: {
           ...STRING,
-          description: "Email or userId of a member. Omit to remind yourself.",
+          description: 'One member, as an email or userId. Use `recipients` for several.',
         },
         tzOffsetMinutes: {
           type: 'integer',
@@ -2014,7 +2051,7 @@ export const TOOLS: Tool[] = [
         ? (await requireProjectByKeyInOrg(ctx.org.slug, projectKey.toUpperCase())).project.id
         : 'ORG';
 
-      const recipientId = await resolveRecipient(ctx.org.id, optionalString(args, 'recipient'));
+      const recipientIds = await resolveRecipients(ctx.org.id, args);
 
       // Signed, so a negative offset survives `optionalInt`'s non-negative rule.
       const rawOffset = args.tzOffsetMinutes;
@@ -2032,13 +2069,13 @@ export const TOOLS: Tool[] = [
             runAt: reminderWallClock(requiredString(args, 'runAt')),
             repeat,
             scope,
-            recipientId,
+            recipientIds,
             tzOffsetMinutes: String(tzOffsetMinutes),
           }),
         ),
       );
 
-      return { ok: true, url: remindersPath(ctx.org) };
+      return { ok: true, recipients: recipientIds.length, url: remindersPath(ctx.org) };
     },
   },
 

@@ -33,7 +33,7 @@ import {
   runAction,
 } from '@/lib/authz';
 import { prisma } from '@/lib/db';
-import { INVALID_INPUT, field, fieldErrorsOf } from '@/lib/action-input';
+import { INVALID_INPUT, field, fieldErrorsOf, fieldList } from '@/lib/action-input';
 import { fail, ok, type ActionResult } from '@/lib/result';
 import { toInstant } from '@/lib/reminder-math';
 import {
@@ -58,6 +58,15 @@ const NOT_YOURS = 'You can only delete reminders you set or receive.';
  */
 const PAST_SLACK_MS = 60_000;
 
+const NO_RECIPIENT = 'Choose at least one person to remind.';
+
+/**
+ * Bounded so one submit cannot fan out to an unbounded number of rows. Every
+ * candidate has to be a member of the organization anyway, so this is a sanity
+ * cap rather than a security control.
+ */
+const MAX_RECIPIENTS = 50;
+
 const createSchema = z.object({
   orgSlug: slugSchema,
   title: reminderTitleSchema,
@@ -65,7 +74,18 @@ const createSchema = z.object({
   tzOffsetMinutes: tzOffsetSchema,
   repeat: reminderRepeatSchema,
   scope: z.union([z.literal(ORG_SCOPE), cuid]),
-  recipientId: cuid,
+  /**
+   * ONE REMINDER PER PERSON, not one reminder with many recipients.
+   *
+   * A row is what the scheduler claims, and it claims with a compare-and-swap
+   * on `nextRunAt`. Sharing a row between recipients would mean one claim
+   * covering N sends: a process killed halfway through the loop has already
+   * advanced the schedule, so everyone after the failure silently loses that
+   * occurrence. Per-person rows give per-person delivery, and they also settle
+   * what deleting means -- removing yourself from a reminder cannot cancel it
+   * for the rest of the team, because it was never their row.
+   */
+  recipientIds: z.array(cuid).min(1, NO_RECIPIENT).max(MAX_RECIPIENTS),
 });
 
 /* -------------------------------------------------------------------------- */
@@ -84,17 +104,26 @@ export async function createReminder(
       tzOffsetMinutes: field(formData, 'tzOffsetMinutes'),
       repeat: field(formData, 'repeat'),
       scope: field(formData, 'scope'),
-      recipientId: field(formData, 'recipientId'),
+      // Unchecked boxes submit nothing, so an empty list is the ordinary way to
+      // get this wrong -- it earns a sentence rather than the generic message.
+      recipientIds: [...new Set(fieldList(formData, 'recipientIds'))],
     });
-    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+    if (!parsed.success) {
+      const fieldErrors = fieldErrorsOf(parsed.error);
+      if (fieldErrors.recipientIds) return fail(NO_RECIPIENT, fieldErrors);
+      return fail(INVALID_INPUT, fieldErrors);
+    }
     const input = parsed.data;
 
     const ctx = await requireOrgBySlug(input.orgSlug);
 
     // Every member may schedule a reminder, for themselves or for a colleague:
     // it is a nudge, not access to anything. The only thing role-gated here is
-    // deleting somebody else's, below.
-    await assertOrgMember(ctx.org.id, input.recipientId);
+    // deleting somebody else's, below. Checked one at a time rather than with a
+    // count, so a forged id is NOT_FOUND rather than silently dropped.
+    for (const recipientId of input.recipientIds) {
+      await assertOrgMember(ctx.org.id, recipientId);
+    }
 
     const project =
       input.scope === ORG_SCOPE ? null : await requireProjectInOrg(ctx.org.id, input.scope);
@@ -111,26 +140,30 @@ export async function createReminder(
       return fail(IN_THE_PAST, { runAt: IN_THE_PAST });
     }
 
-    await prisma.reminder.create({
-      data: {
+    await prisma.reminder.createMany({
+      data: input.recipientIds.map((recipientId) => ({
         organizationId: ctx.org.id,
         projectId: project?.id ?? null,
         title: input.title,
         repeat: input.repeat,
         nextRunAt: runAt,
         tzOffsetMinutes: input.tzOffsetMinutes,
-        recipientId: input.recipientId,
+        recipientId,
         createdById: ctx.user.id,
-      },
-      select: { id: true },
+      })),
     });
 
     revalidatePath(remindersPath(ctx.org));
-    return ok(
-      input.recipientId === ctx.user.id
-        ? 'Reminder scheduled.'
-        : 'Reminder scheduled. They will get an email when it is due.',
-    );
+
+    const count = input.recipientIds.length;
+    if (count === 1) {
+      return ok(
+        input.recipientIds[0] === ctx.user.id
+          ? 'Reminder scheduled.'
+          : 'Reminder scheduled. They will get an email when it is due.',
+      );
+    }
+    return ok(`Reminder scheduled for ${count} people.`);
   });
 }
 

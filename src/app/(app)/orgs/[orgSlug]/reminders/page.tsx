@@ -209,26 +209,42 @@ export default async function RemindersPage({
                 </span>
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="reminder-recipient">Send to</Label>
-                <select
-                  id="reminder-recipient"
-                  name="recipientId"
-                  defaultValue={ctx.user.id}
-                  className={`${SELECT_CLASS} w-full`}
-                >
-                  {members.map((member) => (
-                    <option key={member.user.id} value={member.user.id}>
-                      {member.user.id === ctx.user.id
-                        ? `${member.user.name} (you)`
-                        : member.user.name}
-                    </option>
-                  ))}
-                </select>
+              {/*
+               * Checkboxes rather than a `<select multiple>`: the native
+               * multi-select needs ctrl-click to pick a second name, which is
+               * exactly the interaction nobody discovers. Native inputs
+               * regardless -- `ActionForm` restores a rejected submit through
+               * `form.elements`, which only reaches real form controls.
+               */}
+              <fieldset className="flex flex-col gap-1.5">
+                <legend className="mb-1.5 text-sm font-medium text-secondary">Send to</legend>
+                <div className="flex max-h-40 flex-col gap-2 overflow-y-auto rounded-lg border border-primary bg-primary px-3 py-2.5">
+                  {members.map((member) => {
+                    const id = `reminder-recipient-${member.user.id}`;
+                    return (
+                      <div key={member.user.id} className="flex items-center gap-2.5">
+                        <input
+                          id={id}
+                          name="recipientIds"
+                          type="checkbox"
+                          value={member.user.id}
+                          defaultChecked={member.user.id === ctx.user.id}
+                          className="size-4 shrink-0 rounded border-primary text-brand-solid outline-focus-ring focus-visible:outline-2 focus-visible:outline-offset-2"
+                        />
+                        <label htmlFor={id} className="text-sm text-primary">
+                          {member.user.id === ctx.user.id
+                            ? `${member.user.name} (you)`
+                            : member.user.name}
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
                 <span className="text-xs text-tertiary">
-                  Anyone in {ctx.org.name}. They can delete it themselves.
+                  Anyone in {ctx.org.name}. Each person gets their own reminder and can delete it
+                  themselves.
                 </span>
-              </div>
+              </fieldset>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
