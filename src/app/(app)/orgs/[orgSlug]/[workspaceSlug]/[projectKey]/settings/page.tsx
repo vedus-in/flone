@@ -8,6 +8,7 @@ import { prisma } from '@/lib/db';
 import { COLOR_TOKENS, colorClass } from '@/lib/model';
 import { listStates } from '@/lib/states';
 import { cx } from '@/lib/utils/cx';
+import { WORKSPACE_ORDER } from '@/lib/validation';
 
 import { ActionForm } from '../../../../../action-form';
 import {
@@ -144,7 +145,7 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
         organizationId: ctx.org.id,
         organization: { memberships: { some: { userId: ctx.user.id } } },
       },
-      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      orderBy: WORKSPACE_ORDER,
       select: { id: true, name: true, slug: true },
     }),
   ]);

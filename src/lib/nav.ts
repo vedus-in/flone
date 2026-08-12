@@ -2,6 +2,7 @@ import 'server-only';
 
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/authz';
+import { WORKSPACE_ORDER } from '@/lib/validation';
 
 /**
  * The navigation tree behind the sidebar: the caller's organizations, the
@@ -16,6 +17,9 @@ import { requireUser } from '@/lib/authz';
  * Workspaces ARE loaded, and that is a different trade: there are few of them,
  * they are the grouping the sidebar renders, and a project cannot be placed
  * without knowing which one owns it. One nested relation, no extra round trip.
+ *
+ * Their order is `Workspace.position`, arranged by an admin on the organization
+ * page. It is the sidebar's only hand-set order; everything else is alphabetical.
  *
  * Scoped by MEMBERSHIP at the root of the query -- every organization returned
  * is one the acting user belongs to, and workspaces and projects come back only
@@ -54,7 +58,7 @@ export async function listNavTree(): Promise<NavOrg[]> {
           name: true,
           slug: true,
           workspaces: {
-            orderBy: [{ name: 'asc' }, { id: 'asc' }],
+            orderBy: WORKSPACE_ORDER,
             select: {
               id: true,
               name: true,

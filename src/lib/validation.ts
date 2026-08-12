@@ -92,6 +92,18 @@ export const TICKET_ORDER = [
 /** Workflow states use the same scheme. */
 export const STATE_ORDER = [{ position: 'asc' as const }, { id: 'asc' as const }];
 
+/**
+ * Workspaces are hand-arranged, so `position` leads -- but every row predating
+ * that column sits at 0, which makes ties the normal case rather than the
+ * pathological one. Name breaks them, so an unarranged organization still reads
+ * alphabetically.
+ */
+export const WORKSPACE_ORDER = [
+  { position: 'asc' as const },
+  { name: 'asc' as const },
+  { id: 'asc' as const },
+];
+
 export const CYCLE_ORDER = [{ number: 'asc' as const }];
 
 /* -------------------------------------------------------------------------- */

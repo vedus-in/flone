@@ -201,12 +201,21 @@ model Workspace {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
   slug           String
+  /// Sidebar order, hand-arranged by an admin. The ORGANIZATION's order, not
+  /// the viewer's: everyone sees the same sidebar, which is what keeps this a
+  /// column here instead of a per-user join table.
+  ///
+  /// Every pre-existing row starts at 0, so ties are normal and `WORKSPACE_ORDER`
+  /// breaks them by name -- a list nobody has arranged yet reads alphabetically,
+  /// exactly as it did before this column existed.
+  position       Int          @default(0)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   projects Project[]
 
   @@unique([organizationId, slug])
+  @@index([organizationId, position])
 }
 
 model Membership {

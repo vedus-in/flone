@@ -3,9 +3,10 @@ import { Role } from '@prisma/client';
 import { ChevronDown } from '@untitledui/icons';
 import { prisma } from '@/lib/db';
 import { atLeast, loadPage, requireOrgBySlug, workspacePath } from '@/lib/authz';
+import { WORKSPACE_ORDER } from '@/lib/validation';
 import { Card, EmptyState, Field, Input, SubmitButton } from '@/components/ui';
 import { ActionForm } from '../../action-form';
-import { createWorkspace } from './actions';
+import { createWorkspace, moveWorkspace } from './actions';
 
 /**
  * The organization root: its workspaces.
@@ -13,6 +14,10 @@ import { createWorkspace } from './actions';
  * This used to be the project list, which now lives one level down under the
  * workspace that owns it. Every project has exactly one workspace, so nothing is
  * reachable from here that is not reachable through one of these rows.
+ *
+ * This is also where the SIDEBAR order is set. The arrows write
+ * `Workspace.position`, which is what `listNavTree` reads -- so the arrangement
+ * made here is the one every member navigates by.
  */
 const ROW =
   'grid grid-cols-[minmax(0,1fr)_4.5rem] items-center gap-3 px-3 sm:grid-cols-[minmax(0,1fr)_8rem_4.5rem]';
@@ -28,6 +33,52 @@ function WorkspaceIcon() {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+/**
+ * Two buttons rather than drag-and-drop, the same call the workflow-state list
+ * makes: a handful of rows arranged once, and this works on a phone, from the
+ * keyboard, and before hydration.
+ *
+ * `relative z-10` because the name link's `::after` covers the whole row --
+ * without it the arrows sit UNDER the overlay and every click navigates.
+ */
+function MoveButton({
+  orgSlug,
+  workspaceId,
+  direction,
+  disabled,
+  name,
+}: {
+  orgSlug: string;
+  workspaceId: string;
+  direction: 'up' | 'down';
+  disabled: boolean;
+  name: string;
+}) {
+  return (
+    <ActionForm action={moveWorkspace} aria-label={`Move ${name} ${direction}`}>
+      <input type="hidden" name="orgSlug" value={orgSlug} />
+      <input type="hidden" name="workspaceId" value={workspaceId} />
+      <input type="hidden" name="direction" value={direction} />
+      <button
+        type="submit"
+        disabled={disabled}
+        aria-label={`Move ${name} ${direction}`}
+        className="grid size-4 place-items-center rounded text-tertiary transition-colors hover:text-primary disabled:opacity-25"
+      >
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3">
+          <path
+            d={direction === 'up' ? 'm4 10 4-4 4 4' : 'm4 6 4 4 4-4'}
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    </ActionForm>
   );
 }
 
@@ -53,7 +104,7 @@ export default async function OrganizationPage({
       slug: true,
       _count: { select: { projects: true } },
     },
-    orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    orderBy: WORKSPACE_ORDER,
   });
 
   const canManage = atLeast(ctx.role, Role.ADMIN);
@@ -98,7 +149,7 @@ export default async function OrganizationPage({
           </div>
 
           <ul className="flex flex-col">
-            {workspaces.map((workspace) => (
+            {workspaces.map((workspace, index) => (
               <li
                 key={workspace.id}
                 /* The name link's `::after` covers the row, so the whole row is
@@ -106,6 +157,24 @@ export default async function OrganizationPage({
                 className={`${ROW} relative border-b border-secondary/60 py-2.5 text-sm transition-colors hover:bg-primary_hover has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-focus-ring`}
               >
                 <span className="flex min-w-0 items-center gap-2">
+                  {canManage ? (
+                    <span className="relative z-10 flex shrink-0 flex-col">
+                      <MoveButton
+                        orgSlug={ctx.org.slug}
+                        workspaceId={workspace.id}
+                        direction="up"
+                        disabled={index === 0}
+                        name={workspace.name}
+                      />
+                      <MoveButton
+                        orgSlug={ctx.org.slug}
+                        workspaceId={workspace.id}
+                        direction="down"
+                        disabled={index === workspaces.length - 1}
+                        name={workspace.name}
+                      />
+                    </span>
+                  ) : null}
                   <WorkspaceIcon />
                   <Link
                     href={workspacePath(ctx.org, workspace)}
