@@ -32,6 +32,7 @@ import { Dropdown } from '@/components/base/dropdown/dropdown';
 import type { ActionResult } from '@/lib/result';
 
 import { signOut } from './actions';
+import { reorderWorkspaces } from './orgs/[orgSlug]/actions';
 import { moveProjectToWorkspace } from './orgs/[orgSlug]/[workspaceSlug]/[projectKey]/actions';
 
 /**
@@ -300,40 +301,63 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
   }
 
   /*
-   * Regrouping a project: drag its row onto another workspace.
+   * Two arrangements, one gesture, and every drop lands on a workspace row:
+   * a PROJECT dropped there is regrouped into that workspace, a WORKSPACE
+   * dropped there takes that row's place in the order and the rest shift
+   * around it.
    *
-   * Native HTML5 drag rather than the board's dnd-kit setup -- this is one row
-   * onto one row, and the sidebar already carries both ids, so there is nothing
-   * a sensor library would add.
+   * Native HTML5 drag rather than the board's dnd-kit setup -- these are rows
+   * onto rows, and the sidebar already carries every id involved, so there is
+   * nothing a sensor library would add.
    *
-   * ponytail: no touch and no keyboard path -- native drag has neither, and the
-   * settings dropdown this replaced was the accessible one. Give the workspace
-   * row a "Move project here" menu if either is ever wanted.
+   * ponytail: no touch and no keyboard path -- native drag has neither. The
+   * arrows on the Workspaces page remain the accessible way to order
+   * workspaces; a project has no equivalent left, so give the workspace row a
+   * "Move project here" menu if one is wanted.
    *
    * Gated on ADMIN so a member is not shown an affordance the action will
    * refuse. The server re-proves it; this only hides the handle.
    */
   const canArrange = activeOrg?.role === 'OWNER' || activeOrg?.role === 'ADMIN';
-  const [dragging, setDragging] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<{ kind: 'project' | 'workspace'; id: string } | null>(
+    null,
+  );
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
-  function dropProject(workspaceId: string) {
-    const projectId = dragging;
+  function dropOnWorkspace(workspace: ShellWorkspace) {
+    const source = dragging;
     setDragging(null);
     setDropTarget(null);
-    if (!projectId) return;
-    startTransition(async () => {
-      // `follow` only when the page being read is the one whose URL is about to
-      // change: the action answers with a redirect, and a redirect resolves the
-      // call with nothing, hence the widened type.
-      const result: ActionResult | undefined = await moveProjectToWorkspace({
-        projectId,
-        workspaceId,
-        follow: activeProject?.id === projectId,
+    if (!source || !activeOrg) return;
+
+    if (source.kind === 'project') {
+      startTransition(async () => {
+        // `follow` only when the page being read is the one whose URL is about
+        // to change: the action answers with a redirect, and a redirect
+        // resolves the call with nothing, hence the widened type.
+        const result: ActionResult | undefined = await moveProjectToWorkspace({
+          projectId: source.id,
+          workspaceId: workspace.id,
+          follow: activeProject?.id === source.id,
+        });
+        setMoveError(result && !result.ok ? result.error : null);
       });
-      setMoveError(result && !result.ok ? result.error : null);
+      return;
+    }
+
+    // Inserted at the target's index in the CURRENT list, before the dragged
+    // row is taken out of it -- that one rule reads as "lands on that row"
+    // whether the drag went up or down.
+    const ids = activeOrg.workspaces.map((candidate) => candidate.id);
+    const at = ids.indexOf(workspace.id);
+    const next = ids.filter((id) => id !== source.id);
+    next.splice(at, 0, source.id);
+
+    startTransition(async () => {
+      const result = await reorderWorkspaces({ orgSlug: activeOrg.slug, workspaceIds: next });
+      setMoveError(result.ok ? null : result.error);
     });
   }
 
@@ -477,22 +501,29 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                   const wsOpen = expanded.has(workspace.id);
                   const wsActive = pathname === workspace.href;
                   // The whole group is the target, not just its header row, so
-                  // a drop anywhere in an expanded workspace lands.
-                  const owns = workspace.projects.some((project) => project.id === dragging);
+                  // a drop anywhere in an expanded workspace lands. A drop that
+                  // would change nothing -- a project onto the workspace it is
+                  // already in, a workspace onto itself -- is refused here
+                  // rather than sent and answered with a no-op.
+                  const dragged =
+                    dragging?.kind === 'project'
+                      ? !workspace.projects.some((project) => project.id === dragging.id)
+                      : dragging?.id !== workspace.id;
+                  const canDrop = dragging !== null && dragged;
                   return (
                     <li
                       key={workspace.id}
                       // Without preventDefault the browser refuses the drop, so
-                      // this is also what makes the source workspace inert.
+                      // this is also what makes a pointless target inert.
                       onDragOver={(event) => {
-                        if (!dragging || owns) return;
+                        if (!canDrop) return;
                         event.preventDefault();
                         event.dataTransfer.dropEffect = 'move';
                         setDropTarget(workspace.id);
                       }}
                       onDrop={(event) => {
                         event.preventDefault();
-                        dropProject(workspace.id);
+                        dropOnWorkspace(workspace);
                       }}
                       className={cx(
                         'rounded-md',
@@ -501,9 +532,24 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                       )}
                     >
                       <div
+                        draggable={canArrange}
+                        onDragStart={(event) => {
+                          // Firefox will not start a drag with an empty payload.
+                          event.dataTransfer.setData('text/plain', workspace.name);
+                          event.dataTransfer.effectAllowed = 'move';
+                          setDragging({ kind: 'workspace', id: workspace.id });
+                        }}
+                        onDragEnd={() => {
+                          setDragging(null);
+                          setDropTarget(null);
+                        }}
+                        title={canArrange ? 'Drag onto another workspace to reorder' : undefined}
                         className={cx(
                           'flex h-7 items-center gap-0.5 rounded-md pe-2 ps-0.5 transition-colors',
                           wsActive ? 'bg-secondary' : 'hover:bg-secondary',
+                          dragging?.kind === 'workspace' &&
+                            dragging.id === workspace.id &&
+                            'opacity-50',
                         )}
                       >
                         <button
@@ -522,6 +568,9 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                           href={workspace.href}
                           onClick={closeDrawer}
                           aria-current={wsActive ? 'page' : undefined}
+                          // Otherwise the anchor drags its own URL instead of
+                          // the row.
+                          draggable={false}
                           className={cx(
                             'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
                             wsActive ? 'font-medium text-primary' : 'text-tertiary',
@@ -553,7 +602,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                           // Firefox will not start a drag with an empty payload.
                           event.dataTransfer.setData('text/plain', project.key);
                           event.dataTransfer.effectAllowed = 'move';
-                          setDragging(project.id);
+                          setDragging({ kind: 'project', id: project.id });
                         }}
                         onDragEnd={() => {
                           setDragging(null);
@@ -563,7 +612,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                         className={cx(
                           'flex h-7 items-center gap-0.5 rounded-md pe-2 ps-0.5 transition-colors',
                           isActive ? 'bg-secondary' : 'hover:bg-secondary',
-                          dragging === project.id && 'opacity-50',
+                          dragging?.kind === 'project' && dragging.id === project.id && 'opacity-50',
                         )}
                       >
                         <button

@@ -25,7 +25,9 @@ import {
 } from '@/lib/validation';
 
 /**
- * `createWorkspace` and `moveWorkspace`.
+ * `createWorkspace`, and the two ways the sidebar order is set: `moveWorkspace`
+ * one place at a time from the arrows, `reorderWorkspaces` a whole list at a
+ * time from a drag.
  *
  * `orgSlug` arriving in FormData is not a trust violation: it is a routing key,
  * and `requireOrgBySlug` re-proves membership (and yields the caller's role)
@@ -163,12 +165,93 @@ const moveWorkspaceSchema = z.object({
   direction: z.enum(['up', 'down']),
 });
 
+const reorderWorkspacesSchema = z.object({
+  orgSlug: slugSchema,
+  workspaceIds: z.array(cuid).max(500),
+});
+
+/**
+ * Renumber a whole list densely, 0..n-1. Rows already sitting at their number
+ * are left alone, so a nudge writes two rows rather than all of them.
+ */
+async function writeWorkspaceOrder(
+  ordered: Array<{ id: string; position: number }>,
+): Promise<void> {
+  await prisma.$transaction(
+    ordered
+      .map((workspace, position) => ({ id: workspace.id, position, was: workspace.position }))
+      .filter((row) => row.was !== row.position)
+      // Ascending id, like every other multi-row write here, so two concurrent
+      // reorders cannot take locks in opposite orders and deadlock.
+      .sort((a, b) => (a.id < b.id ? -1 : 1))
+      .map((row) =>
+        prisma.workspace.update({ where: { id: row.id }, data: { position: row.position } }),
+      ),
+  );
+}
+
+/**
+ * The sidebar order, set by dragging one workspace onto another: the dragged
+ * one takes that row's place and the rest shift around it.
+ *
+ * A whole list rather than `moveWorkspace`'s one-place nudge, because a drag
+ * crosses any number of rows at once, and because the list is what the sidebar
+ * already has in its hands. The arrows on the Workspaces page stay: they are
+ * the path that works on a phone, from the keyboard, and before hydration,
+ * which native drag is none of.
+ *
+ * ADMIN, and the order is the ORGANIZATION's -- see `moveWorkspace`.
+ */
+export async function reorderWorkspaces(input: {
+  orgSlug: string;
+  workspaceIds: string[];
+}): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = reorderWorkspacesSchema.safeParse(input);
+    if (!parsed.success) return fail(INVALID_INPUT, fieldMessages(parsed.error));
+
+    const ctx = await requireOrgBySlug(parsed.data.orgSlug);
+    requireRole(ctx, Role.ADMIN);
+
+    const workspaces = await prisma.workspace.findMany({
+      where: { organizationId: ctx.org.id },
+      orderBy: WORKSPACE_ORDER,
+      select: { id: true, position: true },
+    });
+
+    // The submitted list is a REQUEST, replayed against the organization's own
+    // rows: an id from another tenant is not in the map and drops out, a
+    // repeated id is taken once, and a workspace created since the sidebar
+    // rendered keeps its place at the end instead of being renumbered to 0
+    // alongside everything else.
+    const byId = new Map(workspaces.map((workspace) => [workspace.id, workspace] as const));
+    const ordered: Array<{ id: string; position: number }> = [];
+    const seen = new Set<string>();
+    for (const id of parsed.data.workspaceIds) {
+      const row = byId.get(id);
+      if (!row || seen.has(id)) continue;
+      seen.add(id);
+      ordered.push(row);
+    }
+    for (const row of workspaces) if (!seen.has(row.id)) ordered.push(row);
+
+    await writeWorkspaceOrder(ordered);
+
+    // The sidebar is rendered by the layout, so it needs the layout revalidated
+    // as well as this page -- same pair `createWorkspace` uses.
+    revalidatePath('/', 'layout');
+    revalidatePath(orgPath(ctx.org));
+    return ok();
+  });
+}
+
 /**
  * Nudge a workspace one place along the sidebar order.
  *
- * Two buttons rather than drag-and-drop, exactly like `moveState`: a handful of
- * rows arranged once, and this works on a phone, from the keyboard, and before
- * hydration.
+ * The keyboard-and-touch path beside the sidebar's drag: arrows work on a
+ * phone, from the keyboard, and before hydration, exactly like `moveState`.
  *
  * ADMIN, the same bar as creating one, because the order is the ORGANIZATION's
  * -- every member sees the arrangement, so it is not a personal preference.
@@ -212,17 +295,7 @@ export async function moveWorkspace(
     reordered[index] = reordered[swapWith];
     reordered[swapWith] = moved;
 
-    await prisma.$transaction(
-      reordered
-        .map((workspace, position) => ({ id: workspace.id, position, was: workspace.position }))
-        .filter((row) => row.was !== row.position)
-        // Ascending id, like every other multi-row write here, so two concurrent
-        // reorders cannot take locks in opposite orders and deadlock.
-        .sort((a, b) => (a.id < b.id ? -1 : 1))
-        .map((row) =>
-          prisma.workspace.update({ where: { id: row.id }, data: { position: row.position } }),
-        ),
-    );
+    await writeWorkspaceOrder(reordered);
 
     // The sidebar is rendered by the layout, so it needs the layout revalidated
     // as well as this page -- same pair `createWorkspace` uses.
