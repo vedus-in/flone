@@ -143,6 +143,8 @@ const I_TARGET =
   'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z';
 const I_BELL =
   'M4 6.5a4 4 0 1 1 8 0c0 3 1.25 4 1.25 4H2.75S4 9.5 4 6.5ZM6.5 13a1.75 1.75 0 0 0 3 0';
+const I_REPEAT =
+  'M11.5 1 14 3.5 11.5 6M2 7.5V6a2.5 2.5 0 0 1 2.5-2.5H14M4.5 15 2 12.5 4.5 10M14 8.5V10a2.5 2.5 0 0 1-2.5 2.5H2';
 
 /* -------------------------------------------------------------------------- */
 
@@ -731,6 +733,24 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                               indented
                             >
                               Boards
+                            </NavRow>
+                          </li>
+                          {/* Recurring ticket templates. The href is appended
+                              here rather than carried on `ShellProject` like
+                              its siblings: `project.href` is already built and
+                              already encoded by the layout, and `recurring` is
+                              a fixed segment, so there is no slug for this
+                              module to construct -- which is the rule the note
+                              on `ShellProject` is actually protecting. */}
+                          <li>
+                            <NavRow
+                              href={`${project.href}/recurring`}
+                              active={pathname === `${project.href}/recurring`}
+                              onNavigate={closeDrawer}
+                              icon={I_REPEAT}
+                              indented
+                            >
+                              Recurring
                             </NavRow>
                           </li>
                           <li>

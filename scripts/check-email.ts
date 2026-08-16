@@ -399,6 +399,17 @@ const RENDERABLE = [
     }),
     true,
   ],
+  [
+    'RecurringTicketEmail',
+    templates.RecurringTicketEmail({
+      issueKey: 'ENG-482',
+      issueTitle: 'XAU breakout daily review — 16 Aug 2026',
+      projectName: 'Trading Desk',
+      repeat: 'Every weekday',
+      url: LINK,
+    }),
+    true,
+  ],
 ] as const;
 
 for (const [name, element, expectsLink] of RENDERABLE) {

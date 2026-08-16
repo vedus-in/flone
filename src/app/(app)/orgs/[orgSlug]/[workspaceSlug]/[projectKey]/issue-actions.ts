@@ -49,6 +49,7 @@ import { appUrl } from '@/lib/email';
 import { notifyIssueAssigned, type IssueContext } from '@/lib/mailer';
 import { stampsFor } from '@/lib/model';
 import { fail, ok, type ActionResult } from '@/lib/result';
+import { insertTicket, nextPosition } from '@/lib/ticket-insert';
 import { INVALID_INPUT, field, fieldErrorsOf, fieldList } from '@/lib/action-input';
 import {
   TICKET_ORDER,
@@ -80,23 +81,6 @@ async function isOrgMember(organizationId: string, userId: string): Promise<bool
 /* Shared helpers                                                              */
 /* -------------------------------------------------------------------------- */
 
-/**
- * SPEC 7.5, rekeyed: the `number` retry is tied STRICTLY to the
- * `(projectId, number)` constraint. A blanket `P2002` retry would silently mask
- * genuine unique violations -- a duplicate label name, say.
- */
-function isTicketNumberConflict(e: unknown): boolean {
-  if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== 'P2002') return false;
-  const target: unknown = e.meta?.target;
-  const parts = Array.isArray(target)
-    ? target.map((part) => String(part))
-    : typeof target === 'string'
-      ? [target]
-      : [];
-  const joined = parts.join(',');
-  return joined.includes('projectId') && joined.includes('number');
-}
-
 /** Every surface the issue appears on, plus the project's issue list. */
 function revalidateIssue(ctx: TicketCtx, extra: string[] = []): void {
   for (const path of [...ticketSurfaces(ctx), ...extra]) revalidatePath(path);
@@ -118,19 +102,6 @@ function issueContext(ctx: ProjectCtx, number: number, title: string): IssueCont
     projectName: ctx.project.name,
     url: appUrl(ticketPath(ctx.org, ctx.project, number)),
   };
-}
-
-/** Append to the end of a state's column, in the issue's own project. */
-async function nextPosition(
-  tx: Prisma.TransactionClient,
-  projectId: string,
-  stateId: string,
-): Promise<number> {
-  const highest = await tx.ticket.aggregate({
-    where: { projectId, stateId },
-    _max: { position: true },
-  });
-  return (highest._max.position ?? 0) + 1;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -198,58 +169,32 @@ export async function createIssue(
     const labelIds = await filterLabelsInProject(ctx.project.id, parsed.data.labelIds);
 
     const description = parsed.data.description.length > 0 ? parsed.data.description : null;
-    const stamps = stampsFor(state.type, { startedAt: null, completedAt: null });
 
-    let created: { number: number } | null = null;
-
-    // `number = max + 1` inside a transaction, up to 3 attempts (SPEC 7.5),
-    // now keyed to the project rather than the board.
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        created = await prisma.$transaction(async (tx) => {
-          const [number, position] = await Promise.all([
-            tx.ticket
-              .aggregate({ where: { projectId: ctx.project.id }, _max: { number: true } })
-              .then((row) => (row._max.number ?? 0) + 1),
-            nextPosition(tx, ctx.project.id, state.id),
-          ]);
-
-          return tx.ticket.create({
-            data: {
-              projectId: ctx.project.id,
-              stateId: state.id,
-              boardId: parsed.data.boardId === '' ? null : parsed.data.boardId,
-              cycleId: parsed.data.cycleId === '' ? null : parsed.data.cycleId,
-              parentId: parsed.data.parentId === '' ? null : parsed.data.parentId,
-              number,
-              position,
-              title: parsed.data.title,
-              description,
-              priority: parsed.data.priority,
-              assigneeId: parsed.data.assigneeId === '' ? null : parsed.data.assigneeId,
-              startedAt: stamps.startedAt,
-              completedAt: stamps.completedAt,
-              ...(labelIds.length > 0
-                ? { labels: { connect: labelIds.map((id) => ({ id })) } }
-                : {}),
-              // Identity comes from the session. Never from the form.
-              createdById: user.id,
-            },
-            select: { number: true },
-          });
-        });
-        break;
-      } catch (e) {
-        if (attempt < 2 && isTicketNumberConflict(e)) continue;
-        throw e;
-      }
-    }
+    // The numbering transaction, the position append and the lifecycle stamps
+    // all live in `src/lib/ticket-insert.ts` -- shared verbatim with the
+    // recurring-ticket scheduler, which must file its tickets exactly as a
+    // person would. Every id handed over has been proved above; `insertTicket`
+    // checks none of them itself, which is why it is not an action.
+    const created = await insertTicket({
+      projectId: ctx.project.id,
+      state,
+      title: parsed.data.title,
+      description,
+      priority: parsed.data.priority,
+      assigneeId: parsed.data.assigneeId === '' ? null : parsed.data.assigneeId,
+      boardId: parsed.data.boardId === '' ? null : parsed.data.boardId,
+      cycleId: parsed.data.cycleId === '' ? null : parsed.data.cycleId,
+      parentId: parsed.data.parentId === '' ? null : parsed.data.parentId,
+      labelIds,
+      // Identity comes from the session. Never from the form.
+      createdById: user.id,
+    });
 
     // The other of the two `assigneeId` write points. Filing an issue already
     // assigned to someone notifies them exactly as reassigning one does; the
     // rule that the actor is never mailed lives in `notifyIssueAssigned`, so
     // assigning yourself on creation stays silent.
-    if (created && parsed.data.assigneeId !== '') {
+    if (parsed.data.assigneeId !== '') {
       await notifyIssueAssigned({
         assigneeId: parsed.data.assigneeId,
         actorId: user.id,
@@ -260,7 +205,7 @@ export async function createIssue(
 
     revalidatePath(projectPath(ctx.org, ctx.project));
     revalidatePath(issuesPath(ctx.org, ctx.project));
-    return ok(created ? `Created ${ctx.project.key}-${created.number}.` : undefined);
+    return ok(`Created ${ctx.project.key}-${created.number}.`);
   });
 }
 

@@ -881,6 +881,21 @@ export function boardPath(org: OrgRef, project: ProjectRef, board: BoardRef): st
   return `${boardsPath(org, project)}/${encodeURIComponent(board.id)}`;
 }
 
+/**
+ * Recurring ticket templates, at PROJECT scope -- unlike `remindersPath`, which
+ * is organization-scoped. Everything the page offers belongs to one project:
+ * its labels, and the Todo-type state a spawned ticket lands in.
+ *
+ * NO `RESERVED_SLUGS` ENTRY, deliberately. That denylist protects segments that
+ * sit where a user-chosen SLUG could be created. This one sits under a project
+ * KEY, and `projectKeySchema` admits uppercase only, so a lowercase static
+ * segment cannot collide with a key -- the same argument that let `issues`,
+ * `boards` and `cycles` stay off the list.
+ */
+export function recurringPath(org: OrgRef, project: ProjectRef): string {
+  return `${projectPath(org, project)}/recurring`;
+}
+
 /** An issue lives at the PROJECT, not under a board. */
 export function ticketPath(org: OrgRef, project: ProjectRef, ticketNumber: number): string {
   return `${projectPath(org, project)}/issue/${ticketNumber}`;

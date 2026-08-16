@@ -1,7 +1,14 @@
 import 'server-only';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { BoardStatus, ReminderChannel, ReminderRepeat, Role, WorkflowStateType } from '@prisma/client';
+import {
+  BoardStatus,
+  ReminderChannel,
+  ReminderRepeat,
+  Role,
+  TicketRepeat,
+  WorkflowStateType,
+} from '@prisma/client';
 import { COLOR_TOKENS, ISSUE_TABS } from '@/lib/model';
 import { MAX_TZ_OFFSET_MINUTES, toInstant } from '@/lib/reminder-math';
 
@@ -279,6 +286,20 @@ export const tzOffsetSchema = z.coerce
 export const reminderTitleSchema = safeText(1, 200);
 
 export const reminderChannelSchema = z.nativeEnum(ReminderChannel);
+
+/* -------------------------------------------------------------------------- */
+/* Recurring tickets                                                           */
+/* -------------------------------------------------------------------------- */
+
+export const ticketRepeatSchema = z.nativeEnum(TicketRepeat);
+
+/**
+ * Shorter than `ticketTitleSchema`'s 200 on purpose: every spawn appends a
+ * date stamp (` -- 16 Aug 2026`, at most 20 characters), and the 40 characters
+ * of headroom are what make the stamped title fit `Ticket.title` by
+ * construction rather than by a truncation nobody would notice.
+ */
+export const recurringTitleSchema = safeText(1, 160);
 
 /* -------------------------------------------------------------------------- */
 /* Phone                                                                       */

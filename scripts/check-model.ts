@@ -31,6 +31,21 @@
  *      a duplicate email is not a failing type, a failing page or a failing
  *      query, it is just a person receiving the same nudge nine times.
  *
+ *   6. Recurring ticket occurrence arithmetic. The tick advances a template
+ *      with the value `nextOccurrence` returns, exactly as reminders do with
+ *      `nextRun`, so a result that is not STRICTLY after `after` is the same
+ *      failure mode with a different face: the row stays due and every tick
+ *      spawns another copy of the same ticket onto the board. MONTHLY adds a
+ *      second way to fail silently -- every occurrence must be derived from
+ *      the immutable anchor, never the previous occurrence, or a template
+ *      anchored past the 28th clamps once in February and never lets go, a
+ *      bug invisible until the second month after the first short one.
+ *      WEEKDAYS must roll on the template's OWN wall clock, not the server's,
+ *      or a template on the far side of the date line spawns on the wrong
+ *      days with nothing in the UI able to tell you. None of this fails a
+ *      type, a page or a query -- it is a board quietly growing duplicate
+ *      tickets, or a review nobody notices went missing.
+ *
  * Runs on plain Node — 22 strips the types. No test framework, no fixtures:
  *
  *   node scripts/check-model.ts
@@ -71,11 +86,17 @@ import {
   CHANNEL_CALLS,
   CHANNEL_EMAILS,
   CHANNEL_LABEL,
+  MAX_TZ_OFFSET_MINUTES,
   REPEAT_LABEL,
+  TICKET_REPEAT_LABEL,
+  dueDateFor,
+  formatDateStamp,
   formatLocalDateTime,
   formatOffset,
   formatWhen,
+  nextOccurrence,
   nextRun,
+  rollToWeekday,
   speechFor,
   speechForCode,
   stepClock,
@@ -738,6 +759,252 @@ ok('a leading zero survives into the spoken code', () => {
   // as "one hundred twenty-three".
   const say = speechForCode('000123');
   assert.ok(say.includes('0. 0. 0. 1. 2. 3.'));
+});
+
+/* -------------------------------------------------------------------------- */
+/* 8. Recurring ticket occurrence arithmetic                                   */
+/*                                                                             */
+/* `nextOccurrence` is the whole no-duplicate guarantee for RecurringTicket,   */
+/* joining `nextRun` above -- see item 6 in the header for what each property  */
+/* below protects against.                                                    */
+/* -------------------------------------------------------------------------- */
+
+console.log('\nrecurring tickets');
+
+const TICKET_REPEATS = ['DAILY', 'WEEKDAYS', 'WEEKLY', 'MONTHLY'] as const;
+
+/** ISO instant search rather than a hand-picked date -- a wrong guess at which
+ * real-world date is a Saturday would make the weekday-roll checks below pass
+ * for the wrong reason, which is worse than not having them. */
+function findUtcDay(target: number, from: Date): Date {
+  let at = from;
+  while (at.getUTCDay() !== target) at = new Date(at.getTime() + DAY_MS);
+  return at;
+}
+
+const A_SATURDAY = findUtcDay(6, new Date('2026-01-01T09:00:00Z'));
+const A_SUNDAY = findUtcDay(0, new Date('2026-01-01T09:00:00Z'));
+
+ok('every occurrence is strictly after `after`, whatever the anchor, cadence, offset or gap', () => {
+  // Anchors chosen adversarially: an ordinary day, a month-end that clamps,
+  // and a leap day, each of which has its own way to trip up the arithmetic.
+  const anchors = [
+    new Date('2026-01-15T09:00:00Z'),
+    new Date('2026-01-31T09:00:00Z'),
+    new Date('2028-02-29T09:00:00Z'),
+  ];
+  for (const anchor of anchors) {
+    for (const repeat of TICKET_REPEATS) {
+      for (const tz of [0, BERLIN_SUMMER, MAX_TZ_OFFSET_MINUTES, -MAX_TZ_OFFSET_MINUTES]) {
+        for (const days of [-400, -30, -1, -0.5, 0, 0.5, 1, 6.9, 7, 30, 90, 400]) {
+          const after = new Date(anchor.getTime() + days * DAY_MS);
+          const next = nextOccurrence(anchor, repeat, after, tz);
+          assert.ok(
+            next.getTime() > after.getTime(),
+            `${repeat} anchor=${anchor.toISOString()} tz=${tz} after=+${days}d landed at or before \`after\` -- a spawn loop`,
+          );
+        }
+      }
+    }
+  }
+});
+
+ok('an `after` exactly on an occurrence still advances past it, for every cadence', () => {
+  // The boundary case a half-open interval gets wrong: the tick calls this
+  // with `now` at or after the occurrence it just claimed, never strictly
+  // between two occurrences.
+  const anchor = new Date('2026-01-15T09:00:00Z');
+  for (const repeat of TICKET_REPEATS) {
+    const first = nextOccurrence(anchor, repeat, anchor, 0);
+    const second = nextOccurrence(anchor, repeat, first, 0);
+    assert.ok(
+      second.getTime() > first.getTime(),
+      `${repeat}: \`after\` equal to an occurrence did not advance past it`,
+    );
+  }
+});
+
+console.log('\nrecurring tickets — monthly clamp never sticks');
+
+ok('anchored on the 31st: Jan 31 -> Feb 28 -> Mar 31 -> Apr 30 -> May 31, feeding each result back as `after` the way the tick does', () => {
+  const anchor = new Date('2026-01-31T09:00:00Z');
+  const expected: Array<[number, number, number]> = [
+    [2026, 0, 31], // Jan 31 -- the anchor itself
+    [2026, 1, 28], // Feb 28 -- clamped, 2026 is not a leap year
+    [2026, 2, 31], // Mar 31 -- the clamp did NOT stick
+    [2026, 3, 30], // Apr 30 -- clamped again, independently
+    [2026, 4, 31], // May 31
+  ];
+  let after = new Date(anchor.getTime() - DAY_MS);
+  for (const [year, month, day] of expected) {
+    const next = nextOccurrence(anchor, 'MONTHLY', after, 0);
+    assert.equal(next.getUTCFullYear(), year, `year for ${year}-${month + 1}-${day}`);
+    assert.equal(next.getUTCMonth(), month, `month for ${year}-${month + 1}-${day}`);
+    assert.equal(
+      next.getUTCDate(),
+      day,
+      `expected day ${day} in month ${month + 1} of ${year}, got ${next.getUTCDate()} -- ` +
+        'a clamp that leaked into the next occurrence would show 28 every month from February on',
+    );
+    assert.equal(next.getUTCHours(), 9, 'the time of day must survive the clamp');
+    after = next;
+  }
+});
+
+ok('a leap February clamps to the 29th, not the 28th', () => {
+  const anchor = new Date('2028-01-31T09:00:00Z'); // 2028 is a leap year
+  const before = new Date(anchor.getTime() - DAY_MS);
+  const first = nextOccurrence(anchor, 'MONTHLY', before, 0);
+  const second = nextOccurrence(anchor, 'MONTHLY', first, 0);
+  assert.equal(second.getUTCFullYear(), 2028);
+  assert.equal(second.getUTCMonth(), 1, 'February');
+  assert.equal(second.getUTCDate(), 29, 'a leap February must not be clamped down to 28');
+});
+
+ok('an anchor on 29 Feb falls back to 28 Feb in the very next non-leap year', () => {
+  const anchor = new Date('2028-02-29T09:00:00Z'); // 2028 is a leap year, 2029 is not
+  let after = new Date(anchor.getTime() - DAY_MS);
+  let next = anchor;
+  for (let k = 0; k <= 12; k += 1) {
+    next = nextOccurrence(anchor, 'MONTHLY', after, 0);
+    after = next;
+  }
+  assert.equal(next.getUTCFullYear(), 2029);
+  assert.equal(next.getUTCMonth(), 1, 'February');
+  assert.equal(next.getUTCDate(), 28, 'no 29th in 2029 -- the clamp must fall back, not skip ahead to March');
+});
+
+ok('monthly crosses a year boundary and still clamps correctly on the far side', () => {
+  const anchor = new Date('2026-12-31T09:00:00Z');
+  const expected: Array<[number, number, number]> = [
+    [2026, 11, 31], // Dec 31 -- the anchor
+    [2027, 0, 31], // Jan 31
+    [2027, 1, 28], // Feb 28, 2027 -- not a leap year
+  ];
+  let after = new Date(anchor.getTime() - DAY_MS);
+  for (const [year, month, day] of expected) {
+    const next = nextOccurrence(anchor, 'MONTHLY', after, 0);
+    assert.equal(next.getUTCFullYear(), year);
+    assert.equal(next.getUTCMonth(), month);
+    assert.equal(next.getUTCDate(), day, `year-boundary clamp failed for ${year}-${month + 1}`);
+    after = next;
+  }
+});
+
+console.log('\nrecurring tickets — weekday roll');
+
+ok('rollToWeekday moves Saturday and Sunday to Monday and leaves Monday-Friday untouched', () => {
+  assert.equal(rollToWeekday(A_SATURDAY, 0).getUTCDay(), 1);
+  assert.equal(rollToWeekday(A_SATURDAY, 0).getTime(), A_SATURDAY.getTime() + 2 * DAY_MS);
+  assert.equal(rollToWeekday(A_SUNDAY, 0).getUTCDay(), 1);
+  assert.equal(rollToWeekday(A_SUNDAY, 0).getTime(), A_SUNDAY.getTime() + DAY_MS);
+
+  for (let day = 1; day <= 5; day += 1) {
+    const weekday = findUtcDay(day, new Date('2026-01-01T00:00:00Z'));
+    assert.equal(
+      rollToWeekday(weekday, 0).getTime(),
+      weekday.getTime(),
+      `${weekday.toISOString()} is Monday-Friday and must not move`,
+    );
+  }
+});
+
+ok('WEEKDAYS never lands on a weekend on the TEMPLATE wall clock, even across the date line', () => {
+  // Formula lifted from the module's own header comment: wall clock = instant
+  // minus the offset. Checking the raw UTC instant instead -- the bug this
+  // guards against -- would pass at tz=0 and fail invisibly everywhere else.
+  const wallClockDay = (instant: Date, tzOffsetMinutes: number) =>
+    new Date(instant.getTime() - tzOffsetMinutes * 60_000).getUTCDay();
+
+  const anchor = new Date('2026-01-05T09:00:00Z');
+  // 0 is the control; the rest are large, and one of each sign, so a template
+  // on the far side of the date line (a large negative offset shifts the wall
+  // clock a day AHEAD of UTC; a large positive one shifts it a day behind) is
+  // actually exercised, not just the common single-digit zones.
+  for (const tz of [0, BERLIN_SUMMER, 720, -720, MAX_TZ_OFFSET_MINUTES, -MAX_TZ_OFFSET_MINUTES]) {
+    let after = new Date(anchor.getTime() - DAY_MS);
+    for (let i = 0; i < 60; i += 1) {
+      const next = nextOccurrence(anchor, 'WEEKDAYS', after, tz);
+      const day = wallClockDay(next, tz);
+      assert.ok(
+        day !== 0 && day !== 6,
+        `tz=${tz}: occurrence ${next.toISOString()} is a weekend on the template's own wall clock (day=${day})`,
+      );
+      after = next;
+    }
+  }
+});
+
+console.log('\nrecurring tickets — missed occurrences are skipped, not replayed');
+
+ok('a daily template down for a week fires once tomorrow, not seven times today', () => {
+  const anchor = new Date('2026-01-05T09:00:00Z');
+  const now = new Date('2026-01-12T09:30:00Z'); // 7 days and 30 minutes late
+  const next = nextOccurrence(anchor, 'DAILY', now, 0);
+  assert.equal(next.toISOString(), '2026-01-13T09:00:00.000Z');
+  assert.ok(next.getTime() > now.getTime());
+});
+
+ok('an outage of several missed periods still yields exactly the immediate next occurrence, for every cadence', () => {
+  const anchor = new Date('2026-01-05T09:00:00Z');
+  // Each outage is sized to roughly seven periods of its own cadence -- "down
+  // for a week" scaled to what a week actually means for that repeat, so
+  // several real occurrences are missed in every case, not just DAILY's.
+  const outageMs: Record<(typeof TICKET_REPEATS)[number], number> = {
+    DAILY: 7 * DAY_MS,
+    WEEKDAYS: 7 * DAY_MS,
+    WEEKLY: 7 * 7 * DAY_MS,
+    MONTHLY: 7 * 31 * DAY_MS,
+  };
+  // How far past `now` the single returned occurrence may legitimately land:
+  // one cadence step, plus the WEEKDAYS roll's own two-day allowance. Replaying
+  // even one extra missed period would blow straight through this bound.
+  const stepBoundMs: Record<(typeof TICKET_REPEATS)[number], number> = {
+    DAILY: DAY_MS,
+    WEEKDAYS: 3 * DAY_MS,
+    WEEKLY: 7 * DAY_MS,
+    MONTHLY: 31 * DAY_MS,
+  };
+  for (const repeat of TICKET_REPEATS) {
+    const now = new Date(anchor.getTime() + outageMs[repeat]);
+    const next = nextOccurrence(anchor, repeat, now, 0);
+    assert.ok(next.getTime() > now.getTime(), `${repeat}: still due after the outage -- a spawn loop`);
+    const overshootDays = (next.getTime() - now.getTime()) / DAY_MS;
+    assert.ok(
+      next.getTime() - now.getTime() <= stepBoundMs[repeat],
+      `${repeat}: next occurrence is ${overshootDays} days past the outage ending -- ` +
+        'missed occurrences were skipped over rather than resuming at the very next one',
+    );
+  }
+});
+
+console.log('\nrecurring tickets — labels and date formatting');
+
+ok('every ticket repeat has a label, so the recurring page never renders undefined', () => {
+  for (const repeat of TICKET_REPEATS) {
+    assert.equal(typeof TICKET_REPEAT_LABEL[repeat], 'string');
+    assert.ok(TICKET_REPEAT_LABEL[repeat].length > 0);
+  }
+});
+
+ok('formatDateStamp and dueDateFor agree on the occurrence day, even when the offset crosses a UTC date boundary', () => {
+  // Tokyo, UTC+9 (tzOffsetMinutes -540): 2026-08-12T00:30 local is
+  // 2026-08-11T15:30 UTC. The UTC calendar day is a day behind the wall-clock
+  // day both the title stamp and the due date must use.
+  const tokyo = -540;
+  const instant = new Date('2026-08-11T15:30:00Z');
+  assert.equal(formatDateStamp(instant, tokyo), '12 Aug 2026');
+  assert.equal(dueDateFor(instant, tokyo).toISOString(), '2026-08-12T00:00:00.000Z');
+});
+
+ok('dueDateFor always returns exact UTC midnight, whatever the time of day or offset', () => {
+  for (const tz of [0, BERLIN_SUMMER, 720, -720, MAX_TZ_OFFSET_MINUTES, -MAX_TZ_OFFSET_MINUTES]) {
+    const due = dueDateFor(new Date('2026-08-11T23:59:59.999Z'), tz);
+    assert.equal(due.getUTCHours(), 0);
+    assert.equal(due.getUTCMinutes(), 0);
+    assert.equal(due.getUTCSeconds(), 0);
+    assert.equal(due.getUTCMilliseconds(), 0);
+  }
 });
 
 console.log(`\nAll good — ${checks} checks.\n`);

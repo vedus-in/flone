@@ -113,6 +113,8 @@ model User {
   challengePicks  ChallengePick[]
   reminders        Reminder[]  @relation("ReminderRecipient")
   createdReminders Reminder[]  @relation("ReminderCreatedBy")
+  recurringTickets        RecurringTicket[] @relation("RecurringTicketAssignee")
+  createdRecurringTickets RecurringTicket[] @relation("RecurringTicketCreatedBy")
 
   @@index([isAdmin])
 }
@@ -288,6 +290,7 @@ model Project {
   tickets    Ticket[]
   savedViews SavedView[]
   reminders  Reminder[]
+  recurringTickets RecurringTicket[]
 
   @@unique([organizationId, key])
   @@index([workspaceId])
@@ -352,6 +355,7 @@ model Label {
   createdAt DateTime @default(now())
 
   tickets Ticket[] @relation("TicketLabels")
+  recurringTickets RecurringTicket[] @relation("RecurringTicketLabels")
 
   @@unique([projectId, name])
 }
@@ -551,6 +555,89 @@ model Reminder {
   @@index([nextRunAt])
   /// The list on `/orgs/[orgSlug]/reminders`.
   @@index([organizationId])
+}
+
+/// How often a `RecurringTicket` spawns.
+///
+/// DELIBERATELY NOT `ReminderRepeat`. There is no `ONCE`: a one-time pre-filled
+/// ticket is called creating a ticket, and that form already exists. And there
+/// IS a `WEEKDAYS`, because a ticket is work and work has working days, where a
+/// reminder is a nudge and fires whenever it was asked to. Two different value
+/// sets, so two enums rather than one union that is wrong at both ends.
+enum TicketRepeat {
+  DAILY
+  WEEKDAYS
+  WEEKLY
+  MONTHLY
+}
+
+/// A template that the scheduler turns into a real `Ticket` on a cadence.
+///
+/// Design: docs/superpowers/specs/2026-08-16-recurring-tickets-design.md
+///
+/// PURELY ADDITIVE. The only write this feature makes to shared data is
+/// creating a ticket, and it goes through the same `insertTicket` transaction
+/// `createIssue` calls -- extracted, not copied, so the two cannot disagree
+/// about numbering, positioning or lifecycle stamps.
+///
+/// `nextRunAt` is the ONLY thing the scheduler reads, and writing it is how a
+/// spawn is claimed: the tick advances it with a conditional `updateMany` that
+/// matches on the value it read, so two overlapping ticks cannot both spawn the
+/// same occurrence. Exactly the mechanism `Reminder` uses, and null means the
+/// same thing -- not scheduled -- which here is what PAUSED is. A paused
+/// template keeps its accumulated description instead of being deleted to stop
+/// it, and needs no second boolean the due query could disagree with.
+///
+/// NO `stateId`. The state a spawned ticket lands in is resolved per spawn from
+/// the project's own states (`defaultComposeState`), because a stored state id
+/// is a reference a deleted or renamed state turns into a dangling pointer the
+/// scheduler trips over at 3am. Same indirection, same reason, as the Daily
+/// Challenges board resolving columns by state TYPE.
+///
+/// `tzOffsetMinutes` is `Date.prototype.getTimezoneOffset()` from the creator's
+/// browser, as on `Reminder` and with the same accepted DST ceiling. It is
+/// load-bearing beyond formatting here: the WEEKDAYS test and the MONTHLY
+/// day-of-month arithmetic both run on the template's own wall clock, or a
+/// template on the far side of the date line skips the wrong days.
+model RecurringTicket {
+  id             String       @id @default(cuid())
+  projectId      String
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// 1-160, not `Ticket.title`'s 200: every spawn stamps " -- 16 Aug 2026" onto
+  /// it, and the headroom is what makes the stamped title fit by construction.
+  title          String
+  description    String?      @db.Text
+  priority       Priority     @default(NONE)
+  /// SetNull, not Cascade: losing the assignee must not delete the process
+  /// definition. The next occurrence spawns unassigned and sits on the board.
+  assigneeId     String?
+  assignee       User?        @relation("RecurringTicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  repeat         TicketRepeat
+  /// The first occurrence. EVERY later occurrence is computed from it, never
+  /// from the previous one -- that is what stops a monthly template anchored on
+  /// the 31st from clamping to the 28th in February and then staying there
+  /// forever. See `nextOccurrence` in src/lib/reminder-math.ts.
+  anchorAt       DateTime
+  /// Null = PAUSED. The due query is `nextRunAt <= now`, which never matches
+  /// null, so a paused template is skipped without a second flag.
+  nextRunAt      DateTime?
+  lastSpawnedAt  DateTime?
+  tzOffsetMinutes Int         @default(0)
+  /// Cascade, like `Reminder`: configuration, not authored content. In practice
+  /// a creator with authored tickets cannot be hard-deleted anyway
+  /// (`Ticket.createdById` is Restrict), so a live template always has a live
+  /// creator for the rows it spawns to name.
+  createdById    String
+  createdBy      User         @relation("RecurringTicketCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  labels         Label[]      @relation("RecurringTicketLabels")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  /// The scheduler's whole query. Every other column is read only after a row
+  /// has already been found through this one.
+  @@index([nextRunAt])
+  /// The list on `.../[projectKey]/recurring`.
+  @@index([projectId])
 }
 
 /// A named URL. `query` is the Issues-list query string verbatim, so there is

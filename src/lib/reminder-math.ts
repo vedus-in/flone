@@ -17,9 +17,10 @@
  * recompute the local wall time per occurrence if that hour ever matters.
  */
 
-import type { ReminderChannel, ReminderRepeat } from '@prisma/client';
+import type { ReminderChannel, ReminderRepeat, TicketRepeat } from '@prisma/client';
 
 const MINUTE_MS = 60_000;
+const DAY_MS = 86_400_000;
 
 /**
  * How far apart two sends are. `ONCE` is zero, which is what makes it the
@@ -191,6 +192,175 @@ export function toInstant(local: string, tzOffsetMinutes: number): Date | null {
 /** The inverse: the instant shifted so UTC getters read the recipient's clock. */
 function wallClock(instant: Date, tzOffsetMinutes: number): Date {
   return new Date(instant.getTime() - tzOffsetMinutes * MINUTE_MS);
+}
+
+/** Back from a shifted wall clock to the real instant. Inverse of `wallClock`. */
+function fromWallClock(wall: Date, tzOffsetMinutes: number): Date {
+  return new Date(wall.getTime() + tzOffsetMinutes * MINUTE_MS);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Recurring tickets                                                           */
+/*                                                                             */
+/* A second cadence vocabulary, for `RecurringTicket` rather than `Reminder`.  */
+/* Everything below computes an occurrence from the template's IMMUTABLE       */
+/* anchor, never from the previous occurrence -- see `nextOccurrence` for what  */
+/* that buys and what breaks without it.                                       */
+/* -------------------------------------------------------------------------- */
+
+export const TICKET_REPEAT_LABEL: Record<TicketRepeat, string> = {
+  DAILY: 'Every day',
+  WEEKDAYS: 'Every weekday',
+  WEEKLY: 'Every week',
+  MONTHLY: 'Every month',
+};
+
+/**
+ * Saturday or Sunday ON THE TEMPLATE'S OWN CLOCK.
+ *
+ * The shift is not cosmetic here. A Monday 08:00 Tokyo spawn is Sunday 23:00 in
+ * UTC, so testing the raw instant would skip every Monday and happily spawn
+ * every Sunday -- a bug nobody would see until a template crossed the date
+ * line.
+ */
+function isWeekend(instant: Date, tzOffsetMinutes: number): boolean {
+  const day = wallClock(instant, tzOffsetMinutes).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+/**
+ * The same instant, moved forward to Monday if it lands on a weekend.
+ *
+ * At most two steps by construction (Saturday -> Sunday -> Monday), so this is
+ * a bounded roll and not a search. Used twice: once by the create action, so a
+ * WEEKDAYS template whose first run was picked on a Saturday starts on the
+ * Monday rather than silently skipping its first occurrence, and once per
+ * spawn inside `nextOccurrence`.
+ */
+export function rollToWeekday(instant: Date, tzOffsetMinutes: number): Date {
+  let out = instant;
+  for (let step = 0; step < 2 && isWeekend(out, tzOffsetMinutes); step += 1) {
+    out = new Date(out.getTime() + DAY_MS);
+  }
+  return out;
+}
+
+/** Whole fixed-length periods on from the anchor, always strictly after `after`. */
+function afterAnchor(anchorAt: Date, stepMs: number, after: Date): Date {
+  const elapsed = after.getTime() - anchorAt.getTime();
+  // A negative elapsed means the anchor is itself still ahead of `after` -- a
+  // resumed template whose anchor was moved forward. Period 0 is then the
+  // answer, and clamping to 1 here would silently skip it.
+  const periods = Math.max(0, Math.floor(elapsed / stepMs) + 1);
+  return new Date(anchorAt.getTime() + periods * stepMs);
+}
+
+/**
+ * The `k`th monthly occurrence, on the template's wall clock.
+ *
+ * The day is CLAMPED to the target month's length, so a template anchored on
+ * the 31st resolves to the 28th in a non-leap February. The clamp applies to
+ * this occurrence only and never feeds the next one, which is the entire reason
+ * every occurrence is computed from the anchor: chaining would turn one
+ * February into a permanent move to the 28th.
+ */
+function monthlyWall(anchorWall: Date, k: number): Date {
+  const months = anchorWall.getUTCMonth() + k;
+  const year = anchorWall.getUTCFullYear() + Math.floor(months / 12);
+  const month = ((months % 12) + 12) % 12;
+  // Day 0 of the following month is the last day of this one.
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return new Date(
+    Date.UTC(
+      year,
+      month,
+      Math.min(anchorWall.getUTCDate(), lastDay),
+      anchorWall.getUTCHours(),
+      anchorWall.getUTCMinutes(),
+    ),
+  );
+}
+
+/**
+ * When a recurring ticket next spawns, given the occurrence that just fired.
+ *
+ * ALWAYS STRICTLY AFTER `after`, and computed from `anchorAt` rather than from
+ * the previous occurrence. Both properties are load-bearing and both are
+ * asserted in `scripts/check-model.ts`:
+ *
+ *   - Not strictly after would be a spawn loop. The row stays due, and every
+ *     tick creates another copy of the same ticket -- the board fills up with
+ *     duplicates of the one thing somebody actually has to do.
+ *   - Anchored rather than chained is what makes MONTHLY correct: the 31st runs
+ *     Jan 31 -> Feb 28 -> Mar 31, where chaining would clamp once in February
+ *     and never come back.
+ *
+ * Missed occurrences are SKIPPED, not replayed, exactly as `nextRun` skips
+ * missed reminders. A scheduler down for a week spawns one ticket per template
+ * rather than seven: six stale review tickets are noise that buries the one
+ * that matters, and the work they stand for did not happen anyway.
+ */
+export function nextOccurrence(
+  anchorAt: Date,
+  repeat: TicketRepeat,
+  after: Date,
+  tzOffsetMinutes: number,
+): Date {
+  if (repeat === 'MONTHLY') {
+    const anchorWall = wallClock(anchorAt, tzOffsetMinutes);
+    const afterWall = wallClock(after, tzOffsetMinutes);
+
+    // Whole calendar months between the two, which is a LOWER BOUND on the
+    // answer: occurrence k-1 falls in the month before `after`'s, so it cannot
+    // be later than `after`. Starting there makes the loop below run once or
+    // twice whatever the gap, so a template unfired for a year costs the same
+    // as one unfired for a minute.
+    let k =
+      (afterWall.getUTCFullYear() - anchorWall.getUTCFullYear()) * 12 +
+      (afterWall.getUTCMonth() - anchorWall.getUTCMonth());
+    if (k < 0) k = 0;
+    while (monthlyWall(anchorWall, k).getTime() <= afterWall.getTime()) k += 1;
+
+    return fromWallClock(monthlyWall(anchorWall, k), tzOffsetMinutes);
+  }
+
+  if (repeat === 'WEEKLY') return afterAnchor(anchorAt, 7 * DAY_MS, after);
+
+  // DAILY and WEEKDAYS share the daily step; WEEKDAYS then rolls off the
+  // weekend. The roll only ever moves forward, so the result stays strictly
+  // after `after`.
+  const daily = afterAnchor(anchorAt, DAY_MS, after);
+  return repeat === 'WEEKDAYS' ? rollToWeekday(daily, tzOffsetMinutes) : daily;
+}
+
+/**
+ * `16 Aug 2026` -- the date stamped onto every spawned ticket's title.
+ *
+ * Fixed locale and UTC-formatted on an already-shifted instant, the same rule
+ * every other formatter here follows, so the title a cron process in another
+ * country writes is the date the person who set the template would have named.
+ */
+const DATE_STAMP = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+export function formatDateStamp(instant: Date, tzOffsetMinutes: number): string {
+  return DATE_STAMP.format(wallClock(instant, tzOffsetMinutes));
+}
+
+/**
+ * The spawned ticket's due date: midnight UTC on the occurrence's own day.
+ *
+ * UTC midnight is the convention `isoDateSchema` and every other due date in
+ * the app already stores, so a spawned ticket sorts and renders beside a
+ * hand-filed one instead of an hour off it.
+ */
+export function dueDateFor(instant: Date, tzOffsetMinutes: number): Date {
+  const wall = wallClock(instant, tzOffsetMinutes);
+  return new Date(Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate()));
 }
 
 /**

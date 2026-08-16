@@ -2,7 +2,7 @@ import { Action, Card, EmailLayout, Eyebrow, FallbackLink, Meta, Note, Paragraph
 import { PRODUCT_NAME } from './theme';
 
 /**
- * The eleven messages.
+ * The twelve messages.
  *
  * All in one file on purpose: they are short, they share a vocabulary, and the
  * thing most worth reviewing about them is that the copy is CONSISTENT --
@@ -479,4 +479,66 @@ ReminderEmail.PreviewProps = {
   repeat: 'Every day',
   setBy: 'Dana Reed',
   url: 'https://flone.example.com/orgs/acme/reminders',
+};
+
+/* -------------------------------------------------------------------------- */
+/* 11. A recurring ticket spawned                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Carries the issue key the same way `issueAssignedSubject` does -- searchable
+ * by key in a mailbox exactly like an assigned issue is -- but the verb
+ * differs: nobody assigned this. A cron tick spawned it from a template the
+ * recipient (or a teammate) set up; "ready" says that without claiming a
+ * person did something they did not.
+ */
+export function recurringTicketSubject(key: string, title: string): string {
+  return `${key} ready: ${title}`;
+}
+
+/**
+ * Sent by the recurring-ticket tick (`src/lib/recurring.ts`) when a template
+ * spawns its next occurrence, to the assignee only, only once their address is
+ * confirmed -- checked by the caller, not here, same split as reminders (§7 of
+ * the recurring-tickets design).
+ *
+ * `IssueAssignedEmail` is deliberately NOT reused here. Its copy says a person
+ * did something ("Dana assigned you...") and at spawn time nobody did -- do
+ * not "simplify" this back to it.
+ */
+export function RecurringTicketEmail({
+  issueKey,
+  issueTitle,
+  projectName,
+  repeat,
+  url,
+}: {
+  issueKey: string;
+  issueTitle: string;
+  projectName: string;
+  repeat: string;
+  url: string;
+}) {
+  return (
+    <EmailLayout preview={issueTitle} context={projectName}>
+      <Card>
+        <Eyebrow>New ticket</Eyebrow>
+        <Title>{issueTitle}</Title>
+        <Meta>
+          {issueKey} &middot; {projectName}
+        </Meta>
+        <Paragraph>Your recurring ticket is ready. {repeat}.</Paragraph>
+        <Action href={url}>Open {issueKey}</Action>
+        <FallbackLink href={url} note="Or paste this link into your browser:" />
+      </Card>
+    </EmailLayout>
+  );
+}
+
+RecurringTicketEmail.PreviewProps = {
+  issueKey: 'ENG-482',
+  issueTitle: 'XAU breakout daily review — 16 Aug 2026',
+  projectName: 'Trading Desk',
+  repeat: 'Every weekday',
+  url: 'https://flone.example.com/orgs/acme/ENG/issue/482',
 };

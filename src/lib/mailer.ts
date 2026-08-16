@@ -15,6 +15,7 @@ import {
   NewCommentEmail,
   PasswordChangedEmail,
   PasswordResetEmail,
+  RecurringTicketEmail,
   ReminderEmail,
   VerifyEmail,
   accountExistsSubject,
@@ -26,6 +27,7 @@ import {
   newCommentSubject,
   passwordChangedSubject,
   passwordResetSubject,
+  recurringTicketSubject,
   reminderSubject,
   verifyEmailSubject,
 } from '@/emails/templates';
@@ -417,6 +419,51 @@ export async function sendReminderMail(input: {
       scope: input.scope,
       repeat: input.repeat,
       setBy: input.setBy,
+      url: input.url,
+    }),
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Recurring tickets                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The recurring-ticket counterpart of `sendReminderMail`, bent past the
+ * never-mail-the-actor rule the same way and for the same reason: a template
+ * you set up and assigned to yourself arriving silently would defeat the
+ * point, and at spawn time the actor is a cron tick, not a person to protect
+ * from their own mail.
+ *
+ * `IssueAssignedEmail` is deliberately NOT reused -- its copy says a person
+ * did something ("Dana assigned you...") and here nobody did; do not
+ * "simplify" this back to it.
+ *
+ * `await`ed via `renderAndSend`, not `queueMail`: the caller is
+ * `runDueRecurringTickets`, a cron tick with no response for `after()` to run
+ * behind -- exactly why `sendReminderMail` awaits instead of queueing.
+ *
+ * The unverified-address rule still holds but is enforced by the CALLER (the
+ * scheduler), not here -- the same split `sendReminderMail` uses, so the tick
+ * can advance the schedule for an unconfirmed recipient without sending,
+ * rather than leaving the row permanently due.
+ */
+export async function sendRecurringTicketMail(input: {
+  email: string;
+  issueKey: string;
+  issueTitle: string;
+  projectName: string;
+  repeat: string;
+  url: string;
+}): Promise<void> {
+  await renderAndSend(
+    input.email,
+    recurringTicketSubject(input.issueKey, input.issueTitle),
+    RecurringTicketEmail({
+      issueKey: input.issueKey,
+      issueTitle: input.issueTitle,
+      projectName: input.projectName,
+      repeat: input.repeat,
       url: input.url,
     }),
   );
