@@ -11,6 +11,12 @@ export const styles = sortCx({
     common: {
         root: [
             "group relative inline-flex h-max cursor-pointer items-center justify-center whitespace-nowrap outline-brand transition duration-100 ease-linear before:absolute focus-visible:outline-2 focus-visible:outline-offset-2",
+            // Tactile press. 0.96 is the floor -- anything smaller reads as a
+            // gimmick rather than a response. `transition` above already covers
+            // transform, so this is one property and no new transition. A
+            // disabled button must not appear to respond, and anyone who has
+            // asked for less motion gets none.
+            "active:scale-[0.96] disabled:active:scale-100 motion-reduce:active:scale-100",
             // When button is used within `InputGroup`
             "in-data-input-wrapper:shadow-xs in-data-input-wrapper:focus:!z-50 in-data-input-wrapper:in-data-leading:-mr-px in-data-input-wrapper:in-data-leading:rounded-r-none in-data-input-wrapper:in-data-leading:before:rounded-r-none in-data-input-wrapper:in-data-trailing:-ml-px in-data-input-wrapper:in-data-trailing:rounded-l-none in-data-input-wrapper:in-data-trailing:before:rounded-l-none",
             // Disabled styles

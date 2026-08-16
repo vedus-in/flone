@@ -226,7 +226,7 @@ export function Field({ htmlFor, label, hint, error, children, className }: Fiel
       </Label>
       {children}
       {hint ? (
-        <span id={`${htmlFor}-hint`} className="text-xs text-tertiary">
+        <span id={`${htmlFor}-hint`} className="text-xs text-pretty text-tertiary">
           {hint}
         </span>
       ) : null}
@@ -371,8 +371,8 @@ export function PageHeader({
   return (
     <header className={cx('flex flex-wrap items-start justify-between gap-4', className)}>
       <div className="flex min-w-0 flex-col gap-1.5">
-        <h1 className="text-xl font-semibold text-primary">{title}</h1>
-        {description ? <p className="text-sm text-tertiary">{description}</p> : null}
+        <h1 className="text-xl font-semibold text-balance text-primary">{title}</h1>
+        {description ? <p className="text-sm text-pretty text-tertiary">{description}</p> : null}
         {children ? <div className="flex flex-wrap items-center gap-2">{children}</div> : null}
       </div>
       {actions ? (
