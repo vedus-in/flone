@@ -16,7 +16,8 @@ A small, multi-tenant Kanban application. People sign up with an email address a
 - **Tickets** — title, optional description, a per-board sequential number, an optional assignee. Moved between columns and reordered within a column using buttons on the card.
 - **Comments** — Markdown comments on a ticket, edited in place: press Edit and the comment itself becomes the editor, Ctrl/Cmd+Enter or Save commits, Escape reverts. You can edit and delete your own; admins and owners can moderate any.
 - **@mentions** — type `@` in a comment to tag any member of the organization, and they get an email about it. The name is stored as plain text in the body, so who was tagged is re-derived from the comment itself — including after an edit, which mails only the people it newly named.
-- **MCP** — one authenticated endpoint (`/api/mcp`) exposing the whole application to an AI assistant: organizations, members, projects, boards, tickets, comments and site administration. See [MCP access](#mcp-access).
+- **Recurring tickets** — a template that creates a pre-filled issue on a schedule: daily, weekdays, weekly or monthly. Title, Markdown description, priority, labels and assignee are copied onto each one, which arrives due that day with the date on its title. Every occurrence is counted from the template's original anchor, so one anchored on the 31st runs Jan 31 → Feb 28 → Mar 31 rather than sticking at the 28th. Editing the description changes every future ticket and none already created; pausing keeps it for when the work comes back.
+- **MCP** — one authenticated endpoint (`/api/mcp`) exposing the whole application to an AI assistant: organizations, members, projects, boards, tickets, comments, reminders, recurring tickets, saved views and site administration. See [MCP access](#mcp-access).
 
 ### Not included, on purpose
 
@@ -127,22 +128,29 @@ Any other MCP client works the same way — point it at the endpoint with that o
 
 ### Tools
 
-The whole application, 28 tools. Every one of them is the same Server Action the web UI submits, so the role matrix below is the app's, not a second implementation of it.
+The whole application, 47 tools. Every one of them is the same Server Action the web UI submits, so the role matrix below is the app's, not a second implementation of it.
 
 | Area | Tools | Who |
 | --- | --- | --- |
-| Reading | `list_boards`, `get_organization`, `get_board`, `get_ticket`, `search_tickets` | any member |
+| Reading | `list_boards`, `whoami`, `get_organization`, `get_project`, `get_board`, `get_ticket`, `search_tickets` | any member |
 | Tickets | `create_ticket`, `update_ticket`, `move_ticket`, `move_ticket_to_board`, `delete_ticket` | any member; delete is author/`ADMIN`/`OWNER` |
 | Comments | `create_comment`, `update_comment`, `delete_comment` | any member; edit and delete are author/`ADMIN`/`OWNER` |
 | Boards | `create_board`, `rename_board`, `delete_board` | `ADMIN` or `OWNER` |
 | Projects | `create_project`, `update_project`, `delete_project` | `ADMIN` or `OWNER` |
+| Workspaces | `create_workspace` | `ADMIN` or `OWNER` |
 | Organizations | `create_organization`, `rename_organization`, `delete_organization` | anyone may create; rename is `ADMIN`+, delete is `OWNER` |
 | Members | `add_member`, `set_member_role`, `remove_member` | `ADMIN` or `OWNER`; granting `OWNER` is `OWNER`-only |
+| Daily Challenges | `list_challenges`, `add_challenge`, `remove_challenge`, `move_challenge` | your own board only |
+| Reminders | `list_reminders`, `create_reminder`, `delete_reminder` | any member; delete is setter/recipient/`ADMIN` |
+| Recurring tickets | `list_recurring_tickets`, `create_recurring_ticket`, `update_recurring_ticket`, `reschedule_recurring_ticket`, `set_recurring_ticket_paused`, `delete_recurring_ticket` | any member; delete is creator/`ADMIN`/`OWNER` |
+| Saved views | `list_views`, `create_view`, `delete_view` | any member; delete is creator/`ADMIN` |
 | Site admin | `admin_list_users`, `admin_set_registration`, `admin_set_user_admin` | site administrators |
 
 `delete_project` and `delete_organization` require the caller to echo the project key or organization name exactly, the same confirmation the web forms ask for.
 
-Two things are deliberately absent. Signing out would revoke the very token making the call, and login/register mint credentials — a caller holding a token is already authenticated, and account creation stays a human act behind the registration flag. Board columns are fixed at three app-wide, so there is nothing to expose.
+Some things are deliberately absent. Signing out would revoke the very token making the call; login, register and creating an MCP token all mint credentials — a caller holding a token is already authenticated, and account creation stays a human act behind the registration flag; and phone verification places a real call, which is not something a model should trigger on someone's handset.
+
+Others are simply not built yet: workflow states, labels and cycles can be read and referred to by name but not created or edited over MCP, and neither can cycle configuration, workspace renaming, notification preferences or pending invitations. The web UI does all of those.
 
 ### Verifying it
 

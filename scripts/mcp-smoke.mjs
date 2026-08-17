@@ -95,9 +95,18 @@ step('unauthenticated -> 401');
 
 /* -- tools ----------------------------------------------------------------- */
 
-const { body: listed } = await rpc('tools/list');
-const names = listed.result.tools.map((tool) => tool.name).sort();
-assert.deepEqual(names, [
+/**
+ * Tool names are a WIRE CONTRACT: clients call them by string, so removing or
+ * renaming one breaks somebody's automation silently.
+ *
+ * Asserted as a SUPERSET, not an exact set. This list was frozen twice as an
+ * `assert.deepEqual` and rotted both times -- `whoami` and `create_workspace`
+ * shipped without it, so `mcp:smoke` failed on a list mismatch rather than on
+ * anything actually wrong. A missing name still fails the run, which is the
+ * property worth having; a NEW name is reported and does not, because adding a
+ * tool cannot break an existing caller.
+ */
+const REQUIRED_TOOLS = [
   'add_challenge',
   'add_member',
   'admin_list_users',
@@ -107,13 +116,16 @@ assert.deepEqual(names, [
   'create_comment',
   'create_organization',
   'create_project',
+  'create_recurring_ticket',
   'create_reminder',
   'create_ticket',
   'create_view',
+  'create_workspace',
   'delete_board',
   'delete_comment',
   'delete_organization',
   'delete_project',
+  'delete_recurring_ticket',
   'delete_reminder',
   'delete_ticket',
   'delete_view',
@@ -123,6 +135,7 @@ assert.deepEqual(names, [
   'get_ticket',
   'list_boards',
   'list_challenges',
+  'list_recurring_tickets',
   'list_reminders',
   'list_views',
   'move_challenge',
@@ -132,18 +145,47 @@ assert.deepEqual(names, [
   'remove_member',
   'rename_board',
   'rename_organization',
+  'reschedule_recurring_ticket',
   'search_tickets',
   'set_member_role',
+  'set_recurring_ticket_paused',
   'update_comment',
   'update_project',
+  'update_recurring_ticket',
   'update_ticket',
-]);
+  'whoami',
+];
+
+const { body: listed } = await rpc('tools/list');
+const names = listed.result.tools.map((tool) => tool.name).sort();
+
+const missing = REQUIRED_TOOLS.filter((name) => !names.includes(name));
+assert.deepEqual(missing, [], `tools removed or renamed: ${missing.join(', ')}`);
+
+// Two tools answering to one name means one of them is unreachable, and which
+// one depends on array order -- a bug no type checker sees.
+const duplicates = names.filter((name, index) => names.indexOf(name) !== index);
+assert.deepEqual(duplicates, [], `duplicate tool names: ${duplicates.join(', ')}`);
+
 for (const tool of listed.result.tools) {
   assert.equal(tool.inputSchema.type, 'object', `${tool.name} needs an object inputSchema`);
   assert.ok(tool.description, `${tool.name} needs a description`);
   assert.equal(tool.run, undefined, `${tool.name} must not leak its handler`);
+  // A required key that is not a declared property can never be satisfied, so
+  // the tool is uncallable -- and the error the client gets says nothing useful.
+  for (const key of tool.inputSchema.required ?? []) {
+    assert.ok(
+      Object.keys(tool.inputSchema.properties ?? {}).includes(key),
+      `${tool.name} requires "${key}" but does not declare it`,
+    );
+  }
 }
-step(`tools/list -> ${names.length} tools`);
+
+const added = names.filter((name) => !REQUIRED_TOOLS.includes(name));
+step(
+  `tools/list -> ${names.length} tools` +
+    (added.length ? ` (${added.length} newer than this script: ${added.join(', ')})` : ''),
+);
 
 /* -- a tool error is a result, not a transport error ----------------------- */
 

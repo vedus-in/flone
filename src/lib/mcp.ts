@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { Priority, ReminderRepeat, Role } from '@prisma/client';
+import { Priority, ReminderChannel, ReminderRepeat, Role, TicketRepeat } from '@prisma/client';
 
 import {
   AuthzError,
@@ -11,6 +11,7 @@ import {
   issuesPath,
   orgPath,
   projectPath,
+  recurringPath,
   remindersPath,
   requireAdmin,
   requireBoard,
@@ -30,7 +31,14 @@ import { prisma } from '@/lib/db';
 import { CHALLENGE_COLUMNS, columnForStateType } from '@/lib/challenges';
 import { ensureCycles } from '@/lib/cycles';
 import { listNavTree } from '@/lib/nav';
-import { REPEAT_LABEL, formatWhen } from '@/lib/reminder-math';
+import {
+  CHANNEL_CALLS,
+  CHANNEL_EMAILS,
+  CHANNEL_LABEL,
+  REPEAT_LABEL,
+  TICKET_REPEAT_LABEL,
+  formatWhen,
+} from '@/lib/reminder-math';
 import type { ActionResult } from '@/lib/result';
 import { getAppSettings, isRegistrationOpen } from '@/lib/settings';
 import { listStates } from '@/lib/states';
@@ -66,6 +74,12 @@ import {
   deleteReminder,
 } from '@/app/(app)/orgs/[orgSlug]/reminders/actions';
 import {
+  createRecurringTicket,
+  deleteRecurringTicket,
+  setRecurringTicketPaused,
+  updateRecurringTicket,
+} from '@/app/(app)/orgs/[orgSlug]/[workspaceSlug]/[projectKey]/recurring/actions';
+import {
   createIssue,
   deleteIssue,
   placeIssue,
@@ -87,10 +101,13 @@ import {
 /**
  * The MCP tool surface (transport lives in `src/app/api/mcp/route.ts`).
  *
- * It covers the whole application: organizations, members, projects, workflow
- * states, labels, cycles, boards, issues, comments, the per-person Daily
- * Challenges board, scheduled reminders, saved views and site administration.
- * Everything the web UI can do, a model can do — under exactly the same rules.
+ * It covers organizations, members, projects, boards, issues, comments, the
+ * per-person Daily Challenges board, scheduled reminders, recurring tickets,
+ * saved views and site administration. Workflow states, labels and cycles are
+ * readable and referable by name, but not yet editable here — see the gap list
+ * at the foot of this comment.
+ *
+ * What a model CAN do, it does under exactly the same rules as the web UI.
  *
  * THIS FILE ADDS NO AUTHORIZATION OF ITS OWN, and that is the point. Every read
  * goes through a `require*` helper from `@/lib/authz` or is a nested/rooted
@@ -110,10 +127,17 @@ import {
  * who minted the token — never more. A MEMBER's token cannot delete an
  * organization here any more than their browser can.
  *
- * Two actions are deliberately absent. `signOut` would revoke the very token
- * making the call, and `login`/`register` mint credentials — a caller holding a
- * token is already authenticated, and account creation stays a human act behind
- * the registration flag.
+ * Deliberately absent, and the list is exhaustive. `signOut` would revoke the
+ * very token making the call. `login` / `register` mint credentials — a caller
+ * holding a token is already authenticated, and account creation stays a human
+ * act behind the registration flag. `createMcpToken` mints a credential for the
+ * same reason, and phone verification places a real phone call, which is not
+ * something a model should be able to trigger on a colleague's handset.
+ *
+ * NOT everything the web UI can do is here yet. Known read/write gaps, none of
+ * them load-bearing for the tools above: workflow-state and label CRUD, cycle
+ * configuration, workspace rename/delete/reorder, notification preferences,
+ * pending-invitation visibility, and board colour/lead/target-date.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -156,7 +180,7 @@ function requiredString(args: Args, key: string): string {
 function requiredId(args: Args, key: string): string {
   const parsed = cuid.safeParse(requiredString(args, key));
   if (!parsed.success) {
-    throw new ToolError(`"${key}" must be an id returned by a previous read (list_boards, get_organization, get_board, get_ticket or search_tickets).`);
+    throw new ToolError(`"${key}" must be an id returned by a previous read (get_organization, get_project, get_board, get_ticket or search_tickets).`);
   }
   return parsed.data;
 }
@@ -230,6 +254,24 @@ function optionalInt(args: Args, key: string): number | undefined {
     throw new ToolError(`"${key}" must be a non-negative integer.`);
   }
   return value;
+}
+
+/**
+ * `tzOffsetMinutes`, which is SIGNED — Berlin in summer is -120.
+ *
+ * Read here rather than through `optionalInt`, whose non-negative rule would
+ * reject every timezone east of Greenwich. Defaults to 0, i.e. the wall clock
+ * the caller gave is UTC: there is no browser on this side of the API to ask,
+ * and guessing a zone from the server's own clock is how a reminder arrives at
+ * the wrong hour in a country nobody involved is in.
+ */
+function signedOffset(args: Args): number {
+  const raw = args.tzOffsetMinutes;
+  if (raw === undefined || raw === null) return 0;
+  if (!Number.isInteger(raw)) {
+    throw new ToolError('"tzOffsetMinutes" must be a whole number of minutes.');
+  }
+  return raw as number;
 }
 
 function requiredBoolean(args: Args, key: string): boolean {
@@ -405,6 +447,9 @@ function enumOf<T extends string>(values: readonly T[], label: string, value: st
 const PRIORITIES = Object.values(Priority);
 const ROLES = Object.values(Role);
 const REPEATS = Object.values(ReminderRepeat);
+const CHANNELS = Object.values(ReminderChannel);
+/** No ONCE here: a one-time pre-filled ticket is `create_ticket`. */
+const TICKET_REPEATS = Object.values(TicketRepeat);
 const CHALLENGE_COLUMN_IDS = CHALLENGE_COLUMNS.map((column) => column.id);
 
 /**
@@ -532,7 +577,7 @@ export const TOOLS: Tool[] = [
     name: 'list_boards',
     title: 'List boards',
     description:
-      'Every organization, project and board the signed-in user can reach, with the ids and slugs the other tools need. Start here.',
+      'Every organization, workspace and project the signed-in user can reach, with the slugs and keys the other tools need. Start here. It does NOT return boards — those come from get_organization or get_project.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
     run: async () => ({ organizations: await listNavTree() }),
@@ -623,7 +668,9 @@ export const TOOLS: Tool[] = [
       "A board's issues, grouped by the PROJECT's workflow states in board order, plus the organization members who can be assigned work. A board owns no columns of its own.",
     inputSchema: {
       type: 'object',
-      properties: { boardId: { ...STRING, description: 'From list_boards.' } },
+      properties: {
+        boardId: { ...STRING, description: 'From get_organization or get_project.' },
+      },
       required: ['boardId'],
       additionalProperties: false,
     },
@@ -1968,11 +2015,24 @@ export const TOOLS: Tool[] = [
           id: true,
           title: true,
           repeat: true,
+          channel: true,
           nextRunAt: true,
           lastSentAt: true,
           tzOffsetMinutes: true,
           project: { select: { name: true, key: true } },
-          recipient: { select: { id: true, name: true, email: true, emailVerified: true } },
+          recipient: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              emailVerified: true,
+              // `phoneVerified` only, NEVER the number itself. Every member of
+              // the organization can call this tool, and a roster of
+              // colleagues' phone numbers is not something reading the reminder
+              // list should hand out -- the same rule the web page follows.
+              phoneVerified: true,
+            },
+          },
           createdBy: { select: { name: true } },
         },
       });
@@ -1980,26 +2040,46 @@ export const TOOLS: Tool[] = [
       return {
         organization: ctx.org.name,
         url: remindersPath(ctx.org),
-        reminders: reminders.map((reminder) => ({
-          reminderId: reminder.id,
-          title: reminder.title,
-          repeat: reminder.repeat,
-          repeatLabel: REPEAT_LABEL[reminder.repeat],
-          // Both: the instant is what to reason about, the label is what the
-          // recipient will actually read in the message.
-          nextRunAt: reminder.nextRunAt?.toISOString() ?? null,
-          nextRunLocal: reminder.nextRunAt
-            ? formatWhen(reminder.nextRunAt, reminder.tzOffsetMinutes)
-            : null,
-          lastSentAt: reminder.lastSentAt?.toISOString() ?? null,
-          scope: reminder.project ? 'project' : 'organization',
-          projectKey: reminder.project?.key ?? null,
-          recipient: reminder.recipient.name,
-          recipientEmail: reminder.recipient.email,
-          // The feature's one silent failure: scheduled, advanced, never sent.
-          deliverable: reminder.recipient.emailVerified !== null,
-          setBy: reminder.createdBy.name,
-        })),
+        reminders: reminders.map((reminder) => {
+          // What this row will ACTUALLY do, which is not the same as what it was
+          // set to. A channel whose destination has never been confirmed is
+          // claimed, advanced and delivered nowhere -- the feature's one silent
+          // failure, and the reason this is computed rather than assumed.
+          //
+          // Mirrors `runDueReminders` exactly: it counts a row as delivered if
+          // ANY requested channel got through, so BOTH with only a confirmed
+          // email is still deliverable, just not by phone.
+          const wantsEmail = CHANNEL_EMAILS[reminder.channel];
+          const wantsCall = CHANNEL_CALLS[reminder.channel];
+          const byEmail = wantsEmail && reminder.recipient.emailVerified !== null;
+          const byCall = wantsCall && reminder.recipient.phoneVerified !== null;
+
+          return {
+            reminderId: reminder.id,
+            title: reminder.title,
+            repeat: reminder.repeat,
+            repeatLabel: REPEAT_LABEL[reminder.repeat],
+            channel: reminder.channel,
+            channelLabel: CHANNEL_LABEL[reminder.channel],
+            // Both: the instant is what to reason about, the label is what the
+            // recipient will actually read in the message.
+            nextRunAt: reminder.nextRunAt?.toISOString() ?? null,
+            nextRunLocal: reminder.nextRunAt
+              ? formatWhen(reminder.nextRunAt, reminder.tzOffsetMinutes)
+              : null,
+            lastSentAt: reminder.lastSentAt?.toISOString() ?? null,
+            scope: reminder.project ? 'project' : 'organization',
+            projectKey: reminder.project?.key ?? null,
+            recipient: reminder.recipient.name,
+            recipientEmail: reminder.recipient.email,
+            deliverable: byEmail || byCall,
+            // Per-channel, so a BOTH reminder that will email but never ring is
+            // legible as exactly that rather than a flat "deliverable: true".
+            willEmail: byEmail,
+            willCall: byCall,
+            setBy: reminder.createdBy.name,
+          };
+        }),
       };
     },
   },
@@ -2019,6 +2099,12 @@ export const TOOLS: Tool[] = [
           ...STRING,
           enum: REPEATS,
           description: 'ONCE, DAILY or WEEKLY. Defaults to ONCE.',
+        },
+        channel: {
+          ...STRING,
+          enum: CHANNELS,
+          description:
+            'EMAIL, CALL or BOTH. Defaults to EMAIL. A CALL needs a phone number the recipient has confirmed on their own account — nobody else can set one for them, and an unconfirmed number is silently never rung. Check `willCall` in list_reminders afterwards.',
         },
         projectKey: {
           ...STRING,
@@ -2051,6 +2137,13 @@ export const TOOLS: Tool[] = [
         throw new ToolError(`"repeat" must be one of: ${REPEATS.join(', ')}.`);
       }
 
+      // Defaults to EMAIL, matching the column default: a caller who does not
+      // mention a channel cannot accidentally schedule a phone call.
+      const channel = (optionalString(args, 'channel') ?? ReminderChannel.EMAIL).toUpperCase();
+      if (!(CHANNELS as string[]).includes(channel)) {
+        throw new ToolError(`"channel" must be one of: ${CHANNELS.join(', ')}.`);
+      }
+
       const projectKey = optionalString(args, 'projectKey');
       // Resolved through the membership-scoped loader, so a key from another
       // tenant is not found rather than silently scoped to the wrong project.
@@ -2060,12 +2153,7 @@ export const TOOLS: Tool[] = [
 
       const recipientIds = await resolveRecipients(ctx.org.id, args);
 
-      // Signed, so a negative offset survives `optionalInt`'s non-negative rule.
-      const rawOffset = args.tzOffsetMinutes;
-      if (rawOffset !== undefined && rawOffset !== null && !Number.isInteger(rawOffset)) {
-        throw new ToolError('"tzOffsetMinutes" must be a whole number of minutes.');
-      }
-      const tzOffsetMinutes = typeof rawOffset === 'number' ? rawOffset : 0;
+      const tzOffsetMinutes = signedOffset(args);
 
       must(
         await createReminder(
@@ -2075,6 +2163,7 @@ export const TOOLS: Tool[] = [
             title: requiredString(args, 'title'),
             runAt: reminderWallClock(requiredString(args, 'runAt')),
             repeat,
+            channel,
             scope,
             recipientIds,
             tzOffsetMinutes: String(tzOffsetMinutes),
@@ -2082,7 +2171,12 @@ export const TOOLS: Tool[] = [
         ),
       );
 
-      return { ok: true, recipients: recipientIds.length, url: remindersPath(ctx.org) };
+      return {
+        ok: true,
+        recipients: recipientIds.length,
+        channel,
+        url: remindersPath(ctx.org),
+      };
     },
   },
 
@@ -2106,6 +2200,395 @@ export const TOOLS: Tool[] = [
       const reminderId = requiredId(args, 'reminderId');
       must(await deleteReminder(null, form({ orgSlug, reminderId })));
       return { ok: true, deleted: reminderId };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Recurring tickets                                                   */
+  /*                                                                     */
+  /* A template the scheduler turns into a real issue on a cadence. The  */
+  /* spawned issue is an ORDINARY issue -- get_ticket, create_comment,   */
+  /* update_ticket all work on it, and nothing links it back here -- so  */
+  /* these tools are about the SCHEDULE, not about the work.             */
+  /*                                                                     */
+  /* Same timezone rule as reminders: there is no browser here to supply */
+  /* an offset, so a wall clock is read as UTC unless `tzOffsetMinutes`  */
+  /* says otherwise.                                                     */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'list_recurring_tickets',
+    title: 'List recurring tickets',
+    description:
+      "Every recurring ticket template in one project — what it creates, when the next one appears, how often, and who it is assigned to. A template with no next run is PAUSED. Every member of the organization can see all of them.",
+    inputSchema: {
+      type: 'object',
+      properties: { orgSlug: ORG_SLUG, projectKey: PROJECT_KEY },
+      required: ['orgSlug', 'projectKey'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
+
+      const templates = await prisma.recurringTicket.findMany({
+        where: { projectId: ctx.project.id },
+        orderBy: [{ nextRunAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }],
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          priority: true,
+          repeat: true,
+          anchorAt: true,
+          nextRunAt: true,
+          lastSpawnedAt: true,
+          tzOffsetMinutes: true,
+          assignee: { select: { id: true, name: true, email: true, emailVerified: true } },
+          createdBy: { select: { name: true } },
+          labels: { select: { name: true } },
+        },
+      });
+
+      return {
+        organization: ctx.org.name,
+        project: ctx.project.name,
+        projectKey: ctx.project.key,
+        url: recurringPath(ctx.org, ctx.project),
+        recurringTickets: templates.map((template) => ({
+          recurringTicketId: template.id,
+          title: template.title,
+          description: template.description,
+          priority: template.priority,
+          repeat: template.repeat,
+          repeatLabel: TICKET_REPEAT_LABEL[template.repeat],
+          // Null next run IS the paused state -- there is no second flag, so
+          // this is derived rather than stored.
+          paused: template.nextRunAt === null,
+          // Both: the instant is what to reason about, the label is the time
+          // the person who set it up actually picked.
+          nextRunAt: template.nextRunAt?.toISOString() ?? null,
+          nextRunLocal: template.nextRunAt
+            ? formatWhen(template.nextRunAt, template.tzOffsetMinutes)
+            : null,
+          // Every occurrence is counted from here, never from the last one.
+          anchorAt: template.anchorAt.toISOString(),
+          lastSpawnedAt: template.lastSpawnedAt?.toISOString() ?? null,
+          tzOffsetMinutes: template.tzOffsetMinutes,
+          assignee: template.assignee?.name ?? null,
+          assigneeEmail: template.assignee?.email ?? null,
+          // An unassigned template mails nobody by design: the issue appearing
+          // on the board is the notification. Only flag a real dead end.
+          assigneeNotified:
+            template.assignee === null ? null : template.assignee.emailVerified !== null,
+          labels: template.labels.map((label) => label.name),
+          setBy: template.createdBy.name,
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'create_recurring_ticket',
+    title: 'Create a recurring ticket',
+    description:
+      'Set up a template that creates a pre-filled issue on a schedule — DAILY, WEEKDAYS, WEEKLY or MONTHLY. Each issue gets the date appended to its title and is due that day. There is no ONCE: for a single pre-filled issue use create_ticket. `runAt` is a wall clock (2026-08-20T09:00) for the FIRST issue, read as UTC unless `tzOffsetMinutes` is given, and it must be in the future. MONTHLY keeps the day of the month you pick, clamped in shorter months. Any member may create one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        title: {
+          ...STRING,
+          description:
+            'Title of each created issue, before the date is appended. Max 160 characters.',
+        },
+        description: {
+          ...STRING,
+          description:
+            "Markdown body copied onto every issue this creates. This is the living checklist — edit it later to change what every future issue asks for.",
+        },
+        runAt: { ...STRING, description: 'When the FIRST issue appears, as 2026-08-20T09:00.' },
+        repeat: {
+          ...STRING,
+          enum: TICKET_REPEATS,
+          description: 'DAILY, WEEKDAYS (skips Saturday and Sunday), WEEKLY or MONTHLY.',
+        },
+        assignee: {
+          ...STRING,
+          description:
+            'Email or userId of the member each issue is assigned to. They get an email every time one appears. Omit for unassigned.',
+        },
+        priority: { ...STRING, enum: PRIORITIES, description: 'Defaults to NONE.' },
+        labels: {
+          type: 'array',
+          items: STRING,
+          description:
+            'Label names copied onto every issue this creates. One label per recurring duty is what turns its whole history into a single filter on the issue list.',
+        },
+        tzOffsetMinutes: {
+          type: 'integer',
+          description:
+            "UTC offset in minutes as getTimezoneOffset() reports it — Berlin in summer is -120. Defaults to 0, i.e. runAt is UTC. Also decides which days count as the weekend for WEEKDAYS.",
+        },
+      },
+      required: ['orgSlug', 'projectKey', 'title', 'runAt', 'repeat'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
+
+      const assignee = optionalString(args, 'assignee');
+      const assigneeId =
+        assignee && assignee.trim() !== '' ? await resolveMember(ctx.org.id, assignee) : '';
+
+      const rawLabels = args.labels;
+      if (rawLabels !== undefined && !Array.isArray(rawLabels)) {
+        throw new ToolError('"labels" must be an array of strings.');
+      }
+      const labelIds = await resolveLabels(
+        ctx.project.id,
+        (rawLabels ?? []).map((value) => String(value)),
+      );
+
+      const priority = optionalString(args, 'priority');
+
+      const formData = form({
+        orgSlug: ctx.org.slug,
+        projectKey: ctx.project.key,
+        title: requiredString(args, 'title'),
+        description: optionalString(args, 'description') ?? '',
+        runAt: reminderWallClock(requiredString(args, 'runAt')),
+        repeat: enumOf(TICKET_REPEATS, 'repeat', requiredString(args, 'repeat')),
+        assigneeId,
+        tzOffsetMinutes: String(signedOffset(args)),
+        ...(priority ? { priority: enumOf(PRIORITIES, 'priority', priority) } : {}),
+      });
+      for (const id of labelIds) formData.append('labelIds', id);
+
+      must(await createRecurringTicket(null, formData));
+
+      return { ok: true, url: recurringPath(ctx.org, ctx.project) };
+    },
+  },
+
+  {
+    name: 'update_recurring_ticket',
+    title: 'Update a recurring ticket',
+    description:
+      "Change what a recurring ticket creates: its title, description, priority, assignee or labels. Only the fields you pass change; the rest are kept. This is how you refine the checklist — it affects every FUTURE issue, and never the ones already created. To change the schedule use reschedule_recurring_ticket. Any member may update one.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        recurringTicketId: { ...STRING, description: 'From list_recurring_tickets.' },
+        title: { ...STRING, description: 'Max 160 characters.' },
+        description: { ...STRING, description: 'Markdown. Pass "" to clear it.' },
+        priority: { ...STRING, enum: PRIORITIES },
+        assignee: {
+          ...STRING,
+          description: 'Email or userId. Pass "" to unassign.',
+        },
+        labels: {
+          type: 'array',
+          items: STRING,
+          description: 'Replaces the whole label set. Pass [] to clear it.',
+        },
+      },
+      required: ['orgSlug', 'projectKey', 'recurringTicketId'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
+      const recurringTicketId = requiredId(args, 'recurringTicketId');
+
+      // The action takes the WHOLE content shape and replaces it, because the
+      // web form submits every field every time. A tool that only names one
+      // field would otherwise blank the others, so the current row is read
+      // first and the arguments are merged over it. Scoped to the authorized
+      // project, so an id from another tenant is simply not found.
+      const current = await prisma.recurringTicket.findFirst({
+        where: { id: recurringTicketId, projectId: ctx.project.id },
+        select: {
+          title: true,
+          description: true,
+          priority: true,
+          assigneeId: true,
+          labels: { select: { id: true } },
+        },
+      });
+      if (!current) throw new AuthzError('NOT_FOUND');
+
+      const assignee = optionalString(args, 'assignee');
+      const assigneeId =
+        assignee === undefined
+          ? (current.assigneeId ?? '')
+          : assignee.trim() === ''
+            ? ''
+            : await resolveMember(ctx.org.id, assignee);
+
+      const rawLabels = args.labels;
+      if (rawLabels !== undefined && !Array.isArray(rawLabels)) {
+        throw new ToolError('"labels" must be an array of strings.');
+      }
+      const labelIds =
+        rawLabels === undefined
+          ? current.labels.map((label) => label.id)
+          : await resolveLabels(
+              ctx.project.id,
+              rawLabels.map((value) => String(value)),
+            );
+
+      const priority = optionalString(args, 'priority');
+
+      const formData = form({
+        part: 'CONTENT',
+        orgSlug: ctx.org.slug,
+        projectKey: ctx.project.key,
+        recurringTicketId,
+        title: optionalString(args, 'title') ?? current.title,
+        description: optionalString(args, 'description') ?? current.description ?? '',
+        priority: priority ? enumOf(PRIORITIES, 'priority', priority) : current.priority,
+        assigneeId,
+      });
+      for (const id of labelIds) formData.append('labelIds', id);
+
+      must(await updateRecurringTicket(null, formData));
+
+      return { ok: true, url: recurringPath(ctx.org, ctx.project) };
+    },
+  },
+
+  {
+    name: 'reschedule_recurring_ticket',
+    title: 'Reschedule a recurring ticket',
+    description:
+      'Change WHEN a recurring ticket creates issues. `runAt` becomes the new anchor every later occurrence is counted from, so it must be in the future — this is not the same as editing the content, which reschedule leaves alone. A PAUSED template stays paused; use set_recurring_ticket_paused to restart it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        recurringTicketId: { ...STRING, description: 'From list_recurring_tickets.' },
+        runAt: { ...STRING, description: 'New first issue, as 2026-08-20T09:00. Must be future.' },
+        repeat: { ...STRING, enum: TICKET_REPEATS, description: 'DAILY, WEEKDAYS, WEEKLY or MONTHLY.' },
+        tzOffsetMinutes: {
+          type: 'integer',
+          description: 'UTC offset in minutes. Defaults to 0, i.e. runAt is UTC.',
+        },
+      },
+      required: ['orgSlug', 'projectKey', 'recurringTicketId', 'runAt', 'repeat'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
+
+      must(
+        await updateRecurringTicket(
+          null,
+          form({
+            part: 'SCHEDULE',
+            orgSlug: ctx.org.slug,
+            projectKey: ctx.project.key,
+            recurringTicketId: requiredId(args, 'recurringTicketId'),
+            runAt: reminderWallClock(requiredString(args, 'runAt')),
+            repeat: enumOf(TICKET_REPEATS, 'repeat', requiredString(args, 'repeat')),
+            tzOffsetMinutes: String(signedOffset(args)),
+          }),
+        ),
+      );
+
+      return { ok: true, url: recurringPath(ctx.org, ctx.project) };
+    },
+  },
+
+  {
+    name: 'set_recurring_ticket_paused',
+    title: 'Pause or resume a recurring ticket',
+    description:
+      'Stop a recurring ticket creating issues, or start it again. Pausing keeps the template and everything written into it, which is what makes it the right way to stop one temporarily — deleting is not. Resuming computes the next issue from the original anchor, always in the future, so a template paused for a month does not create a backlog on the next tick. Any member may pause or resume.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        recurringTicketId: { ...STRING, description: 'From list_recurring_tickets.' },
+        paused: { type: 'boolean', description: 'true to pause, false to resume.' },
+      },
+      required: ['orgSlug', 'projectKey', 'recurringTicketId', 'paused'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
+      const paused = requiredBoolean(args, 'paused');
+
+      must(
+        await setRecurringTicketPaused(
+          null,
+          form({
+            orgSlug: ctx.org.slug,
+            projectKey: ctx.project.key,
+            recurringTicketId: requiredId(args, 'recurringTicketId'),
+            paused: String(paused),
+          }),
+        ),
+      );
+
+      return { ok: true, paused, url: recurringPath(ctx.org, ctx.project) };
+    },
+  },
+
+  {
+    name: 'delete_recurring_ticket',
+    title: 'Delete a recurring ticket',
+    description:
+      'Delete a recurring ticket template. Issues it has already created are NOT touched — they are ordinary issues with no link back. Whoever set it up, and any admin, may delete one. To stop it temporarily without losing the checklist, use set_recurring_ticket_paused instead.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        recurringTicketId: { ...STRING, description: 'From list_recurring_tickets.' },
+      },
+      required: ['orgSlug', 'projectKey', 'recurringTicketId'],
+      additionalProperties: false,
+    },
+    annotations: { destructiveHint: true },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
+      const recurringTicketId = requiredId(args, 'recurringTicketId');
+
+      must(
+        await deleteRecurringTicket(
+          null,
+          form({
+            orgSlug: ctx.org.slug,
+            projectKey: ctx.project.key,
+            recurringTicketId,
+          }),
+        ),
+      );
+
+      return { ok: true, deleted: recurringTicketId };
     },
   },
 
