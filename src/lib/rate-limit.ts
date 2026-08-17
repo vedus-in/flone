@@ -91,6 +91,17 @@ export const LIMITS = {
   RESET_IP: { limit: 10, windowMs: ONE_HOUR },
   VERIFY_EMAIL: { limit: 3, windowMs: ONE_HOUR },
   VERIFY_IP: { limit: 10, windowMs: ONE_HOUR },
+
+  /**
+   * Image uploads, keyed on the USER rather than the origin.
+   *
+   * What this rations is bucket space, not CPU, and every uploader is already an
+   * authenticated member -- so the account is the only thing worth counting, and
+   * it is the one identifier a client cannot rotate. At 10 MB a file this caps one
+   * account at 600 MB an hour, which is far above pasting screenshots into issues
+   * and far below anything worth a storage bill.
+   */
+  UPLOAD_USER: { limit: 60, windowMs: ONE_HOUR },
 } as const;
 
 export function loginIpKey(ip: string): string {
@@ -125,6 +136,11 @@ export function verifyEmailKey(normalizedEmail: string): string {
 
 export function verifyIpKey(ip: string): string {
   return `verify:ip:${ip}`;
+}
+
+/** The session user's id, which is never client-supplied. */
+export function uploadUserKey(userId: string): string {
+  return `upload:user:${userId}`;
 }
 
 /* -------------------------------------------------------------------------- */

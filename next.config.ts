@@ -9,11 +9,38 @@ import type { NextConfig } from 'next';
  * here are `base-uri 'none'`, `form-action 'self'`, `object-src 'none'` and
  * `frame-ancestors 'none'` — none of which need a nonce.
  */
+/**
+ * The attachment bucket's origin, for `img-src`.
+ *
+ * `GET /api/attachments/<id>` answers 302 to a presigned bucket URL, and a CSP
+ * fetch directive is RE-CHECKED ON EVERY REDIRECT HOP. So `img-src 'self'` alone
+ * blocks the image even though the page only ever asked this origin for it, and
+ * the failure is a console-only CSP violation that looks exactly like a broken
+ * upload.
+ *
+ * READ AT BUILD TIME, because `headers()` is compiled into the routes manifest.
+ * `S3_ENDPOINT` must therefore be present in the BUILD environment, not just at
+ * runtime -- on Railway a service variable is both, so the reference variable in
+ * `.env.example` is enough. With it unset the app builds and every other feature
+ * works; attachments upload and then refuse to render, which is the one failure
+ * mode worth this comment.
+ */
+function bucketImageSource(): string {
+  const endpoint = process.env.S3_ENDPOINT?.trim();
+  if (!endpoint) return '';
+  try {
+    return ` ${new URL(endpoint).origin}`;
+  } catch {
+    console.warn('[csp] S3_ENDPOINT is not a URL; attachment images will be blocked');
+    return '';
+  }
+}
+
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
+  `img-src 'self' data:${bucketImageSource()}`,
   "font-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",

@@ -20,7 +20,7 @@ import { ERRORS, type ActionResult } from '@/lib/result';
  *
  * HARD PROHIBITION: outside this file, the tenant-scoped models (Organization,
  * Membership, Project, Board, WorkflowState, Cycle, Label, SavedView, Ticket,
- * Comment) must NEVER be reached with `findUnique({ where: { id } })` or any
+ * Comment, Attachment) must NEVER be reached with `findUnique({ where: { id } })` or any
  * `findFirst` / `count` / `aggregate` lacking a tenant predicate. Fetch through
  * a `require*` helper, or via a nested `select` rooted at an already-authorized
  * entity.
@@ -78,6 +78,14 @@ export type TicketRef = {
   completedAt: Date | null;
 };
 export type CommentRef = { id: string; ticketId: string; authorId: string; body: string };
+export type AttachmentRef = {
+  id: string;
+  ticketId: string;
+  /** Bucket object key. Never rendered, never logged -- it names its issue. */
+  key: string;
+  filename: string;
+  mimeType: string;
+};
 
 export type OrgCtx = { user: SessionUser; org: OrgRef; role: Role };
 export type WorkspaceCtx = OrgCtx & { workspace: WorkspaceRef };
@@ -87,6 +95,7 @@ export type BoardCtx = ProjectCtx & { board: BoardRef };
 export type TicketCtx = ProjectCtx & { ticket: TicketRef; board: BoardRef | null };
 export type CycleCtx = ProjectCtx & { cycle: CycleRef };
 export type CommentCtx = TicketCtx & { comment: CommentRef };
+export type AttachmentCtx = TicketCtx & { attachment: AttachmentRef };
 
 /* -------------------------------------------------------------------------- */
 /* Errors                                                                      */
@@ -136,6 +145,7 @@ type BoardRow = BoardRef & { project: ProjectRow };
 type TicketRow = TicketRef & { project: ProjectRow; board: BoardRef | null };
 type CycleRow = CycleRef & { project: ProjectRow };
 type CommentRow = CommentRef & { ticket: TicketRow };
+type AttachmentRow = AttachmentRef & { ticket: TicketRow };
 
 function orgSelect(userId: string) {
   return {
@@ -263,6 +273,19 @@ function toCommentCtx(user: SessionUser, row: CommentRow): CommentCtx {
   return {
     ...toTicketCtx(user, row.ticket),
     comment: { id: row.id, ticketId: row.ticketId, authorId: row.authorId, body: row.body },
+  };
+}
+
+function toAttachmentCtx(user: SessionUser, row: AttachmentRow): AttachmentCtx {
+  return {
+    ...toTicketCtx(user, row.ticket),
+    attachment: {
+      id: row.id,
+      ticketId: row.ticketId,
+      key: row.key,
+      filename: row.filename,
+      mimeType: row.mimeType,
+    },
   };
 }
 
@@ -611,6 +634,35 @@ export async function requireComment(commentId: string): Promise<CommentCtx> {
   });
   if (!row) throw new AuthzError('NOT_FOUND');
   return toCommentCtx(user, row);
+}
+
+/**
+ * An image attachment, for `GET /api/attachments/[id]`.
+ *
+ * The walk is the whole authorization for serving a private object: attachment ->
+ * ticket -> project -> organization, with the membership predicate in the SAME
+ * query. A signed-out caller, a caller in another tenant and a deleted row all
+ * produce the same `null` and therefore the same 404, so an image id cannot be
+ * used to probe for issues.
+ */
+export async function requireAttachment(attachmentId: string): Promise<AttachmentCtx> {
+  const user = await requireUser();
+  const row = await prisma.attachment.findFirst({
+    where: {
+      id: attachmentId,
+      ticket: { project: { organization: { memberships: { some: { userId: user.id } } } } },
+    },
+    select: {
+      id: true,
+      ticketId: true,
+      key: true,
+      filename: true,
+      mimeType: true,
+      ticket: { select: ticketSelect(user.id) },
+    },
+  });
+  if (!row) throw new AuthzError('NOT_FOUND');
+  return toAttachmentCtx(user, row);
 }
 
 /* -------------------------------------------------------------------------- */

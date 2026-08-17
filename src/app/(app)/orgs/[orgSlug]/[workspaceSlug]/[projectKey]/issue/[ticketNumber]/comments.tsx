@@ -48,6 +48,7 @@ import {
 } from 'react';
 import { Avatar } from '@/components/base/avatar/avatar';
 
+import { AttachImageButton, useImageAttach } from '@/components/image-attach';
 import { Button, FormError, Prose, Separator, SubmitButton, Textarea } from '@/components/ui';
 import type { ActionResult } from '@/lib/result';
 import { cx } from '@/lib/utils/cx';
@@ -392,12 +393,22 @@ function RowAction({
   );
 }
 
-function CommentRow({ comment, members }: { comment: CommentItem; members: Member[] }) {
+function CommentRow({
+  comment,
+  members,
+  ticketId,
+}: {
+  comment: CommentItem;
+  members: Member[];
+  /** The issue an attachment pasted into this edit belongs to. */
+  ticketId: string;
+}) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(comment.body);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const ref = useRef<HTMLTextAreaElement>(null);
+  const attach = useImageAttach({ ticketId, value, onValueChange: setValue, textareaRef: ref });
 
   // Re-seeded from the prop, so a just-saved body does not flash back to the
   // old text while revalidation is still in flight.
@@ -494,14 +505,21 @@ function CommentRow({ comment, members }: { comment: CommentItem; members: Membe
                   cancel();
                 }
               }}
+              {...attach.textareaProps}
             />
             <div className="flex items-center gap-2">
-              <Button size="sm" color="primary" onPress={save} isDisabled={pending}>
+              <Button
+                size="sm"
+                color="primary"
+                onPress={save}
+                isDisabled={pending || attach.uploading}
+              >
                 {pending ? 'Saving...' : 'Save'}
               </Button>
               <Button size="sm" color="secondary" onPress={cancel} isDisabled={pending}>
                 Cancel
               </Button>
+              <AttachImageButton attach={attach} />
             </div>
           </div>
         ) : (
@@ -510,7 +528,7 @@ function CommentRow({ comment, members }: { comment: CommentItem; members: Membe
           </Prose>
         )}
 
-        <FormError>{error}</FormError>
+        <FormError>{error ?? attach.error}</FormError>
       </div>
     </li>
   );
@@ -539,6 +557,12 @@ export function CommentThread({
   // most needs it back. Holding the value in state survives that reset; we
   // clear it ourselves only once the server confirms the comment landed.
   const [body, setBody] = useState('');
+  const attach = useImageAttach({
+    ticketId,
+    value: body,
+    onValueChange: setBody,
+    textareaRef: bodyRef,
+  });
 
   useEffect(() => {
     if (state?.ok) {
@@ -552,7 +576,12 @@ export function CommentThread({
       {comments.length > 0 ? (
         <ol className="flex flex-col gap-6">
           {comments.map((comment) => (
-            <CommentRow key={comment.id} comment={comment} members={members} />
+            <CommentRow
+              key={comment.id}
+              comment={comment}
+              members={members}
+              ticketId={ticketId}
+            />
           ))}
         </ol>
       ) : (
@@ -577,16 +606,19 @@ export function CommentThread({
             maxLength={5000}
             rows={3}
             required
-            placeholder="Write a comment... type @ to mention someone"
+            placeholder="Write a comment... type @ to mention someone, paste an image to attach it"
             value={body}
             onValueChange={setBody}
+            {...attach.textareaProps}
           />
-          <div className="flex justify-end">
-            <SubmitButton size="sm" pendingLabel="Posting...">
+          <div className="flex items-center justify-end gap-2">
+            <AttachImageButton attach={attach} />
+            {/* Posting mid-upload would store the `![uploading ...]` placeholder. */}
+            <SubmitButton size="sm" pendingLabel="Posting..." isDisabled={attach.uploading}>
               Comment
             </SubmitButton>
           </div>
-          <FormError>{resultError(state)}</FormError>
+          <FormError>{resultError(state) ?? attach.error}</FormError>
         </div>
       </form>
     </div>

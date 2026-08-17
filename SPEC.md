@@ -30,6 +30,14 @@ filtering · activity feeds · websockets · realtime · drag-and-drop · admin 
 dark-mode toggle · i18n · analytics · markdown/rich text rendering · avatars · REST/JSON API ·
 route handlers (`route.ts`) · `middleware.ts` · tests beyond what is explicitly asked for.
 
+> **AMENDED 2026-08-17.** "File uploads" is narrowed, not removed: IMAGE attachments on issues
+> are built, everything else stays out. An image is pasted, dropped or picked into the existing
+> `<textarea>` and lands in the body as ordinary Markdown — so there is still no rich-text
+> editor, no upload widget, and nothing new for MCP to render. PNG/JPEG/GIF/WebP only, 10 MB,
+> stored in a private S3-compatible bucket and served by redirect to a 5-minute presigned URL.
+> Non-image files, thumbnailing and any public link remain out. A third `route.ts` comes with it;
+> see the 2026-08-11 amendment below, §4.6, §4.8 and §5.
+>
 > **AMENDED 2026-08-12.** @mentions are off this list. A comment body may name any member of
 > the organization as the literal text `@Their Name`, which is highlighted on read and mails
 > that person — gated by the existing `notifyComments` switch, so no new preference and no
@@ -40,9 +48,12 @@ route handlers (`route.ts`) · `middleware.ts` · tests beyond what is explicitl
 > **AMENDED 2026-08-12.** Markdown rendering is off this list for descriptions and comments —
 > read-side only, and no rich-text editor: the input is still a plain `<textarea>`. See §4.9.
 >
-> **AMENDED 2026-08-11.** `route.ts` is off this list for two files only — the MCP endpoint and
-> CLI sign-in. A REST/JSON API remains out: neither exposes a resource, and every board, issue
-> and comment still moves through MCP or a Server Action. See §5.
+> **AMENDED 2026-08-11**, extended 2026-08-17. `route.ts` is off this list for THREE files only —
+> the MCP endpoint, CLI sign-in, and image attachments (`/api/attachments` to upload,
+> `/api/attachments/[id]` to serve). A REST/JSON API remains out: none of them exposes a resource,
+> and every board, issue and comment still moves through MCP or a Server Action. The attachment
+> routes exist for one reason each — a Server Action body is capped at 512 KB (§4.8) and an
+> `<img src>` is a GET, which no Server Action can be. See §5.
 >
 > **AMENDED 2026-08-06.** Email sending, email verification and password reset were on this list
 > and have been built — see `docs/superpowers/specs/2026-08-06-email-design.md`, which supersedes
@@ -588,6 +599,22 @@ want.
 > The binding rule above is unchanged and applies to both: no state-changing mutation on a GET
 > path. `GET /api/mcp` is a 405, and `/api/cli/login` has no GET.
 
+> **AMENDED 2026-08-17.** A third route handler exists, in two halves, and the analysis holds for
+> both — again for a different reason, so again recorded rather than re-derived.
+>
+> `POST /api/attachments` authenticates by COOKIE only; there is no bearer path and no
+> `Next-Action` header to demand. So, exactly as for `/api/mcp`, `sameSite='lax'` is doing the
+> whole job: a cross-site POST does not carry the cookie, so a forged upload arrives
+> unauthenticated and `requireUser` refuses it. The response is JSON with no CORS, so a
+> cross-origin caller could not read the resulting id even if it could send the request. **This is
+> the second route that makes `sameSite='none'` unshippable** while it exists.
+>
+> `GET /api/attachments/[id]` MUTATES NOTHING, which is what keeps the binding rule intact on the
+> one path in this app a browser reaches with a plain `<img src>`. It reads one row through the
+> authorization walk and answers 302 to a presigned bucket URL. The only write on that path is the
+> idempotent `Session.expiresAt` extension inside `readSession()` — the carve-out the rule already
+> names, and the reason a tempting "record a view" counter must never be added here.
+
 ### 4.7 What must never be logged
 
 Never, in any form: plaintext or normalized passwords, encoded hashes, raw session tokens, token
@@ -624,6 +651,21 @@ off-origin), `object-src 'none'`, and `frame-ancestors 'none'`.
 
 **Pin Next to the latest 15.x, minimum 15.2.3** (below that, CVE-2025-29927 allows a middleware
 bypass via `x-middleware-subrequest`).
+
+> **AMENDED 2026-08-17.** `img-src` gains ONE more source: the origin of `S3_ENDPOINT`, appended
+> by `next.config.ts` when that variable is set. Nothing else in the policy changes, and
+> `bodySizeLimit` stays at `'512kb'` — the upload route exists precisely so that ceiling does not
+> have to move for every form in the app.
+>
+> The addition is not optional and it is not cosmetic. `GET /api/attachments/[id]` answers 302 to
+> the bucket, and **a CSP fetch directive is re-checked on every redirect hop**, so `img-src 'self'`
+> blocks the image even though the page only ever asked this origin for it. The failure mode is a
+> console-only violation and a broken-image icon, with no server-side error to find.
+>
+> `headers()` is compiled into the routes manifest, so the variable is read AT BUILD TIME. A build
+> without `S3_ENDPOINT` produces a policy that blocks every attachment at runtime, however
+> correctly the variable is set for the running process. That is the one operational hazard the
+> feature adds, and it is written down in `.env.example` and the README as well as here.
 
 ### 4.9 XSS posture
 
@@ -722,6 +764,17 @@ Ten pages. **No `middleware.ts`.**
 > obtain the token MCP requires; it is two verbs and no nouns. Its credential checks are not
 > its own — they live in `@/lib/sign-in`, shared verbatim with the `signIn` action. See §4.6
 > for why the CSRF analysis survives both.
+>
+> **AMENDED 2026-08-17.** A third exists, and it is the first that serves a BROWSER:
+> `src/app/api/attachments/route.ts` (POST, multipart upload) and
+> `src/app/api/attachments/[id]/route.ts` (GET, 302 to a 5-minute presigned bucket URL). It is
+> still no REST surface — one verb each, no nouns, nothing to enumerate — and it exists only
+> because a Server Action cannot carry 10 MB without raising `bodySizeLimit` for every form in the
+> app, and cannot be the target of an `<img src>` at all. Supporting modules:
+> `src/lib/bucket.ts` (SigV4 signing and three operations, no dependency),
+> `src/lib/attachments.ts` (the type/size/filename rules, pure), `requireAttachment` in
+> `src/lib/authz.ts` (the walk), and `src/components/image-attach.tsx` (paste, drop, pick).
+> See §4.6 for the CSRF analysis and §4.8 for the `img-src` addition the redirect forces.
 
 ```
 prisma/

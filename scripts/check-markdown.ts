@@ -110,7 +110,27 @@ check('common syntax renders', () => {
   assert.match(out, /<code>bun test<\/code>/);
 });
 
-/* 6. Empty and whitespace-only bodies must not throw. */
+/**
+ * 6. Image attachments. `POST /api/attachments` hands the editor
+ *    `![name](/api/attachments/<id>)`, and this is the assertion that the whole
+ *    feature renders: react-markdown's default `urlTransform` keeps a RELATIVE
+ *    url, and `globals.css` styles the `img` it produces. Passing a custom
+ *    `urlTransform` to `Prose` -- or adding a rehype sanitizer with a url
+ *    allowlist -- would break every attached image and nothing else in the repo
+ *    would notice.
+ */
+check('relative attachment images render', () => {
+  const out = html('![shot.png](/api/attachments/0f2a-4c11)');
+  assert.match(out, /<img/);
+  assert.match(out, /src="\/api\/attachments\/0f2a-4c11"/);
+  assert.match(out, /alt="shot\.png"/);
+});
+
+check('javascript: image sources are still stripped', () => {
+  assert.doesNotMatch(html('![x](javascript:alert(1))'), /javascript:/);
+});
+
+/* 7. Empty and whitespace-only bodies must not throw. */
 check('empty input renders nothing', () => {
   assert.doesNotMatch(html(''), /<p>/);
 });

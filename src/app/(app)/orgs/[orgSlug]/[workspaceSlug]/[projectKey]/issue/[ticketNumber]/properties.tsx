@@ -43,6 +43,7 @@ import {
   type PickerOption,
 } from '@/components/property-picker';
 import { Assignee, PriorityIcon, StateIcon } from '@/components/issue-row';
+import { AttachImageButton, useImageAttach } from '@/components/image-attach';
 import { Button, FormError, Prose, Textarea } from '@/components/ui';
 import { PRIORITY_LABEL, colorClass } from '@/lib/model';
 import type { ActionResult } from '@/lib/result';
@@ -187,6 +188,9 @@ export function InlineDescription({ ticketId, title, description }: InlineEditor
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const ref = useRef<HTMLTextAreaElement>(null);
+  // Paste, drop and pick an image. It edits `value` like any other keystroke, so
+  // the image is Markdown in the draft and is saved by the same `updateIssue`.
+  const attach = useImageAttach({ ticketId, value, onValueChange: setValue, textareaRef: ref });
 
   useEffect(() => setValue(description), [description]);
   useEffect(() => {
@@ -257,18 +261,22 @@ export function InlineDescription({ ticketId, title, description }: InlineEditor
             cancel();
           }
         }}
+        {...attach.textareaProps}
         aria-label="Description"
-        placeholder="What needs to happen?"
+        placeholder="What needs to happen? Paste or drop an image to attach it."
       />
       <div className="flex items-center gap-2">
-        <Button size="sm" color="primary" onPress={save} isDisabled={pending}>
+        {/* Saving mid-upload would store the `![uploading ...]` placeholder, so
+            the button waits rather than the person having to notice. */}
+        <Button size="sm" color="primary" onPress={save} isDisabled={pending || attach.uploading}>
           {pending ? 'Saving...' : 'Save'}
         </Button>
         <Button size="sm" color="secondary" onPress={cancel} isDisabled={pending}>
           Cancel
         </Button>
+        <AttachImageButton attach={attach} />
       </div>
-      <FormError>{error}</FormError>
+      <FormError>{error ?? attach.error}</FormError>
     </div>
   );
 }

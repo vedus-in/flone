@@ -44,6 +44,7 @@ import {
   type StateRef,
   type TicketCtx,
 } from '@/lib/authz';
+import { deleteObject } from '@/lib/bucket';
 import { prisma } from '@/lib/db';
 import { appUrl } from '@/lib/email';
 import { notifyIssueAssigned, type IssueContext } from '@/lib/mailer';
@@ -255,6 +256,34 @@ export async function updateIssue(
 
 const deleteIssueSchema = z.object({ ticketId: cuid });
 
+/**
+ * Delete an issue's bucket objects. BEST EFFORT, and called BEFORE the row goes,
+ * because the rows are what name the objects and `Attachment.ticketId` cascades
+ * them away with the issue.
+ *
+ * `ticketId` must come from an authorized context; the only caller resolves it
+ * through `requireTicket` first and this performs no tenant check of its own.
+ *
+ * NOTHING HERE CAN FAIL THE DELETE IT IS CLEANING UP AFTER. A bucket outage, a
+ * rotated credential or no bucket at all leaves objects behind and logs a count:
+ * an orphan costs $0.015/GB-month, where a delete that refuses to proceed costs
+ * someone their afternoon.
+ *
+ * DELIBERATELY NOT WIRED TO PROJECT, BOARD OR ORGANIZATION DELETE. Those cascade
+ * hundreds of issues away in one statement, and walking every object in a
+ * best-effort loop would turn one query into thousands of HTTP calls for pennies
+ * of storage. Objects orphaned that way stay orphaned, and the README says so.
+ */
+async function purgeTicketAttachments(ticketId: string): Promise<void> {
+  const rows = await prisma.attachment.findMany({ where: { ticketId }, select: { key: true } });
+  if (rows.length === 0) return;
+
+  const results = await Promise.all(rows.map((row) => deleteObject(row.key)));
+  const failed = results.filter((deleted) => !deleted).length;
+  // Counts only -- never a key, which names the issue it belonged to (SPEC 4.7).
+  if (failed > 0) console.error(`[attachments] orphaned=${failed} of=${rows.length}`);
+}
+
 export async function deleteIssue(
   _prev: ActionResult | null,
   formData: FormData,
@@ -274,8 +303,14 @@ export async function deleteIssue(
     // member's work, while issue EDITING stays open to every member.
     requireAuthorOrRole(ctx, ctx.ticket.createdById, 'ADMIN');
 
-    // Comments cascade; sub-issues are orphaned rather than deleted (parentId
-    // is SetNull), so deleting an epic never takes its children with it.
+    // Bucket objects BEFORE the row, because the rows are what name them and
+    // `ticketId` cascades them away. Best effort by design: a bucket outage leaves
+    // orphaned objects and a log line, never a delete that refuses to happen.
+    await purgeTicketAttachments(ctx.ticket.id);
+
+    // Comments and attachment rows cascade; sub-issues are orphaned rather than
+    // deleted (parentId is SetNull), so deleting an epic never takes its children
+    // with it.
     await prisma.ticket.delete({ where: { id: ctx.ticket.id } });
 
     revalidateIssue(ctx);

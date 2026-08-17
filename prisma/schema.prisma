@@ -113,6 +113,7 @@ model User {
   challengePicks  ChallengePick[]
   reminders        Reminder[]  @relation("ReminderRecipient")
   createdReminders Reminder[]  @relation("ReminderCreatedBy")
+  attachments      Attachment[]
   recurringTickets        RecurringTicket[] @relation("RecurringTicketAssignee")
   createdRecurringTickets RecurringTicket[] @relation("RecurringTicketCreatedBy")
 
@@ -428,6 +429,7 @@ model Ticket {
 
   comments       Comment[]
   challengePicks ChallengePick[]
+  attachments    Attachment[]
 
   @@unique([projectId, number])
   @@index([projectId, stateId, position])
@@ -671,4 +673,57 @@ model Comment {
   updatedAt DateTime @updatedAt
 
   @@index([ticketId, createdAt])
+}
+
+/// An image uploaded against an issue and referenced from Markdown as
+/// `![alt](/api/attachments/<id>)` in its description or in one of its comments.
+///
+/// THE ROW IS THE PERMISSION. The bucket is private and no object URL ever
+/// reaches a browser: `GET /api/attachments/[id]` walks this row up to its
+/// organization exactly as every other read does, and only then mints a
+/// short-lived presigned URL. So an attachment is readable by precisely the
+/// people who can read the issue, and it stops being readable the moment they
+/// lose access -- which a public object URL could never express.
+///
+/// NO BACK-REFERENCE FROM THE MARKDOWN. Nothing parses a description to find out
+/// which attachments it uses, so removing the image text does not delete the
+/// object and re-adding it does not resurrect anything. That is deliberate: the
+/// alternative is a parser deciding when to destroy a file, and getting it wrong
+/// means someone's screenshot vanishes because they edited a sentence.
+///
+/// `ticketId` cascades, so the rows go with the issue. The bucket objects do not
+/// cascade -- nothing in Postgres can reach a bucket -- and are deleted
+/// best-effort by `purgeTicketAttachments` on the delete path. An orphaned object
+/// costs $0.015/GB-month and is logged; a delete that fails because the bucket is
+/// down must not be a delete that fails.
+///
+/// `uploadedById` is Restrict for the same reason `Comment.authorId` is: this is
+/// authored content, and a user with content must not be hard-deletable.
+model Attachment {
+  /// NO `@default(cuid())`, and the only id in this schema without one. Prisma's
+  /// cuid default is generated inside the query engine, so it does not exist until
+  /// the row does -- and the object key embeds the id, while the OBJECT is written
+  /// before the row (a failed upload must not leave a row pointing at nothing).
+  /// The upload route therefore mints a `randomUUID()` and passes it explicitly.
+  id           String   @id
+  ticketId     String
+  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// The bucket object key, `attachments/<ticketId>/<id>-<sanitized filename>`.
+  /// Unique by construction (it carries the row's own id), so no constraint
+  /// asserts it. The filename is in there only so a human browsing the bucket can
+  /// tell what they are looking at without the database.
+  key          String
+  /// As the browser reported it, sanitized. Display and alt text only -- it is
+  /// never used to open, route to, or serve anything.
+  filename     String
+  /// Constrained to the image allowlist in `src/lib/attachments.ts` at upload
+  /// time. Stored because it is what the object was written with.
+  mimeType     String
+  size         Int
+  uploadedById String
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime @default(now())
+
+  /// The purge query on ticket delete. Serving is a lookup by primary key.
+  @@index([ticketId])
 }
