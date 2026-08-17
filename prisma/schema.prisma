@@ -292,6 +292,7 @@ model Project {
   savedViews SavedView[]
   reminders  Reminder[]
   recurringTickets RecurringTicket[]
+  attachments Attachment[]
 
   @@unique([organizationId, key])
   @@index([workspaceId])
@@ -675,14 +676,29 @@ model Comment {
   @@index([ticketId, createdAt])
 }
 
-/// An image uploaded against an issue and referenced from Markdown as
-/// `![alt](/api/attachments/<id>)` in its description or in one of its comments.
+/// An image uploaded inside a project and referenced from Markdown as
+/// `![alt](/api/attachments/<id>)` -- in an issue description, a comment, or a
+/// recurring-ticket template.
+///
+/// THE PROJECT OWNS IT, NOT THE ISSUE, and `ticketId` is nullable for one
+/// unavoidable reason: an image can be pasted into a body that has no row yet.
+/// The new-issue dialog and the recurring-template form both compose a
+/// description before anything exists to attach it to, so an upload from either
+/// carries a project and no ticket. Keying the row to the issue instead would
+/// mean the compose surfaces could not upload at all -- which is exactly the bug
+/// this shape fixes.
+///
+/// THIS GIVES NOTHING AWAY. Access is derived by walking to the ORGANIZATION, and
+/// every member of an organization can already read every issue in every one of
+/// its projects -- so "who may see this attachment" is the same set of people
+/// whether the walk starts at the ticket or at the project. The ticket link is
+/// bookkeeping for cleanup, never the permission.
 ///
 /// THE ROW IS THE PERMISSION. The bucket is private and no object URL ever
 /// reaches a browser: `GET /api/attachments/[id]` walks this row up to its
 /// organization exactly as every other read does, and only then mints a
 /// short-lived presigned URL. So an attachment is readable by precisely the
-/// people who can read the issue, and it stops being readable the moment they
+/// people who can read the project, and it stops being readable the moment they
 /// lose access -- which a public object URL could never express.
 ///
 /// NO BACK-REFERENCE FROM THE MARKDOWN. Nothing parses a description to find out
@@ -691,11 +707,18 @@ model Comment {
 /// alternative is a parser deciding when to destroy a file, and getting it wrong
 /// means someone's screenshot vanishes because they edited a sentence.
 ///
-/// `ticketId` cascades, so the rows go with the issue. The bucket objects do not
-/// cascade -- nothing in Postgres can reach a bucket -- and are deleted
-/// best-effort by `purgeTicketAttachments` on the delete path. An orphaned object
-/// costs $0.015/GB-month and is logged; a delete that fails because the bucket is
-/// down must not be a delete that fails.
+/// Both foreign keys cascade, so the rows go with the issue or with the project.
+/// The bucket objects do not -- nothing in Postgres can reach a bucket -- and are
+/// deleted best-effort by `purgeTicketAttachments` on the issue delete path. An
+/// orphaned object costs $0.015/GB-month and is logged; a delete that fails
+/// because the bucket is down must not be a delete that fails.
+///
+/// A row with a null `ticketId` is an upload from a compose surface, and it stays
+/// null: nothing adopts it when the issue is created, because adoption would mean
+/// parsing the description to find which ids it names, and that parser is exactly
+/// what the paragraph above refuses to write. The cost is that abandoning a
+/// half-written issue leaves its objects behind -- the same accepted orphan class
+/// as a project delete, and cheaper than a parser that can destroy a file.
 ///
 /// `uploadedById` is Restrict for the same reason `Comment.authorId` is: this is
 /// authored content, and a user with content must not be hard-deletable.
@@ -706,12 +729,23 @@ model Attachment {
   /// before the row (a failed upload must not leave a row pointing at nothing).
   /// The upload route therefore mints a `randomUUID()` and passes it explicitly.
   id           String   @id
-  ticketId     String
-  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  /// The bucket object key, `attachments/<ticketId>/<id>-<sanitized filename>`.
+  /// The owner, and always known: every compose surface belongs to a project even
+  /// when it has no issue yet.
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Null for an upload into a body that has no row yet -- see the note above.
+  ticketId     String?
+  ticket       Ticket?  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// The bucket object key, `attachments/<projectId>/<id>-<sanitized filename>`.
   /// Unique by construction (it carries the row's own id), so no constraint
   /// asserts it. The filename is in there only so a human browsing the bucket can
   /// tell what they are looking at without the database.
+  ///
+  /// KEYED ON THE PROJECT, not the issue, because the issue may not exist when the
+  /// object is written and the key can never be rewritten afterwards -- an object
+  /// is not renamed, it is copied and deleted. Rows created before this column
+  /// existed carry the older `attachments/<ticketId>/...` shape and keep working:
+  /// the key is opaque and always read from the row, never rebuilt.
   key          String
   /// As the browser reported it, sanitized. Display and alt text only -- it is
   /// never used to open, route to, or serve anything.
@@ -724,6 +758,9 @@ model Attachment {
   uploadedBy   User     @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
   createdAt    DateTime @default(now())
 
-  /// The purge query on ticket delete. Serving is a lookup by primary key.
+  /// `ticketId` is the purge query on issue delete; `projectId` is walked by the
+  /// authorization lookup and by its own cascade. Serving is a lookup by primary
+  /// key and needs neither.
   @@index([ticketId])
+  @@index([projectId])
 }

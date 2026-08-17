@@ -773,7 +773,9 @@ Ten pages. **No `middleware.ts`.**
 > app, and cannot be the target of an `<img src>` at all. Supporting modules:
 > `src/lib/bucket.ts` (SigV4 signing and three operations, no dependency),
 > `src/lib/attachments.ts` (the type/size/filename rules, pure), `requireAttachment` in
-> `src/lib/authz.ts` (the walk), and `src/components/image-attach.tsx` (paste, drop, pick).
+> `src/lib/authz.ts` (the walk, rooted at the PROJECT because an image may be pasted into a body
+> that has no row yet), and `src/components/image-attach.tsx` (paste, drop, pick — a hook for the
+> controlled editors, `ImageAttachTextarea` for the uncontrolled template forms).
 > See §4.6 for the CSRF analysis and §4.8 for the `img-src` addition the redirect forces.
 
 ```

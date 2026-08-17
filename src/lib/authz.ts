@@ -80,8 +80,10 @@ export type TicketRef = {
 export type CommentRef = { id: string; ticketId: string; authorId: string; body: string };
 export type AttachmentRef = {
   id: string;
-  ticketId: string;
-  /** Bucket object key. Never rendered, never logged -- it names its issue. */
+  projectId: string;
+  /** Null when the image was pasted into a body that had no row yet. */
+  ticketId: string | null;
+  /** Bucket object key. Never rendered, never logged. */
   key: string;
   filename: string;
   mimeType: string;
@@ -95,7 +97,11 @@ export type BoardCtx = ProjectCtx & { board: BoardRef };
 export type TicketCtx = ProjectCtx & { ticket: TicketRef; board: BoardRef | null };
 export type CycleCtx = ProjectCtx & { cycle: CycleRef };
 export type CommentCtx = TicketCtx & { comment: CommentRef };
-export type AttachmentCtx = TicketCtx & { attachment: AttachmentRef };
+/**
+ * PROJECT-rooted, not ticket-rooted, because an attachment need not have an
+ * issue. Nothing needs the issue to serve an image, so the ctx does not carry one.
+ */
+export type AttachmentCtx = ProjectCtx & { attachment: AttachmentRef };
 
 /* -------------------------------------------------------------------------- */
 /* Errors                                                                      */
@@ -145,7 +151,7 @@ type BoardRow = BoardRef & { project: ProjectRow };
 type TicketRow = TicketRef & { project: ProjectRow; board: BoardRef | null };
 type CycleRow = CycleRef & { project: ProjectRow };
 type CommentRow = CommentRef & { ticket: TicketRow };
-type AttachmentRow = AttachmentRef & { ticket: TicketRow };
+type AttachmentRow = AttachmentRef & { project: ProjectRow };
 
 function orgSelect(userId: string) {
   return {
@@ -278,9 +284,10 @@ function toCommentCtx(user: SessionUser, row: CommentRow): CommentCtx {
 
 function toAttachmentCtx(user: SessionUser, row: AttachmentRow): AttachmentCtx {
   return {
-    ...toTicketCtx(user, row.ticket),
+    ...toProjectCtx(user, row.project),
     attachment: {
       id: row.id,
+      projectId: row.projectId,
       ticketId: row.ticketId,
       key: row.key,
       filename: row.filename,
@@ -640,25 +647,33 @@ export async function requireComment(commentId: string): Promise<CommentCtx> {
  * An image attachment, for `GET /api/attachments/[id]`.
  *
  * The walk is the whole authorization for serving a private object: attachment ->
- * ticket -> project -> organization, with the membership predicate in the SAME
- * query. A signed-out caller, a caller in another tenant and a deleted row all
- * produce the same `null` and therefore the same 404, so an image id cannot be
- * used to probe for issues.
+ * project -> organization, with the membership predicate in the SAME query. A
+ * signed-out caller, a caller in another tenant and a deleted row all produce the
+ * same `null` and therefore the same 404, so an image id cannot be used to probe
+ * for anything.
+ *
+ * THROUGH THE PROJECT, NOT THE TICKET, and deliberately: `Attachment.ticketId` is
+ * null for an image pasted into an issue that has not been created yet, and a walk
+ * rooted at the ticket would make those permanently unservable -- the same hole
+ * `requireTicketInPath` avoids by not walking through the optional board. It gives
+ * nothing away, because every member of an organization can already read every
+ * issue in every one of its projects.
  */
 export async function requireAttachment(attachmentId: string): Promise<AttachmentCtx> {
   const user = await requireUser();
   const row = await prisma.attachment.findFirst({
     where: {
       id: attachmentId,
-      ticket: { project: { organization: { memberships: { some: { userId: user.id } } } } },
+      project: { organization: { memberships: { some: { userId: user.id } } } },
     },
     select: {
       id: true,
+      projectId: true,
       ticketId: true,
       key: true,
       filename: true,
       mimeType: true,
-      ticket: { select: ticketSelect(user.id) },
+      project: { select: projectSelect(user.id) },
     },
   });
   if (!row) throw new AuthzError('NOT_FOUND');

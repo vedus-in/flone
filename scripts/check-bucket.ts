@@ -230,9 +230,13 @@ check('a long name is capped', () => {
   assert.ok(sanitizeFilename(`${'a'.repeat(500)}.png`).length <= 80);
 });
 
-check('the key names its issue and its row', () => {
-  const key = attachmentKey('tkt_123', 'att_456', 'my shot.png');
-  assert.equal(key, 'attachments/tkt_123/att_456-my-shot.png');
+/**
+ * Keyed on the PROJECT, not the issue: an image can be pasted into an issue that
+ * does not exist yet, and an object key cannot be rewritten once written.
+ */
+check('the key names its project and its row', () => {
+  const key = attachmentKey('prj_123', 'att_456', 'my shot.png');
+  assert.equal(key, 'attachments/prj_123/att_456-my-shot.png');
 });
 
 console.log(`check-bucket: ${passed} checks passed`);

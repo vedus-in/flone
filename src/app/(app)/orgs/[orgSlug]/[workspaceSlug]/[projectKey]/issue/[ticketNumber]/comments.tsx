@@ -408,7 +408,12 @@ function CommentRow({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const ref = useRef<HTMLTextAreaElement>(null);
-  const attach = useImageAttach({ ticketId, value, onValueChange: setValue, textareaRef: ref });
+  const attach = useImageAttach({
+    target: { ticketId },
+    value,
+    onValueChange: setValue,
+    textareaRef: ref,
+  });
 
   // Re-seeded from the prop, so a just-saved body does not flash back to the
   // old text while revalidation is still in flight.
@@ -558,7 +563,7 @@ export function CommentThread({
   // clear it ourselves only once the server confirms the comment landed.
   const [body, setBody] = useState('');
   const attach = useImageAttach({
-    ticketId,
+    target: { ticketId },
     value: body,
     onValueChange: setBody,
     textareaRef: bodyRef,

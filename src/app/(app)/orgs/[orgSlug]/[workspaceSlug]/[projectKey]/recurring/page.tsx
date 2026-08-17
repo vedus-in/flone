@@ -18,8 +18,8 @@ import {
   Label,
   PageHeader,
   SubmitButton,
-  Textarea,
 } from '@/components/ui';
+import { ImageAttachTextarea } from '@/components/image-attach';
 import { atLeast, loadPage, orgPath, projectPath, requireProjectByKey } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { PRIORITY_LABEL, PRIORITY_ORDER, colorClass } from '@/lib/model';
@@ -359,7 +359,12 @@ export default async function RecurringPage({ params }: { params: Promise<Params
                 </>
               }
             >
-              <Textarea
+              {/* Images paste, drop and attach here too, targeted at the PROJECT:
+                  a template has no issue, and neither do the tickets it has not
+                  spawned yet. Still an uncontrolled control with a `name`, so
+                  `ActionForm`'s rehydration is unaffected. */}
+              <ImageAttachTextarea
+                target={{ projectId: ctx.project.id }}
                 id="new-recurring-description"
                 name="description"
                 rows={6}
@@ -540,7 +545,8 @@ export default async function RecurringPage({ params }: { params: Promise<Params
                                   label="Description (Markdown)"
                                   hint="Changes every future ticket. The ones already created keep the text they were made with."
                                 >
-                                  <Textarea
+                                  <ImageAttachTextarea
+                                    target={{ projectId: ctx.project.id }}
                                     id={`${template.id}-description`}
                                     name="description"
                                     rows={8}

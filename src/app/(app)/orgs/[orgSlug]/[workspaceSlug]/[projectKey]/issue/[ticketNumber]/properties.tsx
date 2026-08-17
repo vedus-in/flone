@@ -190,7 +190,12 @@ export function InlineDescription({ ticketId, title, description }: InlineEditor
   const ref = useRef<HTMLTextAreaElement>(null);
   // Paste, drop and pick an image. It edits `value` like any other keystroke, so
   // the image is Markdown in the draft and is saved by the same `updateIssue`.
-  const attach = useImageAttach({ ticketId, value, onValueChange: setValue, textareaRef: ref });
+  const attach = useImageAttach({
+    target: { ticketId },
+    value,
+    onValueChange: setValue,
+    textareaRef: ref,
+  });
 
   useEffect(() => setValue(description), [description]);
   useEffect(() => {

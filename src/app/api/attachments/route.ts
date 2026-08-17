@@ -6,7 +6,13 @@ import {
   sanitizeFilename,
   validateUpload,
 } from '@/lib/attachments';
-import { AuthzError, isNextControlFlowError, requireTicket, requireUser } from '@/lib/authz';
+import {
+  AuthzError,
+  isNextControlFlowError,
+  requireProject,
+  requireTicket,
+  requireUser,
+} from '@/lib/authz';
 import { bucketConfig, putObject } from '@/lib/bucket';
 import { prisma } from '@/lib/db';
 import { ERRORS } from '@/lib/result';
@@ -30,11 +36,22 @@ import { cuid } from '@/lib/validation';
  * an `Authorization` header either. The response is JSON with no CORS, so nothing
  * cross-origin can read it even if it could send it.
  *
- * AUTHORIZATION IS THE TICKET'S, not the file's: `requireTicket` walks the
- * client-supplied `ticketId` up to its organization inside one query, so a member
- * of another tenant gets the same 404 as a nonexistent issue. Any member who can
- * see an issue can attach to it -- the same rule as editing its description,
- * which is what the image ends up inside.
+ * AUTHORIZATION IS THE TARGET'S, not the file's, and there are two targets:
+ *
+ *   `ticketId` -- pasting into an existing issue or one of its comments.
+ *   `projectId` -- pasting into a body that does not exist yet: the new-issue
+ *                  dialog and the recurring-template form both compose a
+ *                  description before there is a row to hang it on.
+ *
+ * Either way the id is walked up to its organization inside one query, so a member
+ * of another tenant gets the same 404 as a nonexistent target. Any member who can
+ * see a project can attach in it -- the same rule as editing an issue description,
+ * which is where the image ends up.
+ *
+ * A ticket target is preferred when both are sent, because it records the issue
+ * for cleanup; the project comes from the AUTHORIZED ticket row in that case and
+ * never from the request, so a forged `projectId` cannot file an object under
+ * another project.
  */
 
 export const runtime = 'nodejs';
@@ -67,8 +84,11 @@ export async function POST(request: Request): Promise<Response> {
 
     const form = await request.formData();
 
-    const parsedTicketId = cuid.safeParse(form.get('ticketId'));
-    if (!parsedTicketId.success) return json({ error: ERRORS.NOT_FOUND }, 404);
+    const ticketId = cuid.safeParse(form.get('ticketId'));
+    const projectId = cuid.safeParse(form.get('projectId'));
+    // Neither target is even well-formed: nothing to look up, and a 404 says so
+    // without distinguishing "malformed" from "not yours".
+    if (!ticketId.success && !projectId.success) return json({ error: ERRORS.NOT_FOUND }, 404);
 
     const file = form.get('file');
     if (!(file instanceof File)) return json({ error: ATTACHMENT_ERRORS.NO_FILE }, 400);
@@ -77,7 +97,16 @@ export async function POST(request: Request): Promise<Response> {
     if (rejection) return json({ error: rejection }, 400);
 
     // The authorization walk. Everything above this line is shape checking.
-    const ctx = await requireTicket(parsedTicketId.data);
+    // `target.projectId` comes out of the walked row in both branches.
+    const target = ticketId.success
+      ? await requireTicket(ticketId.data).then((ctx) => ({
+          projectId: ctx.project.id,
+          ticketId: ctx.ticket.id,
+        }))
+      : await requireProject(projectId.data!).then((ctx) => ({
+          projectId: ctx.project.id,
+          ticketId: null,
+        }));
 
     const filename = sanitizeFilename(file.name);
     // The id is minted here rather than by Prisma's default, because the object
@@ -85,14 +114,15 @@ export async function POST(request: Request): Promise<Response> {
     // not leave a row pointing at nothing, and the reverse -- an object with no
     // row -- is just an orphan nobody can reach.
     const id = randomUUID();
-    const key = attachmentKey(ctx.ticket.id, id, filename);
+    const key = attachmentKey(target.projectId, id, filename);
 
     await putObject(key, await file.arrayBuffer(), file.type);
 
     await prisma.attachment.create({
       data: {
         id,
-        ticketId: ctx.ticket.id,
+        projectId: target.projectId,
+        ticketId: target.ticketId,
         key,
         filename,
         mimeType: file.type,

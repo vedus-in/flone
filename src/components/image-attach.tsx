@@ -1,8 +1,16 @@
 'use client';
 
-import { useRef, useState, type ClipboardEvent, type DragEvent, type RefObject } from 'react';
+import {
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type ComponentProps,
+  type DragEvent,
+  type RefObject,
+} from 'react';
 
 import { Button } from '@/components/base/buttons/button';
+import { FormError, Textarea } from '@/components/ui';
 
 /**
  * Pasting, dropping and picking an image into a Markdown textarea.
@@ -37,13 +45,32 @@ import { Button } from '@/components/base/buttons/button';
 
 const UPLOAD_FAILED = 'That image could not be uploaded. Try again.';
 
+/**
+ * What the upload is authorized against.
+ *
+ * A ticket where one exists, and a PROJECT where one does not: the new-issue
+ * dialog and the recurring-template form both compose a description before there
+ * is any row to attach it to, and with only a ticket target those two surfaces
+ * could not upload at all.
+ */
+export type AttachTarget = { ticketId: string } | { projectId: string };
+
 type UseImageAttachOptions = {
-  ticketId: string;
-  /** The caller's current draft. */
-  value: string;
-  onValueChange: (next: string) => void;
-  /** Needed for the caret position; insertion falls back to the end without it. */
+  target: AttachTarget;
+  /** The textarea being typed into. Both the caret and, uncontrolled, the text. */
   textareaRef: RefObject<HTMLTextAreaElement | null>;
+  /**
+   * CONTROLLED CALLERS PASS BOTH; uncontrolled callers pass neither.
+   *
+   * The issue editors and the comment boxes hold their draft in state, so the
+   * image has to be inserted through them or React overwrites it on the next
+   * render. The recurring-template forms are deliberately uncontrolled native
+   * controls -- `ActionForm` puts a rejected submit back through `form.elements`,
+   * which only reaches real ones -- so there the DOM node IS the draft and this
+   * writes to it directly.
+   */
+  value?: string;
+  onValueChange?: (next: string) => void;
 };
 
 export type ImageAttach = {
@@ -61,29 +88,38 @@ export type ImageAttach = {
 };
 
 export function useImageAttach({
-  ticketId,
+  target,
   value,
   onValueChange,
   textareaRef,
 }: UseImageAttachOptions): ImageAttach {
   // The draft as of this render, kept in a ref so an upload that finishes in ten
   // seconds edits the text as it is THEN, not as it was when the paste happened.
-  const latest = useRef(value);
-  latest.current = value;
+  const latest = useRef(value ?? '');
+  if (onValueChange) latest.current = value ?? '';
 
   const [inFlight, setInFlight] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const token = useRef(0);
 
+  function read(): string {
+    return onValueChange ? latest.current : (textareaRef.current?.value ?? '');
+  }
+
   function write(next: string): void {
-    // Written to the ref as well as pushed up, so two files in one paste do not
-    // both insert at the same offset in the same stale string.
-    latest.current = next;
-    onValueChange(next);
+    if (onValueChange) {
+      // Written to the ref as well as pushed up, so two files in one paste do not
+      // both insert at the same offset in the same stale string.
+      latest.current = next;
+      onValueChange(next);
+      return;
+    }
+    const el = textareaRef.current;
+    if (el) el.value = next;
   }
 
   function insertAtCaret(text: string): void {
-    const current = latest.current;
+    const current = read();
     const caret = textareaRef.current?.selectionStart ?? current.length;
     const before = current.slice(0, caret);
     const after = current.slice(caret);
@@ -100,7 +136,10 @@ export function useImageAttach({
 
     try {
       const body = new FormData();
-      body.set('ticketId', ticketId);
+      // One field or the other; the route re-derives the project from whichever
+      // it can authorize, never from anything else sent here.
+      if ('ticketId' in target) body.set('ticketId', target.ticketId);
+      else body.set('projectId', target.projectId);
       body.set('file', file);
 
       const response = await fetch('/api/attachments', { method: 'POST', body });
@@ -114,9 +153,9 @@ export function useImageAttach({
         throw new Error(typeof result?.error === 'string' ? result.error : UPLOAD_FAILED);
       }
 
-      write(latest.current.replace(placeholder, `![${result.filename ?? file.name}](${result.url})`));
+      write(read().replace(placeholder, `![${result.filename ?? file.name}](${result.url})`));
     } catch (e) {
-      write(latest.current.replace(`${placeholder}\n`, '').replace(placeholder, ''));
+      write(read().replace(`${placeholder}\n`, '').replace(placeholder, ''));
       setError(e instanceof Error && e.message ? e.message : UPLOAD_FAILED);
     } finally {
       setInFlight((count) => count - 1);
@@ -166,6 +205,31 @@ export function useImageAttach({
     uploading: inFlight > 0,
     error,
   };
+}
+
+/**
+ * An UNCONTROLLED Markdown textarea that accepts images, with the attach button
+ * and any upload error under it.
+ *
+ * For the recurring-template forms, which submit as plain `FormData` and must stay
+ * real form controls with a `name` and a `defaultValue` -- so this owns the hook
+ * rather than asking the page to, and the page stays a Server Component. Every
+ * other prop is forwarded to the textarea untouched.
+ */
+export function ImageAttachTextarea({
+  target,
+  ...props
+}: { target: AttachTarget } & Omit<ComponentProps<typeof Textarea>, 'value' | 'onChange' | 'ref'>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const attach = useImageAttach({ target, textareaRef: ref });
+
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <Textarea {...props} ref={ref} {...attach.textareaProps} />
+      <AttachImageButton attach={attach} />
+      <FormError>{attach.error}</FormError>
+    </div>
+  );
 }
 
 /**

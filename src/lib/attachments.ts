@@ -80,16 +80,22 @@ export function sanitizeFilename(name: string): string {
 }
 
 /**
- * `attachments/<ticketId>/<attachmentId>-<sanitized filename>`.
+ * `attachments/<projectId>/<attachmentId>-<sanitized filename>`.
  *
  * Traceable without the database, which is the whole point of the shape: someone
- * looking at a bucket listing at 3am can tell which issue an object belongs to
+ * looking at a bucket listing at 3am can tell which project an object belongs to
  * and what it was called, with no query and no export.
+ *
+ * THE PROJECT, NOT THE ISSUE. An image can be pasted into an issue that does not
+ * exist yet, and an object key cannot be rewritten later -- an object is not
+ * renamed, it is copied and deleted. So the key names the one owner that is always
+ * known and never changes. Rows written before this used the issue id; nothing
+ * rewrites them, because the key is opaque and always read from the row.
  */
 export function attachmentKey(
-  ticketId: string,
+  projectId: string,
   attachmentId: string,
   filename: string,
 ): string {
-  return `attachments/${ticketId}/${attachmentId}-${sanitizeFilename(filename)}`;
+  return `attachments/${projectId}/${attachmentId}-${sanitizeFilename(filename)}`;
 }

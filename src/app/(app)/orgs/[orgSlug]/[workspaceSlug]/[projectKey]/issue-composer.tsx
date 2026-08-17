@@ -22,6 +22,7 @@ import { X as CloseIcon } from '@untitledui/icons';
 import { Button as AriaButton } from 'react-aria-components';
 
 import { Dialog, Modal, ModalOverlay } from '@/components/application/modals/modal';
+import { AttachImageButton, useImageAttach } from '@/components/image-attach';
 import { PriorityIcon, StateIcon } from '@/components/issue-row';
 import { FormError } from '@/components/ui';
 import { colorClass, PRIORITY_LABEL, PRIORITY_ORDER } from '@/lib/model';
@@ -110,7 +111,19 @@ export function IssueComposer({
   // close is worse than one extra click.
   const [createMore, setCreateMore] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const headingId = useId();
+
+  // Targeted at the PROJECT: there is no issue yet, which is the whole reason
+  // `Attachment.ticketId` is nullable. An abandoned dialog therefore leaves its
+  // objects in the bucket -- an accepted orphan, and cheaper than a parser that
+  // decides when a file may be destroyed.
+  const attach = useImageAttach({
+    target: { projectId },
+    value: description,
+    onValueChange: setDescription,
+    textareaRef: descriptionRef,
+  });
 
   const state = states.find((candidate) => candidate.id === stateId) ?? states[0];
   const assignee = members.find((member) => member.id === assigneeId) ?? null;
@@ -220,6 +233,7 @@ export function IssueComposer({
                 className="w-full resize-none border-0 bg-transparent p-0 text-lg font-medium text-primary field-sizing-content placeholder:text-tertiary focus:outline-none"
               />
               <textarea
+                ref={descriptionRef}
                 rows={2}
                 maxLength={2000}
                 value={description}
@@ -230,8 +244,9 @@ export function IssueComposer({
                     submit();
                   }
                 }}
+                {...attach.textareaProps}
                 aria-label="Description"
-                placeholder="Add description…"
+                placeholder="Add description… paste an image to attach it"
                 className="w-full resize-none border-0 bg-transparent p-0 text-sm text-primary field-sizing-content placeholder:text-tertiary focus:outline-none"
               />
             </div>
@@ -357,9 +372,9 @@ export function IssueComposer({
               </div>
             ) : null}
 
-            {error ? (
+            {error ?? attach.error ? (
               <div className="px-4 pb-3">
-                <FormError>{error}</FormError>
+                <FormError>{error ?? attach.error}</FormError>
               </div>
             ) : null}
 
@@ -374,6 +389,7 @@ export function IssueComposer({
                 Create more
               </label>
               <div className="flex items-center gap-2">
+                <AttachImageButton attach={attach} />
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
@@ -384,7 +400,9 @@ export function IssueComposer({
                 <button
                   type="button"
                   onClick={submit}
-                  disabled={pending || title.trim().length === 0}
+                  // Creating mid-upload would store the `![uploading ...]`
+                  // placeholder as the description.
+                  disabled={pending || attach.uploading || title.trim().length === 0}
                   className="rounded-lg bg-brand-solid px-3 py-1.5 text-sm font-medium text-white transition-opacity disabled:opacity-50"
                 >
                   {pending ? 'Creating…' : 'Create issue'}
