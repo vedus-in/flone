@@ -11,6 +11,7 @@ import {
   issuesPath,
   orgPath,
   projectPath,
+  projectSettingsPath,
   recurringPath,
   remindersPath,
   requireAdmin,
@@ -42,7 +43,7 @@ import {
 import type { ActionResult } from '@/lib/result';
 import { getAppSettings, isRegistrationOpen } from '@/lib/settings';
 import { listStates } from '@/lib/states';
-import { STATE_ORDER, TICKET_ORDER, cuid } from '@/lib/validation';
+import { COLOR_TOKENS, STATE_ORDER, TICKET_ORDER, cuid } from '@/lib/validation';
 
 import { setRegistration, setUserAdmin } from '@/app/(app)/admin/actions';
 import { createOrganization } from '@/app/(app)/orgs/new/actions';
@@ -57,11 +58,14 @@ import {
 } from '@/app/(app)/orgs/[orgSlug]/settings/actions';
 import {
   createBoard,
+  createLabel,
   createSavedView,
   deleteBoard,
+  deleteLabel,
   deleteProject,
   deleteSavedView,
   renameBoard,
+  updateLabel,
   updateProject,
 } from '@/app/(app)/orgs/[orgSlug]/[workspaceSlug]/[projectKey]/actions';
 import {
@@ -435,6 +439,21 @@ async function resolveMember(organizationId: string, needle: string): Promise<st
   // accounts outside this organization (SPEC §7.14).
   if (!membership) throw new ToolError('That person is not a member of this organization.');
   return membership.userId;
+}
+
+/**
+ * A palette token.
+ *
+ * NOT `enumOf`, which upper-cases its input because every Prisma enum here is
+ * upper-case. Colour tokens are the one closed vocabulary in this file that is
+ * lower-case (`gray`, `brand`, ...), so routing them through `enumOf` would
+ * compare "GRAY" against "gray" and reject every valid colour.
+ */
+function colorToken(value: string): (typeof COLOR_TOKENS)[number] {
+  const wanted = value.trim().toLowerCase();
+  const match = COLOR_TOKENS.find((candidate) => candidate === wanted);
+  if (!match) throw new ToolError(`"color" must be one of: ${COLOR_TOKENS.join(', ')}.`);
+  return match;
 }
 
 function enumOf<T extends string>(values: readonly T[], label: string, value: string): T {
@@ -968,7 +987,13 @@ export const TOOLS: Tool[] = [
           name: state.name,
           type: state.type,
         })),
-        labels: labels.map((label) => ({ labelId: label.id, name: label.name })),
+        // `color` is selected above and was being dropped here, which left
+        // update_label unable to preserve a colour it could not read.
+        labels: labels.map((label) => ({
+          labelId: label.id,
+          name: label.name,
+          color: label.color,
+        })),
         boards: boards.map((board) => ({
           boardId: board.id,
           name: board.name,
@@ -1333,6 +1358,149 @@ export const TOOLS: Tool[] = [
         ),
       );
       return { ok: true, deleted: requiredString(args, 'projectKey') };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Labels                                                              */
+  /*                                                                     */
+  /* Per-project and shared by everyone in it. Read them from            */
+  /* get_project; every tool that takes labels accepts a NAME, so these  */
+  /* exist so a model can create the one it wants rather than failing on */
+  /* "No label X in this project".                                       */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'create_label',
+    title: 'Create a label',
+    description:
+      'Add a label to a project. Names are unique within the project and case-sensitive as stored. ADMIN or OWNER only. Read get_project first — a label that already exists is an error, not a no-op.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        name: { ...STRING, description: 'Label name, 1 to 40 characters.' },
+        color: {
+          ...STRING,
+          enum: COLOR_TOKENS,
+          description: 'Palette token, not a hex value. Defaults to gray.',
+        },
+      },
+      required: ['orgSlug', 'projectKey', 'name'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
+      const color = optionalString(args, 'color');
+
+      must(
+        await createLabel(
+          null,
+          form({
+            projectId: ctx.project.id,
+            name: requiredString(args, 'name'),
+            ...(color ? { color: colorToken(color) } : {}),
+          }),
+        ),
+      );
+
+      return { ok: true, url: projectSettingsPath(ctx.org, ctx.project) };
+    },
+  },
+
+  {
+    name: 'update_label',
+    title: 'Rename or recolour a label',
+    description:
+      'Change a label\'s name or colour. Only the fields you pass change. Renaming keeps it on every issue that carries it — it is the same label. ADMIN or OWNER only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        label: { ...STRING, description: 'Current label name or id, from get_project.' },
+        name: { ...STRING, description: 'New name.' },
+        color: { ...STRING, enum: COLOR_TOKENS, description: 'New palette token.' },
+      },
+      required: ['orgSlug', 'projectKey', 'label'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
+
+      // Name or id, the same way every other tool addresses a label.
+      const [labelId] = await resolveLabels(ctx.project.id, [requiredString(args, 'label')]);
+
+      // `updateLabel` demands BOTH name and colour -- the web form submits every
+      // field every time -- so a tool naming one of them would silently reset
+      // the other. The current row is read first and the arguments merged over
+      // it. Scoped to the authorized project, so a foreign id is not found.
+      const current = await prisma.label.findFirst({
+        where: { id: labelId, projectId: ctx.project.id },
+        select: { name: true, color: true },
+      });
+      if (!current) throw new AuthzError('NOT_FOUND');
+
+      const color = optionalString(args, 'color');
+
+      must(
+        await updateLabel(
+          null,
+          form({
+            projectId: ctx.project.id,
+            labelId,
+            name: optionalString(args, 'name') ?? current.name,
+            color: color ? colorToken(color) : current.color,
+          }),
+        ),
+      );
+
+      return { ok: true, url: projectSettingsPath(ctx.org, ctx.project) };
+    },
+  },
+
+  {
+    name: 'delete_label',
+    title: 'Delete a label',
+    description:
+      'Remove a label from a project. The issues that carried it are NOT deleted — they simply lose the tag, and nothing else about them changes. This cannot be undone; recreating the label does not re-tag anything. ADMIN or OWNER only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        label: { ...STRING, description: 'Label name or id, from get_project.' },
+      },
+      required: ['orgSlug', 'projectKey', 'label'],
+      additionalProperties: false,
+    },
+    annotations: { destructiveHint: true },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey').toUpperCase(),
+      );
+      const [labelId] = await resolveLabels(ctx.project.id, [requiredString(args, 'label')]);
+
+      // How many issues are about to lose the tag, counted BEFORE the delete --
+      // afterwards the join rows are gone and the number is unknowable. A model
+      // reporting "removed from 14 issues" is the difference between a deletion
+      // somebody notices and one they discover a week later.
+      const tagged = await prisma.ticket.count({
+        where: { projectId: ctx.project.id, labels: { some: { id: labelId } } },
+      });
+
+      must(await deleteLabel(null, form({ projectId: ctx.project.id, labelId })));
+
+      return { ok: true, deleted: labelId, untaggedIssues: tagged };
     },
   },
 

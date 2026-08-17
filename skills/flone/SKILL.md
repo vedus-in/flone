@@ -42,6 +42,7 @@ Then act. Everything the web app can do is here:
 - **Comments** — `create_comment`, `update_comment`, `delete_comment`.
 - **Boards** — `create_board`, `rename_board`, `delete_board`.
 - **Projects** — `create_project`, `update_project`, `delete_project`. **Workspaces** — `create_workspace`.
+- **Labels** — `create_label`, `update_label` (rename or recolour), `delete_label`. Per-project and shared by everyone in it.
 - **Organizations** — `create_organization`, `rename_organization`, `delete_organization`.
 - **Members** — `add_member` (by email; they must already have an account), `set_member_role`, `remove_member`.
 - **Reminders** — `list_reminders`, `create_reminder`, `delete_reminder`. A scheduled email or phone call, for anyone in the org.
@@ -70,5 +71,6 @@ A template that creates a pre-filled issue on a schedule — `DAILY`, `WEEKDAYS`
 - **Ask before deleting anything.** Deletes cascade: a project takes its boards and issues, an organization takes everything. Deleting a *board* is the exception — its issues survive and simply lose the board chip. `delete_project` and `delete_organization` also require you to echo the key or name exactly — that guardrail is there to make the deletion deliberate, so treat needing it as a reason to confirm with the user, not a puzzle to solve.
 - Making several changes to one issue? One `update_ticket` call, not four.
 - **Status belongs to the project, not to a board.** Each project owns its workflow states — by default *Backlog*, *Todo*, *In Progress*, *In Review*, *Done*, *Canceled* — and an issue has exactly one, which every board and list reflects. `get_project` lists them; `move_ticket` sets one by name. A board is an optional grouping chip, and an issue need not be on one.
-- States, labels and cycles can be read and referred to by name, but not created or renamed here yet. If a label you need does not exist, say so rather than filing the issue untagged.
+- Labels can be created: if the one you need does not exist, `create_label` it rather than filing the issue untagged. Deleting one is not reversible and untags every issue that carried it, so confirm first — the result tells you how many issues it affected.
+- Workflow states and cycles can be read and referred to by name, but not created or renamed here yet.
 - Permission errors are honest. "You don't have permission to do that" means the token's owner genuinely lacks the role — a MEMBER cannot create projects or delete other people's tickets. Report it; don't try another tool to route around it.

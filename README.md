@@ -128,7 +128,7 @@ Any other MCP client works the same way — point it at the endpoint with that o
 
 ### Tools
 
-The whole application, 47 tools. Every one of them is the same Server Action the web UI submits, so the role matrix below is the app's, not a second implementation of it.
+The whole application, 50 tools. Every one of them is the same Server Action the web UI submits, so the role matrix below is the app's, not a second implementation of it.
 
 | Area | Tools | Who |
 | --- | --- | --- |
@@ -138,6 +138,7 @@ The whole application, 47 tools. Every one of them is the same Server Action the
 | Boards | `create_board`, `rename_board`, `delete_board` | `ADMIN` or `OWNER` |
 | Projects | `create_project`, `update_project`, `delete_project` | `ADMIN` or `OWNER` |
 | Workspaces | `create_workspace` | `ADMIN` or `OWNER` |
+| Labels | `create_label`, `update_label`, `delete_label` | `ADMIN` or `OWNER` |
 | Organizations | `create_organization`, `rename_organization`, `delete_organization` | anyone may create; rename is `ADMIN`+, delete is `OWNER` |
 | Members | `add_member`, `set_member_role`, `remove_member` | `ADMIN` or `OWNER`; granting `OWNER` is `OWNER`-only |
 | Daily Challenges | `list_challenges`, `add_challenge`, `remove_challenge`, `move_challenge` | your own board only |
@@ -150,7 +151,7 @@ The whole application, 47 tools. Every one of them is the same Server Action the
 
 Some things are deliberately absent. Signing out would revoke the very token making the call; login, register and creating an MCP token all mint credentials — a caller holding a token is already authenticated, and account creation stays a human act behind the registration flag; and phone verification places a real call, which is not something a model should trigger on someone's handset.
 
-Others are simply not built yet: workflow states, labels and cycles can be read and referred to by name but not created or edited over MCP, and neither can cycle configuration, workspace renaming, notification preferences or pending invitations. The web UI does all of those.
+Others are simply not built yet: workflow states and cycles can be read and referred to by name but not created or edited over MCP, and neither can cycle configuration, workspace renaming, notification preferences or pending invitations. The web UI does all of those.
 
 ### Verifying it
 
