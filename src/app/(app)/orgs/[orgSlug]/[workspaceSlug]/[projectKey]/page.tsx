@@ -7,6 +7,7 @@ import {
   boardsPath,
   cyclePath,
   cyclesPath,
+  docsPath,
   issuesPath,
   loadPage,
   orgSettingsPath,
@@ -39,6 +40,7 @@ const GO_TO = [
   { key: 'cycles', label: 'Cycles', icon: 'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 4.5v3.7l2.2 1.6' },
   { key: 'boards', label: 'Boards', icon: 'M2.5 2.5h11v11h-11zM6 2.5v11M10 2.5v11' },
   { key: 'views', label: 'Views', icon: 'M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z' },
+  { key: 'docs', label: 'Documents', icon: 'M4 1.5h5l3 3v10H4zM9 1.5v3h3M6 8h4M6 11h4' },
 ] as const;
 
 export default async function ProjectPage({ params }: { params: Promise<Params> }) {
@@ -77,6 +79,7 @@ export default async function ProjectPage({ params }: { params: Promise<Params> 
     cycles: cyclesPath(ctx.org, ctx.project),
     boards: boardsPath(ctx.org, ctx.project),
     views: viewsPath(ctx.org, ctx.project),
+    docs: docsPath(ctx.org, ctx.project),
   };
 
   const composeState = defaultComposeState(workspace.states);

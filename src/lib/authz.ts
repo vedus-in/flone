@@ -88,6 +88,16 @@ export type AttachmentRef = {
   filename: string;
   mimeType: string;
 };
+export type DocumentRef = {
+  id: string;
+  projectId: string;
+  /** Null at the top level of the project's tree. */
+  parentId: string | null;
+  title: string;
+  /** Never null -- an empty document is the empty string. */
+  body: string;
+  createdById: string;
+};
 
 export type OrgCtx = { user: SessionUser; org: OrgRef; role: Role };
 export type WorkspaceCtx = OrgCtx & { workspace: WorkspaceRef };
@@ -102,6 +112,14 @@ export type CommentCtx = TicketCtx & { comment: CommentRef };
  * issue. Nothing needs the issue to serve an image, so the ctx does not carry one.
  */
 export type AttachmentCtx = ProjectCtx & { attachment: AttachmentRef };
+/**
+ * PROJECT-rooted like the attachment above, and NOT parent-rooted: a document's
+ * place in the tree is presentation, never permission. Walking up through
+ * `parentId` would make access depend on how deep a page happens to be nested,
+ * and would recurse an unbounded number of times to answer a question the
+ * organization already answers in one hop.
+ */
+export type DocumentCtx = ProjectCtx & { document: DocumentRef };
 
 /* -------------------------------------------------------------------------- */
 /* Errors                                                                      */
@@ -152,6 +170,7 @@ type TicketRow = TicketRef & { project: ProjectRow; board: BoardRef | null };
 type CycleRow = CycleRef & { project: ProjectRow };
 type CommentRow = CommentRef & { ticket: TicketRow };
 type AttachmentRow = AttachmentRef & { project: ProjectRow };
+type DocumentRow = DocumentRef & { project: ProjectRow };
 
 function orgSelect(userId: string) {
   return {
@@ -292,6 +311,20 @@ function toAttachmentCtx(user: SessionUser, row: AttachmentRow): AttachmentCtx {
       key: row.key,
       filename: row.filename,
       mimeType: row.mimeType,
+    },
+  };
+}
+
+function toDocumentCtx(user: SessionUser, row: DocumentRow): DocumentCtx {
+  return {
+    ...toProjectCtx(user, row.project),
+    document: {
+      id: row.id,
+      projectId: row.projectId,
+      parentId: row.parentId,
+      title: row.title,
+      body: row.body,
+      createdById: row.createdById,
     },
   };
 }
@@ -680,6 +713,41 @@ export async function requireAttachment(attachmentId: string): Promise<Attachmen
   return toAttachmentCtx(user, row);
 }
 
+/**
+ * A document, for the Server Actions and the MCP tools that address one by id.
+ *
+ * THROUGH THE PROJECT, NOT THE PARENT CHAIN. A nested page is exactly as visible
+ * as a top-level one -- both belong to the project, and every member of the
+ * organization can already read all of it -- so the walk is the same single hop
+ * every other loader here makes. Climbing `parentId` instead would issue one
+ * query per level of nesting to reach the same answer, and would make a page's
+ * permissions depend on where somebody dragged it.
+ *
+ * The PAGES do not use this: they hold a project ctx already and read the
+ * document out of the tree query they were going to run anyway, scoped by the
+ * `projectId` that ctx proved.
+ */
+export async function requireDocument(documentId: string): Promise<DocumentCtx> {
+  const user = await requireUser();
+  const row = await prisma.document.findFirst({
+    where: {
+      id: documentId,
+      project: { organization: { memberships: { some: { userId: user.id } } } },
+    },
+    select: {
+      id: true,
+      projectId: true,
+      parentId: true,
+      title: true,
+      body: true,
+      createdById: true,
+      project: { select: projectSelect(user.id) },
+    },
+  });
+  if (!row) throw new AuthzError('NOT_FOUND');
+  return toDocumentCtx(user, row);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Intra-resource integrity guards                                             */
 /*                                                                             */
@@ -970,6 +1038,20 @@ export function ticketPath(org: OrgRef, project: ProjectRef, ticketNumber: numbe
 
 export function viewsPath(org: OrgRef, project: ProjectRef): string {
   return `${projectPath(org, project)}/views`;
+}
+
+/**
+ * The project's documents. No `RESERVED_SLUGS` entry, for the reason spelled out
+ * on `recurringPath`: this segment sits under a project KEY, and keys are
+ * uppercase-only, so a lowercase static segment cannot collide with one.
+ */
+export function docsPath(org: OrgRef, project: ProjectRef): string {
+  return `${projectPath(org, project)}/docs`;
+}
+
+/** One document, addressed by its opaque id -- documents have no number. */
+export function documentPath(org: OrgRef, project: ProjectRef, documentId: string): string {
+  return `${docsPath(org, project)}/${encodeURIComponent(documentId)}`;
 }
 
 export function projectSettingsPath(org: OrgRef, project: ProjectRef): string {

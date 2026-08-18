@@ -7,6 +7,8 @@ import {
   boardPath,
   challengesPath,
   cyclesPath,
+  docsPath,
+  documentPath,
   isNextControlFlowError,
   issuesPath,
   orgPath,
@@ -16,6 +18,7 @@ import {
   remindersPath,
   requireAdmin,
   requireBoard,
+  requireDocument,
   requireOrgBySlug,
   // Tools address a project by (orgSlug, projectKey) and have no URL to prove
   // canonical, so they use the workspace-free loader -- same authorization, one
@@ -31,6 +34,7 @@ import {
 import { prisma } from '@/lib/db';
 import { CHALLENGE_COLUMNS, columnForStateType } from '@/lib/challenges';
 import { ensureCycles } from '@/lib/cycles';
+import { ancestorChain, descendantIds, flattenTree } from '@/lib/documents';
 import { listNavTree } from '@/lib/nav';
 import {
   CHANNEL_CALLS,
@@ -78,6 +82,12 @@ import {
   deleteReminder,
 } from '@/app/(app)/orgs/[orgSlug]/reminders/actions';
 import {
+  createDocument,
+  deleteDocument,
+  moveDocument,
+  updateDocument,
+} from '@/app/(app)/orgs/[orgSlug]/[workspaceSlug]/[projectKey]/docs/actions';
+import {
   createRecurringTicket,
   deleteRecurringTicket,
   setRecurringTicketPaused,
@@ -105,11 +115,11 @@ import {
 /**
  * The MCP tool surface (transport lives in `src/app/api/mcp/route.ts`).
  *
- * It covers organizations, members, projects, boards, issues, comments, the
- * per-person Daily Challenges board, scheduled reminders, recurring tickets,
- * saved views and site administration. Workflow states, labels and cycles are
- * readable and referable by name, but not yet editable here — see the gap list
- * at the foot of this comment.
+ * It covers organizations, members, projects, boards, issues, comments,
+ * documents, the per-person Daily Challenges board, scheduled reminders,
+ * recurring tickets, saved views and site administration. Workflow states,
+ * labels and cycles are readable and referable by name, but not yet editable
+ * here — see the gap list at the foot of this comment.
  *
  * What a model CAN do, it does under exactly the same rules as the web UI.
  *
@@ -385,6 +395,39 @@ async function resolveState(projectId: string, needle: string) {
   return match;
 }
 
+/**
+ * Documents are addressed by TITLE as well as by id, for the same reason states
+ * and boards are: a model reasons in names, and a document's id is a cuid nobody
+ * types. `projectId` must come from an authorized context -- it is the only thing
+ * scoping this query.
+ *
+ * An ambiguous title is reported rather than guessed at. Two sibling pages called
+ * "Overview" is a completely ordinary thing to have, and silently editing the
+ * wrong one is not recoverable through the UI.
+ */
+async function resolveDocument(projectId: string, needle: string): Promise<string> {
+  const documents = await prisma.document.findMany({
+    where: { projectId },
+    orderBy: [{ title: 'asc' }, { id: 'asc' }],
+    select: { id: true, title: true },
+  });
+
+  const byId = documents.find((document) => document.id === needle);
+  if (byId) return byId.id;
+
+  const wanted = needle.trim().toLowerCase();
+  const matches = documents.filter((document) => document.title.toLowerCase() === wanted);
+  if (matches.length === 1) return matches[0].id;
+  if (matches.length > 1) {
+    throw new ToolError(
+      `More than one document in this project is called "${needle}". Pass the documentId from list_documents instead.`,
+    );
+  }
+  throw new ToolError(
+    `No document "${needle}" in this project. Call list_documents to see what is there.`,
+  );
+}
+
 /** Boards are addressed by name or id, and the empty string means "no board". */
 async function resolveBoard(projectId: string, needle: string): Promise<string> {
   if (needle.trim() === '') return '';
@@ -586,6 +629,7 @@ const TICKET_ID = {
   ...STRING,
   description: 'Issue id from a previous read, or a ref like ENG-12.',
 } as const;
+const DOCUMENT_ID = { ...STRING, description: 'Document id, from list_documents.' } as const;
 
 export const TOOLS: Tool[] = [
   /* ------------------------------------------------------------------ */
@@ -2891,6 +2935,321 @@ export const TOOLS: Tool[] = [
       const viewId = requiredId(args, 'viewId');
       must(await deleteSavedView(null, form({ projectId: ctx.project.id, viewId })));
       return { ok: true, deleted: viewId };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Documents                                                           */
+  /*                                                                     */
+  /* Long-form Markdown pages inside a project, nested by parent. The    */
+  /* body is the SAME Markdown an issue description is, so a document    */
+  /* reads identically here and in the browser, and an image already     */
+  /* uploaded to the project renders in both.                            */
+  /*                                                                     */
+  /* Every document is addressable by title as well as by id, and the    */
+  /* tree is returned flat with a `depth` -- a model does not need a      */
+  /* nested JSON shape to understand what is filed under what.           */
+  /* ------------------------------------------------------------------ */
+
+  {
+    name: 'list_documents',
+    title: 'List documents',
+    description:
+      "A project's documents as a flat tree: every page with its depth and parent, deepest-first within each branch. Pass `query` to keep only the documents whose title or body contains it (case-insensitive). Bodies are omitted here — read one with get_document.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        query: {
+          ...STRING,
+          description: 'Optional. Case-insensitive substring of the title or body.',
+        },
+      },
+      required: ['orgSlug', 'projectKey'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey'),
+      );
+      const query = optionalString(args, 'query')?.trim();
+
+      const rows = await prisma.document.findMany({
+        where: { projectId: ctx.project.id },
+        orderBy: [{ title: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          parentId: true,
+          title: true,
+          updatedAt: true,
+          createdBy: { select: { name: true } },
+        },
+      });
+
+      // The tree is built from EVERY row and filtered afterwards, so a matching
+      // document keeps the depth it actually has rather than the depth it would
+      // have if its ancestors had also matched.
+      const tree = flattenTree(rows);
+      const matched = query
+        ? await prisma.document
+            .findMany({
+              where: {
+                projectId: ctx.project.id,
+                OR: [
+                  { title: { contains: query, mode: 'insensitive' } },
+                  { body: { contains: query, mode: 'insensitive' } },
+                ],
+              },
+              select: { id: true },
+            })
+            .then((hits) => new Set(hits.map((hit) => hit.id)))
+        : null;
+
+      const documents = matched ? tree.filter((row) => matched.has(row.id)) : tree;
+
+      return {
+        project: ctx.project.name,
+        projectKey: ctx.project.key,
+        url: docsPath(ctx.org, ctx.project),
+        ...(query ? { query } : {}),
+        count: documents.length,
+        documents: documents.map((document) => ({
+          documentId: document.id,
+          title: document.title,
+          depth: document.depth,
+          parentId: document.parentId,
+          updatedBy: document.createdBy.name,
+          updatedAt: document.updatedAt.toISOString(),
+          url: documentPath(ctx.org, ctx.project, document.id),
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'get_document',
+    title: 'Read a document',
+    description:
+      'One document in full: its Markdown body, the chain of documents it sits under, and the documents filed inside it.',
+    inputSchema: {
+      type: 'object',
+      properties: { documentId: DOCUMENT_ID },
+      required: ['documentId'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    run: async (args) => {
+      const ctx = await requireDocument(requiredId(args, 'documentId'));
+
+      // Rooted at the project the walk above authorized.
+      const rows = await prisma.document.findMany({
+        where: { projectId: ctx.project.id },
+        orderBy: [{ title: 'asc' }, { id: 'asc' }],
+        select: { id: true, parentId: true, title: true },
+      });
+
+      const detail = await prisma.document.findFirst({
+        where: { id: ctx.document.id, projectId: ctx.project.id },
+        select: {
+          createdAt: true,
+          updatedAt: true,
+          createdBy: { select: { name: true } },
+        },
+      });
+      if (!detail) throw new AuthzError('NOT_FOUND');
+
+      return {
+        documentId: ctx.document.id,
+        title: ctx.document.title,
+        body: ctx.document.body,
+        project: ctx.project.name,
+        projectKey: ctx.project.key,
+        orgSlug: ctx.org.slug,
+        // Root first, this document last -- the breadcrumbs, as a path.
+        path: ancestorChain(rows, ctx.document.id).map((row) => row.title),
+        parentId: ctx.document.parentId,
+        children: rows
+          .filter((row) => row.parentId === ctx.document.id)
+          .map((child) => ({
+            documentId: child.id,
+            title: child.title,
+            url: documentPath(ctx.org, ctx.project, child.id),
+          })),
+        createdBy: detail.createdBy.name,
+        createdAt: detail.createdAt.toISOString(),
+        updatedAt: detail.updatedAt.toISOString(),
+        url: documentPath(ctx.org, ctx.project, ctx.document.id),
+      };
+    },
+  },
+
+  {
+    name: 'create_document',
+    title: 'Create a document',
+    description:
+      'Write a new document in a project. `body` is Markdown, the same dialect issue descriptions use. Pass `parent` (a title or documentId) to file it inside another document. Any member may create one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgSlug: ORG_SLUG,
+        projectKey: PROJECT_KEY,
+        title: STRING,
+        body: { ...STRING, description: 'Markdown. Optional — a document may start empty.' },
+        parent: {
+          ...STRING,
+          description: 'Document title or documentId. Omit to create it at the top level.',
+        },
+      },
+      required: ['orgSlug', 'projectKey', 'title'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireProjectByKeyInOrg(
+        requiredString(args, 'orgSlug'),
+        requiredString(args, 'projectKey'),
+      );
+
+      const parent = optionalString(args, 'parent');
+      const parentId =
+        parent === undefined || parent.trim() === ''
+          ? ''
+          : await resolveDocument(ctx.project.id, parent);
+
+      // `createDocument` navigates to what it made, so the redirect target is
+      // where the new id comes from -- the same trick create_board uses.
+      const target = await runNavigating(() =>
+        createDocument(
+          null,
+          form({
+            projectId: ctx.project.id,
+            title: requiredString(args, 'title'),
+            body: optionalString(args, 'body') ?? '',
+            parentId,
+          }),
+        ),
+      );
+
+      return { ok: true, documentId: tailOf(target), url: target };
+    },
+  },
+
+  {
+    name: 'update_document',
+    title: 'Rewrite a document',
+    description:
+      'Change a document\'s title, its body, or both. Whichever you leave out keeps its current value. This does NOT move the document — use move_document for that.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        documentId: DOCUMENT_ID,
+        title: STRING,
+        body: { ...STRING, description: 'Markdown. Replaces the whole body.' },
+      },
+      required: ['documentId'],
+      additionalProperties: false,
+    },
+    run: async (args) => {
+      const ctx = await requireDocument(requiredId(args, 'documentId'));
+
+      const title = optionalString(args, 'title');
+      const body = optionalString(args, 'body');
+      if (title === undefined && body === undefined) {
+        throw new ToolError('Pass "title", "body", or both.');
+      }
+
+      // The action's schema demands both fields on every call, so the one that
+      // was not passed is sent back unchanged -- read from the authorized walk,
+      // never from the caller.
+      must(
+        await updateDocument(
+          null,
+          form({
+            documentId: ctx.document.id,
+            title: title ?? ctx.document.title,
+            body: body ?? ctx.document.body,
+          }),
+        ),
+      );
+
+      return { ok: true, documentId: ctx.document.id, url: documentPath(ctx.org, ctx.project, ctx.document.id) };
+    },
+  },
+
+  {
+    name: 'move_document',
+    title: 'Move a document',
+    description:
+      'File a document under another one, or at the top level. A document cannot be filed inside itself or inside anything already beneath it — that would detach the branch from the tree, and it is refused.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        documentId: DOCUMENT_ID,
+        parent: {
+          ...STRING,
+          description:
+            'Document title or documentId to file it under. Pass "" or omit it for the top level.',
+        },
+      },
+      required: ['documentId'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      const ctx = await requireDocument(requiredId(args, 'documentId'));
+
+      const parent = optionalString(args, 'parent');
+      const parentId =
+        parent === undefined || parent.trim() === ''
+          ? ''
+          : await resolveDocument(ctx.project.id, parent);
+
+      must(await moveDocument(null, form({ documentId: ctx.document.id, parentId })));
+
+      return {
+        ok: true,
+        documentId: ctx.document.id,
+        parentId: parentId === '' ? null : parentId,
+        url: documentPath(ctx.org, ctx.project, ctx.document.id),
+      };
+    },
+  },
+
+  {
+    name: 'delete_document',
+    title: 'Delete a document',
+    description:
+      'Delete a document AND every document filed inside it. There is no trash. Yours are yours to delete; anyone else\'s needs ADMIN.',
+    inputSchema: {
+      type: 'object',
+      properties: { documentId: DOCUMENT_ID },
+      required: ['documentId'],
+      additionalProperties: false,
+    },
+    annotations: { destructiveHint: true },
+    run: async (args) => {
+      const ctx = await requireDocument(requiredId(args, 'documentId'));
+
+      // Reported back, because "delete this page" and "delete this page and the
+      // nine under it" are different acts and the caller should see which it did.
+      const rows = await prisma.document.findMany({
+        where: { projectId: ctx.project.id },
+        select: { id: true, parentId: true, title: true },
+      });
+      const nested = descendantIds(rows, ctx.document.id).size;
+
+      const target = await runNavigating(() =>
+        deleteDocument(null, form({ documentId: ctx.document.id })),
+      );
+
+      return {
+        ok: true,
+        deleted: ctx.document.id,
+        alsoDeleted: nested,
+        url: target ?? docsPath(ctx.org, ctx.project),
+      };
     },
   },
 

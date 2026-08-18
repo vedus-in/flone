@@ -18,6 +18,7 @@
     "check:email": "bun scripts/check-email.ts",
     "check:bucket": "bun scripts/check-bucket.ts",
     "check:markdown": "bun scripts/check-markdown.ts",
+    "check:docs": "bun scripts/check-docs.ts",
     "check:mentions": "bun scripts/check-mentions.ts",
     "check:voice": "bun services/voice/check.ts"
   },

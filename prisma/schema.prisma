@@ -116,6 +116,7 @@ model User {
   attachments      Attachment[]
   recurringTickets        RecurringTicket[] @relation("RecurringTicketAssignee")
   createdRecurringTickets RecurringTicket[] @relation("RecurringTicketCreatedBy")
+  documents               Document[]        @relation("DocumentCreatedBy")
 
   @@index([isAdmin])
 }
@@ -293,6 +294,7 @@ model Project {
   reminders  Reminder[]
   recurringTickets RecurringTicket[]
   attachments Attachment[]
+  documents  Document[]
 
   @@unique([organizationId, key])
   @@index([workspaceId])
@@ -674,6 +676,63 @@ model Comment {
   updatedAt DateTime @updatedAt
 
   @@index([ticketId, createdAt])
+}
+
+/// A long-form page inside a project: a title, a Markdown body, and any number of
+/// documents nested under it. Notion's page, with Notion's block editor left out.
+///
+/// THE BODY IS MARKDOWN IN ONE COLUMN, not a tree of block rows, and that is the
+/// whole design. `Prose` already renders issue descriptions and comments through
+/// react-markdown, and `useImageAttach` already turns a pasted screenshot into
+/// `![name](/api/attachments/<id>)` -- so a document written this way inherits
+/// tables, task lists, @mentions and images on the day it ships, reads identically
+/// over MCP, and is greppable in the database. A block table would buy drag-to-
+/// reorder and per-block comments at the cost of every one of those.
+///
+/// THE PROJECT OWNS IT, for the same reason `Attachment` does: the project is the
+/// smallest thing that already has an authorization walk, an image bucket key and
+/// an `(orgSlug, projectKey)` address over MCP. A workspace-level document would
+/// need a new walk, a nullable project on `Attachment`, and a new MCP addressing
+/// scheme, to hold notes that could have sat in a project anyway.
+///
+/// NESTING IS `parentId`, uncapped in depth and CASCADING on delete -- deleting a
+/// page deletes what was filed under it, which is what "delete this section"
+/// means to the person clicking it, and what Notion does before its trash. There
+/// is no trash here: the confirmation names the descendant count instead.
+///
+/// THE ONE INVARIANT NOTHING ELSE ENFORCES: the parent chain must stay acyclic.
+/// Postgres will happily store a -> b -> a, and every reader here walks parents
+/// (breadcrumbs) or children (the tree), so a cycle is an infinite loop in a page
+/// render rather than a wrong answer. `wouldCycle` in `src/lib/documents.ts` is
+/// the guard, and `moveDocument` is the only writer of this column.
+///
+/// NO `position`, deliberately: nothing drags a document into a hand-set order,
+/// so siblings read alphabetically -- the same default `nav.ts` gives a workspace
+/// nobody has arranged. Add the column with the drag handle that needs it.
+///
+/// `createdById` is Restrict, like `Comment.authorId` and
+/// `RecurringTicket.createdById`: this is authored content, and a user who wrote
+/// some must not be hard-deletable.
+model Document {
+  id          String     @id @default(cuid())
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Null means top level. Cascade, so a subtree goes with its root.
+  parentId    String?
+  parent      Document?  @relation("DocumentParent", fields: [parentId], references: [id], onDelete: Cascade)
+  children    Document[] @relation("DocumentParent")
+  title       String
+  /// Never null: a document with no body is the empty string, so every reader
+  /// hands `Prose` a string and no call site needs a `?? ''`.
+  body        String     @db.Text
+  createdById String
+  createdBy   User       @relation("DocumentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  /// The tree query: every document in a project, in one read, grouped by parent.
+  @@index([projectId, parentId])
+  @@index([parentId])
 }
 
 /// An image uploaded inside a project and referenced from Markdown as

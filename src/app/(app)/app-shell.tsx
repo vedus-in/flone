@@ -145,6 +145,8 @@ const I_BELL =
   'M4 6.5a4 4 0 1 1 8 0c0 3 1.25 4 1.25 4H2.75S4 9.5 4 6.5ZM6.5 13a1.75 1.75 0 0 0 3 0';
 const I_REPEAT =
   'M11.5 1 14 3.5 11.5 6M2 7.5V6a2.5 2.5 0 0 1 2.5-2.5H14M4.5 15 2 12.5 4.5 10M14 8.5V10a2.5 2.5 0 0 1-2.5 2.5H2';
+/** A page with a folded corner and two lines of writing on it. */
+const I_DOC = 'M4 1.5h5l3 3v10H4zM9 1.5v3h3M6 8h4M6 11h4';
 
 /* -------------------------------------------------------------------------- */
 
@@ -762,6 +764,26 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                               indented
                             >
                               Views
+                            </NavRow>
+                          </li>
+                          {/* Documents. The href is appended here for the same
+                              reason `recurring` is: a fixed segment under an
+                              already-encoded project path, with no slug for this
+                              module to construct. The row stays lit inside a
+                              document, which is where most of the reading
+                              happens. */}
+                          <li>
+                            <NavRow
+                              href={`${project.href}/docs`}
+                              active={
+                                pathname === `${project.href}/docs` ||
+                                pathname.startsWith(`${project.href}/docs/`)
+                              }
+                              onNavigate={closeDrawer}
+                              icon={I_DOC}
+                              indented
+                            >
+                              Documents
                             </NavRow>
                           </li>
                         </ul>

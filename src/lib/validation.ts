@@ -354,6 +354,15 @@ export const boardDescriptionSchema = safeMultiline(0, 2000);
 export const ticketTitleSchema = safeText(1, 200);
 export const ticketDescriptionSchema = safeMultiline(0, 10000);
 export const commentBodySchema = safeMultiline(1, 5000);
+export const documentTitleSchema = safeText(1, 200);
+/**
+ * A document body, and the one text field in the app that is genuinely long-form:
+ * 100k characters is roughly a 30-page handbook, against 10k for an issue
+ * description. The column is `@db.Text` either way, so the cap is here only to
+ * keep a single request from carrying a book -- and `safeMultiline` still rejects
+ * the NUL byte Postgres cannot store.
+ */
+export const documentBodySchema = safeMultiline(0, 100000);
 export const stateNameSchema = safeText(1, 40);
 export const labelNameSchema = safeText(1, 40);
 export const cycleNameSchema = safeText(0, 60);
