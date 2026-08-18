@@ -209,14 +209,21 @@ export function useImageAttach({
   return {
     textareaProps: {
       onPaste: (event) => {
-        // A paste carrying NO file is left alone entirely: copying an image out of
-        // a web page also puts HTML and text on the clipboard, and pasting text has
-        // to keep working exactly as it did before this feature existed. A paste
-        // that does carry a file is ours to answer -- with the image, or with the
-        // reason it was refused.
-        if ((event.clipboardData?.files?.length ?? 0) === 0) return;
+        const files = Array.from(event.clipboardData?.files ?? []);
+        // No file at all: an ordinary text paste, left completely alone.
+        if (files.length === 0) return;
+
+        // A file AND text, none of the files an image -- copying out of Word or
+        // Excel does this -- is a TEXT paste that happens to carry a file, and
+        // swallowing it to complain about the file would break the most common
+        // action in the app to explain something nobody asked about. An image wins
+        // over text, because pasting a screenshot from a web page is the whole
+        // feature and that clipboard always carries markup too.
+        const hasImage = files.some((file) => validateUpload(file) === null);
+        if (!hasImage && event.clipboardData.types.includes('text/plain')) return;
+
         event.preventDefault();
-        upload(event.clipboardData.files);
+        upload(files);
       },
       onDrop: (event) => {
         setDragging(false);
