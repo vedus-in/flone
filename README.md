@@ -92,6 +92,7 @@ Register an account at `/register`, and you will be sent straight to the organiz
 | `bun run db:deploy` | `prisma migrate deploy` — applies existing migrations. Used in production. |
 | `bun run typecheck` | `tsc --noEmit`. |
 | `bun run mcp:smoke` | End-to-end check of `/api/mcp` against a running server. Needs `FLONE_MCP_TOKEN`. |
+| `bun run smoke:attachments` | End-to-end check of the attachment routes against a running server: upload, the presigned redirect, the type/size refusals, and that deleting an issue really removes its object from the bucket. Builds and deletes a throwaway organization, so it is safe against production. Without `FLONE_MCP_TOKEN` the unauthenticated checks still run and the rest are skipped. |
 | `bun run email:dev` | react-email's preview server for the templates in `src/emails/`. |
 | `bun run check:email` | Asserts the transport and templates. The one-time-token checks need a reachable database and are skipped, not failed, without one. |
 | `bun run check:markdown` | Asserts what the comment renderer does with hostile input: raw HTML stays inert, `javascript:` links are dropped, relative attachment images survive. |
