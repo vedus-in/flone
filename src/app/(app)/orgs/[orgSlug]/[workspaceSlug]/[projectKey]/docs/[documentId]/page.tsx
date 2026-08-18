@@ -28,27 +28,26 @@ import { DocIcon } from '../doc-icon';
 /**
  * One document: the rendered page, and everything that can be done to it.
  *
- * THE LAYOUT IS THE FEATURE. A reading column (`max-w-3xl mx-auto`), a small
- * breadcrumb-and-meta line, a large title, the prose, and the child pages as
- * quiet icon links -- the shape of a Notion page, because a document is READ far
- * more often than it is operated on. Everything operational sits below a rule at
- * the foot, as ghost-text disclosures that stay out of the way until asked.
+ * THE ACTIONS LIVE IN THE TOP BAR, where Notion puts them: breadcrumb on the
+ * left, then Edit, Share and the "⋯" menu on the right, each a native
+ * `<details>` whose panel is an absolutely-positioned popover under its
+ * trigger. Nothing about the page has to be scrolled past to operate on it,
+ * and the reading column below stays nothing but the document.
  *
- * A SERVER COMPONENT WITH NO CLIENT MODULE OF ITS OWN. Editing, moving, sharing
- * and deleting are ordinary forms behind native `<details>` disclosures, which
- * is the platform's answer to "show this only when I ask for it" -- no state, no
- * hydration, and it works before JavaScript arrives. The issue page earns its
- * click-to-edit client component by being the surface people live in all day;
- * one extra click on the rarer path buys this page zero client JS.
+ * A SERVER COMPONENT WITH NO CLIENT MODULE OF ITS OWN. A `<details>` with an
+ * `absolute` panel is the platform's popover: no state, no hydration, works
+ * before JavaScript arrives. The one thing it does not give is close-on-
+ * outside-click, which is the accepted cost of zero client JS on a page that
+ * is read far more often than it is operated on.
  *
- * The delete disclosure is also the confirmation. Its summary names the
- * descendant count, so "delete this section" cannot be a single stray click, and
- * the button behind it says exactly how much is going.
+ * Delete lives inside the "⋯" menu and still confirms by content: the button
+ * itself names the descendant count, so "delete this section" cannot be a
+ * single stray click even there.
  *
- * NO AUTHZ LOADER FOR THE DOCUMENT ITSELF. The project ctx is proved from the URL
- * tuple, and the document is read out of the tree query this page was going to
- * run anyway, scoped by that project id -- so an id from another tenant is simply
- * not in the tree and 404s, exactly as a `require*` helper would make it.
+ * NO AUTHZ LOADER FOR THE DOCUMENT ITSELF. The project ctx is proved from the
+ * URL tuple, and the document is read scoped by that project id -- so an id
+ * from another tenant is simply not found and 404s, exactly as a `require*`
+ * helper would make it.
  */
 
 type Params = {
@@ -60,15 +59,22 @@ type Params = {
 
 const DATE = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' });
 
-/**
- * A page action: ghost text that gains a surface on hover, never a bordered box.
- * The panel behind each one opens onto a soft `bg-secondary` sheet, so an open
- * disclosure reads as one raised surface rather than a form dropped on the page.
- */
-const DISCLOSURE =
-  'inline-flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md px-2 py-1 text-[0.8125rem] text-tertiary transition-colors select-none hover:bg-secondary hover:text-primary [&::-webkit-details-marker]:hidden';
+/** A top-bar action: ghost text that gains a surface on hover. */
+const ACTION =
+  'inline-flex cursor-pointer list-none items-center rounded-md px-2 py-1 text-xs whitespace-nowrap text-tertiary transition-colors select-none hover:bg-secondary hover:text-primary [&::-webkit-details-marker]:hidden';
 
-const PANEL = 'mt-2 flex flex-col gap-4 rounded-xl bg-secondary/40 p-4';
+/**
+ * The popover panel under a top-bar trigger. The same surface the app's
+ * dropdown menus draw -- `bg-primary`, hairline border, deep shadow -- so a
+ * details-based popover is indistinguishable from the scripted ones.
+ */
+const POPOVER_BASE =
+  'absolute right-0 top-[calc(100%+0.375rem)] z-50 flex flex-col gap-4 rounded-xl border border-secondary bg-primary p-4 shadow-2xl';
+
+const POPOVER = `${POPOVER_BASE} w-80 max-w-[calc(100vw-2rem)]`;
+
+/** Edit wants room for the body textarea: as wide as the viewport allows, capped. */
+const EDIT_POPOVER = `${POPOVER_BASE} w-[min(42rem,calc(100vw-2rem))]`;
 
 /**
  * A native `<select>` wearing Untitled UI's field tokens -- the same constant the
@@ -122,8 +128,9 @@ export default async function DocumentPage({ params }: { params: Promise<Params>
 
   return (
     <article className="mx-auto flex w-full max-w-3xl flex-col gap-8 py-4 lg:py-10">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <Breadcrumbs>
+      {/* The top bar: breadcrumb left, meta and every page action right. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <Breadcrumbs className="min-w-0">
           <Breadcrumbs.Item href={docsPath(ctx.org, ctx.project)}>Documents</Breadcrumbs.Item>
           {trail.map((crumb) =>
             crumb.id === document.id ? (
@@ -138,10 +145,181 @@ export default async function DocumentPage({ params }: { params: Promise<Params>
             ),
           )}
         </Breadcrumbs>
-        <span className="text-xs whitespace-nowrap text-tertiary">
-          {document.createdBy.name} · edited {DATE.format(document.updatedAt)}
-          {shareUrl ? ' · public' : null}
-        </span>
+
+        <div className="flex shrink-0 items-center gap-0.5">
+          <span className="mr-1.5 text-xs whitespace-nowrap text-tertiary">
+            Edited {DATE.format(document.updatedAt)}
+          </span>
+
+          <details className="relative">
+            <summary className={ACTION}>Edit</summary>
+            <ActionForm action={updateDocument} className={EDIT_POPOVER} aria-label="Edit document">
+              <input type="hidden" name="documentId" value={document.id} />
+              <Field htmlFor="document-title" label="Title">
+                <Input
+                  id="document-title"
+                  name="title"
+                  isRequired
+                  maxLength={200}
+                  autoComplete="off"
+                  defaultValue={document.title}
+                />
+              </Field>
+              <Field
+                htmlFor="document-body"
+                label="Body (Markdown)"
+                hint="Paste, drop or attach an image and it uploads into this project."
+              >
+                {/* The same uncontrolled Markdown textarea the recurring-template
+                    form uses, targeted at the PROJECT: a document has no issue, and
+                    `Attachment.ticketId` is nullable for exactly this case. */}
+                <ImageAttachTextarea
+                  target={{ projectId: ctx.project.id }}
+                  id="document-body"
+                  name="body"
+                  rows={16}
+                  maxLength={100000}
+                  defaultValue={document.body}
+                  placeholder={'## Overview\n\nWhat this is for.'}
+                />
+              </Field>
+              <div>
+                <SubmitButton size="sm">Save</SubmitButton>
+              </div>
+            </ActionForm>
+          </details>
+
+          {canDelete ? (
+            <details className="relative">
+              {/* The shared state is worn on the trigger, not hidden in the
+                  panel: a public page says so from the top bar. */}
+              <summary className={ACTION}>
+                {shareUrl ? <span className="text-brand-secondary">Public</span> : 'Share'}
+              </summary>
+              <div className={POPOVER}>
+                {shareUrl ? (
+                  <>
+                    {/* Readonly rather than plain text so it can be selected and
+                        copied in one gesture, with no client component to do it. */}
+                    <Input
+                      id="document-share-url"
+                      aria-label="Public link"
+                      readOnly
+                      value={shareUrl}
+                    />
+                    <p className="text-xs text-pretty text-tertiary">
+                      Anyone with this link can read this document — the title, the body
+                      and the images in it — without signing in. Documents filed inside
+                      this one are not shared. Stopping breaks this link permanently;
+                      sharing again makes a new one.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-pretty text-tertiary">
+                    Makes a read-only page anyone with the link can open, no account
+                    needed. Only this document: anything filed inside it stays private.
+                  </p>
+                )}
+                <ActionForm
+                  action={setDocumentShared}
+                  aria-label={shareUrl ? 'Stop sharing document' : 'Share document'}
+                >
+                  <input type="hidden" name="documentId" value={document.id} />
+                  <input type="hidden" name="shared" value={shareUrl ? 'false' : 'true'} />
+                  <SubmitButton
+                    size="sm"
+                    color={shareUrl ? 'secondary' : 'primary'}
+                    pendingLabel={shareUrl ? 'Stopping...' : 'Creating...'}
+                  >
+                    {shareUrl ? 'Stop sharing' : 'Create a public link'}
+                  </SubmitButton>
+                </ActionForm>
+              </div>
+            </details>
+          ) : null}
+
+          <details className="relative">
+            <summary className={`${ACTION} text-sm leading-none`} aria-label="More actions">
+              ⋯
+            </summary>
+            <div className={POPOVER}>
+              <ActionForm
+                action={createDocument}
+                className="flex flex-col gap-2"
+                aria-label="New page inside this document"
+              >
+                <input type="hidden" name="projectId" value={ctx.project.id} />
+                <input type="hidden" name="parentId" value={document.id} />
+                <Field htmlFor="child-document-title" label="New page inside">
+                  <Input
+                    id="child-document-title"
+                    name="title"
+                    isRequired
+                    maxLength={200}
+                    autoComplete="off"
+                    placeholder="Deployment checklist"
+                  />
+                </Field>
+                <div>
+                  <SubmitButton size="sm" color="secondary" pendingLabel="Creating...">
+                    Create
+                  </SubmitButton>
+                </div>
+              </ActionForm>
+
+              <Separator />
+
+              <ActionForm action={moveDocument} className="flex flex-col gap-2" aria-label="Move document">
+                <input type="hidden" name="documentId" value={document.id} />
+                <Field htmlFor="document-parent" label="Move under">
+                  {/* A native `<select>`, and it CANNOT OFFER A CYCLE:
+                      `parentOptions` drops this document and everything beneath
+                      it. `moveDocument` checks again anyway -- a select is a
+                      suggestion, a POST body is whatever the caller sent. */}
+                  <select
+                    id="document-parent"
+                    name="parentId"
+                    defaultValue={document.parentId ?? ''}
+                    className={`${SELECT_CLASS} w-full`}
+                  >
+                    <option value="">Top level</option>
+                    {parentOptions(rows, document.id).map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.title}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <div>
+                  <SubmitButton size="sm" color="secondary" pendingLabel="Moving...">
+                    Move
+                  </SubmitButton>
+                </div>
+              </ActionForm>
+
+              {canDelete ? (
+                <>
+                  <Separator />
+                  {/* The button IS the confirmation: it names the descendant
+                      count, because deleting a document deletes what is filed
+                      under it and nothing here goes to a trash. */}
+                  <ActionForm action={deleteDocument} aria-label="Delete document">
+                    <input type="hidden" name="documentId" value={document.id} />
+                    <SubmitButton
+                      size="sm"
+                      color="secondary-destructive"
+                      pendingLabel="Deleting..."
+                    >
+                      {descendants > 0
+                        ? `Delete, with ${descendants} nested ${descendants === 1 ? 'page' : 'pages'}`
+                        : 'Delete this document'}
+                    </SubmitButton>
+                  </ActionForm>
+                </>
+              ) : null}
+            </div>
+          </details>
+        </div>
       </div>
 
       <h1 className="text-4xl font-bold tracking-tight text-balance text-primary">
@@ -154,7 +332,7 @@ export default async function DocumentPage({ params }: { params: Promise<Params>
         // caller keeps its scale.
         <Prose className="markdown-doc text-[0.9375rem] leading-7">{document.body}</Prose>
       ) : (
-        <p className="text-sm text-tertiary">This page is empty. Open Edit below to write it.</p>
+        <p className="text-sm text-tertiary">This page is empty. Open Edit above to write it.</p>
       )}
 
       {children.length > 0 ? (
@@ -173,179 +351,6 @@ export default async function DocumentPage({ params }: { params: Promise<Params>
           ))}
         </nav>
       ) : null}
-
-      <Separator className="mt-2" />
-
-      <div className="flex flex-col gap-1">
-        <details>
-          <summary className={DISCLOSURE}>Edit</summary>
-          <ActionForm action={updateDocument} className={PANEL} aria-label="Edit document">
-            <input type="hidden" name="documentId" value={document.id} />
-            <Field htmlFor="document-title" label="Title">
-              <Input
-                id="document-title"
-                name="title"
-                isRequired
-                maxLength={200}
-                autoComplete="off"
-                defaultValue={document.title}
-              />
-            </Field>
-            <Field
-              htmlFor="document-body"
-              label="Body (Markdown)"
-              hint="Paste, drop or attach an image and it uploads into this project."
-            >
-              {/* The same uncontrolled Markdown textarea the recurring-template
-                  form uses, targeted at the PROJECT: a document has no issue, and
-                  `Attachment.ticketId` is nullable for exactly this case. */}
-              <ImageAttachTextarea
-                target={{ projectId: ctx.project.id }}
-                id="document-body"
-                name="body"
-                rows={20}
-                maxLength={100000}
-                defaultValue={document.body}
-                placeholder={'## Overview\n\nWhat this is for.'}
-              />
-            </Field>
-            <div>
-              <SubmitButton size="sm">Save</SubmitButton>
-            </div>
-          </ActionForm>
-        </details>
-
-        <details>
-          <summary className={DISCLOSURE}>New page inside</summary>
-          <ActionForm
-            action={createDocument}
-            className={`${PANEL} flex-row flex-wrap items-end gap-3`}
-            aria-label="New sub-document"
-          >
-            <input type="hidden" name="projectId" value={ctx.project.id} />
-            <input type="hidden" name="parentId" value={document.id} />
-            <Field htmlFor="child-document-title" label="Title" className="min-w-0 flex-1">
-              <Input
-                id="child-document-title"
-                name="title"
-                isRequired
-                maxLength={200}
-                autoComplete="off"
-                placeholder="Deployment checklist"
-              />
-            </Field>
-            <SubmitButton size="sm" color="secondary" pendingLabel="Creating...">
-              Create
-            </SubmitButton>
-          </ActionForm>
-        </details>
-
-        <details>
-          <summary className={DISCLOSURE}>Move</summary>
-          <ActionForm
-            action={moveDocument}
-            className={`${PANEL} flex-row flex-wrap items-end gap-3`}
-            aria-label="Move document"
-          >
-            <input type="hidden" name="documentId" value={document.id} />
-            <Field htmlFor="document-parent" label="File under" className="min-w-0 flex-1">
-              {/* A native `<select>`, and it CANNOT OFFER A CYCLE: `parentOptions`
-                  drops this document and everything beneath it. `moveDocument`
-                  checks again anyway -- a select is a suggestion, a POST body is
-                  whatever the caller sent. */}
-              <select
-                id="document-parent"
-                name="parentId"
-                defaultValue={document.parentId ?? ''}
-                className={`${SELECT_CLASS} w-full`}
-              >
-                <option value="">Top level</option>
-                {parentOptions(rows, document.id).map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.title}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <SubmitButton size="sm" color="secondary" pendingLabel="Moving...">
-              Move
-            </SubmitButton>
-          </ActionForm>
-        </details>
-
-        {canDelete ? (
-          <details open={shareUrl !== null}>
-            {/* Open when the document IS shared: "this page is public" is not
-                something to hide behind a closed disclosure. */}
-            <summary className={DISCLOSURE}>
-              {shareUrl ? 'Shared on a public link' : 'Share on a public link'}
-            </summary>
-            <div className={PANEL}>
-              {shareUrl ? (
-                <>
-                  {/* Readonly rather than plain text so it can be selected and
-                      copied in one gesture, with no client component to do it. */}
-                  <Input
-                    id="document-share-url"
-                    aria-label="Public link"
-                    readOnly
-                    value={shareUrl}
-                  />
-                  <p className="text-xs text-pretty text-tertiary">
-                    Anyone with this link can read this document — the title, the body and
-                    the images in it — without signing in. Documents filed inside this one
-                    are not shared. Stopping breaks this link permanently; sharing again
-                    makes a new one.
-                  </p>
-                </>
-              ) : (
-                <p className="text-xs text-pretty text-tertiary">
-                  Makes a read-only page anyone with the link can open, no account needed.
-                  Only this document: anything filed inside it stays private.
-                </p>
-              )}
-              <ActionForm
-                action={setDocumentShared}
-                aria-label={shareUrl ? 'Stop sharing document' : 'Share document'}
-              >
-                <input type="hidden" name="documentId" value={document.id} />
-                <input type="hidden" name="shared" value={shareUrl ? 'false' : 'true'} />
-                <SubmitButton
-                  size="sm"
-                  color={shareUrl ? 'secondary' : 'primary'}
-                  pendingLabel={shareUrl ? 'Stopping...' : 'Creating...'}
-                >
-                  {shareUrl ? 'Stop sharing' : 'Create a public link'}
-                </SubmitButton>
-              </ActionForm>
-            </div>
-          </details>
-        ) : null}
-
-        {canDelete ? (
-          <details>
-            {/* The disclosure IS the confirmation, and the count is why: deleting
-                a document deletes what is filed under it, and nothing here goes
-                to a trash to be recovered from. */}
-            <summary className={`${DISCLOSURE} hover:text-error-primary`}>
-              Delete
-              {descendants > 0
-                ? ` — this also deletes ${descendants} nested ${descendants === 1 ? 'document' : 'documents'}`
-                : null}
-            </summary>
-            <ActionForm action={deleteDocument} className={PANEL} aria-label="Delete document">
-              <input type="hidden" name="documentId" value={document.id} />
-              <div>
-                <SubmitButton size="sm" color="primary-destructive" pendingLabel="Deleting...">
-                  {descendants > 0
-                    ? `Delete this document and ${descendants} nested ${descendants === 1 ? 'document' : 'documents'}`
-                    : 'Delete this document'}
-                </SubmitButton>
-              </div>
-            </ActionForm>
-          </details>
-        ) : null}
-      </div>
     </article>
   );
 }
