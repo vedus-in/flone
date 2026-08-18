@@ -97,6 +97,8 @@ export type DocumentRef = {
   /** Never null -- an empty document is the empty string. */
   body: string;
   createdById: string;
+  /** Null unless the document has been published on a public link. */
+  shareToken: string | null;
 };
 
 export type OrgCtx = { user: SessionUser; org: OrgRef; role: Role };
@@ -325,6 +327,7 @@ function toDocumentCtx(user: SessionUser, row: DocumentRow): DocumentCtx {
       title: row.title,
       body: row.body,
       createdById: row.createdById,
+      shareToken: row.shareToken,
     },
   };
 }
@@ -741,11 +744,89 @@ export async function requireDocument(documentId: string): Promise<DocumentCtx> 
       title: true,
       body: true,
       createdById: true,
+      shareToken: true,
       project: { select: projectSelect(user.id) },
     },
   });
   if (!row) throw new AuthzError('NOT_FOUND');
   return toDocumentCtx(user, row);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Public share links                                                          */
+/*                                                                             */
+/* THE ONLY TWO READS IN THIS FILE THAT DO NOT WALK TO A MEMBERSHIP, and the    */
+/* only two that never touch the session. That is not a hole in the rule at the */
+/* top of this file -- it is the rule applied to a different subject. Everywhere */
+/* else the question is "may this PERSON see this row?", answered by walking to  */
+/* the organization. Here the question is "has this row been published?",        */
+/* answered by the row itself: an unguessable token IS the capability, exactly   */
+/* as it is for a password-reset link.                                          */
+/*                                                                             */
+/* Both are still single queries whose predicate cannot be widened by input: a   */
+/* wrong token and a revoked one produce the same null, and nothing accepts a    */
+/* document id from a public caller.                                            */
+/* -------------------------------------------------------------------------- */
+
+export type SharedDocument = {
+  id: string;
+  title: string;
+  body: string;
+  updatedAt: Date;
+};
+
+/**
+ * A published document, by its token. No session, no organization, no project --
+ * the public page renders the title and the body and NOTHING that would describe
+ * the workspace it came from.
+ *
+ * Null for an unknown token, a revoked one, and a token belonging to a document
+ * that has since been deleted. The caller turns all three into the same 404.
+ */
+export async function findSharedDocument(token: string): Promise<SharedDocument | null> {
+  // Guarded before Prisma, because `shareToken: ''` would otherwise match nothing
+  // in a way that costs a round trip on every crawler hitting `/d/`.
+  if (token.length === 0) return null;
+  return prisma.document.findFirst({
+    where: { shareToken: token },
+    select: { id: true, title: true, body: true, updatedAt: true },
+  });
+}
+
+/**
+ * The bucket key of an attachment that a PUBLISHED document embeds -- the one
+ * thing that keeps a screenshot from being a broken image on a shared page.
+ *
+ * THE PREDICATE IS THE AUTHORIZATION, and it is deliberately narrow: this row is
+ * readable without a session only while some document in its own project both
+ * carries a `shareToken` and mentions this attachment's id in its body. Revoke the
+ * share and the image closes with it, in the same query, with nothing to remember
+ * to also turn off.
+ *
+ * `contains` on the body rather than a parsed reference list, for the reason the
+ * schema gives for never parsing bodies on the delete path: a parser is a second
+ * source of truth about which images a document uses, and getting it wrong here
+ * would mean either a broken image or a leaked one. A substring match can only be
+ * too GENEROUS in one direction -- an id written in a shared document but not
+ * rendered as an image -- and writing an attachment id into a page you are
+ * publishing is indistinguishable from publishing it.
+ */
+export async function findPublicAttachment(attachmentId: string): Promise<{ key: string } | null> {
+  if (attachmentId.length === 0) return null;
+  return prisma.attachment.findFirst({
+    where: {
+      id: attachmentId,
+      project: {
+        documents: {
+          some: {
+            shareToken: { not: null },
+            body: { contains: attachmentId },
+          },
+        },
+      },
+    },
+    select: { key: true },
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1052,6 +1133,17 @@ export function docsPath(org: OrgRef, project: ProjectRef): string {
 /** One document, addressed by its opaque id -- documents have no number. */
 export function documentPath(org: OrgRef, project: ProjectRef, documentId: string): string {
   return `${docsPath(org, project)}/${encodeURIComponent(documentId)}`;
+}
+
+/**
+ * A published document, on the one route in the app that takes no session.
+ *
+ * Short and outside `/orgs` on purpose: the path carries the capability and
+ * nothing else, so a shared link names no organization, no workspace and no
+ * project key. Nothing about who you work for travels with the page you sent.
+ */
+export function publicDocumentPath(shareToken: string): string {
+  return `/d/${encodeURIComponent(shareToken)}`;
 }
 
 export function projectSettingsPath(org: OrgRef, project: ProjectRef): string {

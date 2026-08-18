@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
-import { AuthzError, isNextControlFlowError, requireAttachment } from '@/lib/authz';
+import {
+  AuthzError,
+  findPublicAttachment,
+  isNextControlFlowError,
+  requireAttachment,
+} from '@/lib/authz';
 import { objectUrl } from '@/lib/bucket';
 
 /**
@@ -34,6 +39,15 @@ import { objectUrl } from '@/lib/bucket';
  * A missing attachment, an attachment in another tenant and a signed-out caller
  * are all 404 -- `requireAttachment` derives access in one query, so there is no
  * separate 403 to leak the existence of an issue from.
+ *
+ * THE ONE EXCEPTION IS A PUBLISHED DOCUMENT. A shared page renders
+ * `![shot](/api/attachments/<id>)` like any other body, and its reader has no
+ * session -- so without the second lookup below every screenshot in a shared
+ * document would be a broken image for exactly the person it was sent to. That
+ * lookup is narrow and is checked SECOND, after the membership walk has already
+ * failed: an attachment is servable this way only while a document in its own
+ * project both carries a `shareToken` and names this id in its body. Revoking the
+ * share closes the image in the same query, with nothing else to remember.
  */
 
 export const runtime = 'nodejs';
@@ -66,18 +80,28 @@ export async function GET(
     return new Response(null, { status: 404, headers: NO_STORE });
   }
 
-  try {
-    const ctx = await requireAttachment(id);
+  /** The 302 both paths below answer with, once a key has been proved. */
+  const serve = (key: string): Response =>
     // Hand-built rather than `Response.redirect`, which accepts no headers and so
     // cannot carry the `no-store` that keeps the signed URL out of caches.
-    return new Response(null, {
+    new Response(null, {
       status: 302,
-      headers: { ...NO_STORE, Location: objectUrl(ctx.attachment.key, URL_TTL_SECONDS) },
+      headers: { ...NO_STORE, Location: objectUrl(key, URL_TTL_SECONDS) },
     });
+
+  try {
+    const ctx = await requireAttachment(id);
+    return serve(ctx.attachment.key);
   } catch (e) {
     if (isNextControlFlowError(e)) throw e;
 
     if (e instanceof AuthzError) {
+      // The member walk said no. It may still be an image inside a document
+      // somebody published -- that is a different question about the ROW, not
+      // about the caller, and it is asked only here, after the first one failed.
+      const shared = await findPublicAttachment(id);
+      if (shared) return serve(shared.key);
+
       // 401 only for a missing session, so a signed-out browser is told to sign
       // in rather than shown a broken image forever. Everything else is 404.
       const status = e.kind === 'UNAUTHENTICATED' ? 401 : 404;

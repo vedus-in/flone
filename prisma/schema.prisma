@@ -725,6 +725,27 @@ model Document {
   /// Never null: a document with no body is the empty string, so every reader
   /// hands `Prose` a string and no call site needs a `?? ''`.
   body        String     @db.Text
+  /// The public link, and the WHOLE access rule for one: null means private,
+  /// which every document is until somebody publishes it. There is no second
+  /// visibility column to fall out of step with this one, and no state where a
+  /// token exists but does not work.
+  ///
+  /// STORED RAW, unlike `EmailToken`, which keeps only a sha256. Hashing protects
+  /// a one-time credential whose plaintext lives in someone's inbox; this token
+  /// guards a row whose next column IS the document body, so a database leak that
+  /// exposes the token has already exposed everything the token unlocks. Hashing
+  /// would buy nothing and would cost the ability to show the link again tomorrow.
+  ///
+  /// UNIQUE, so the public route can look a document up by token alone -- that
+  /// lookup is the authorization, and 32 bytes from `randomBytes` is what makes it
+  /// unguessable. Revoking writes null: a re-shared document gets a NEW token, so
+  /// an old URL is dead rather than dormant.
+  ///
+  /// SHARING IS PER DOCUMENT AND DOES NOT DESCEND. A child of a shared page is
+  /// private until it is shared itself, which is why the public page links to
+  /// nothing: publishing a subtree by accident is the failure mode worth designing
+  /// out.
+  shareToken  String?    @unique
   createdById String
   createdBy   User       @relation("DocumentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   createdAt   DateTime   @default(now())

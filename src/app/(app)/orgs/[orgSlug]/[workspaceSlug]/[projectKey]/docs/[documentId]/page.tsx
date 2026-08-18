@@ -7,14 +7,22 @@ import {
   docsPath,
   documentPath,
   loadPage,
+  publicDocumentPath,
   requireProjectByKey,
 } from '@/lib/authz';
+import { appUrl } from '@/lib/email';
 import { prisma } from '@/lib/db';
 import { ancestorChain, descendantIds, parentOptions } from '@/lib/documents';
 import { ImageAttachTextarea } from '@/components/image-attach';
 import { Breadcrumbs, Field, Input, Prose, SubmitButton } from '@/components/ui';
 import { ActionForm } from '../../../../../../action-form';
-import { createDocument, deleteDocument, moveDocument, updateDocument } from '../actions';
+import {
+  createDocument,
+  deleteDocument,
+  moveDocument,
+  setDocumentShared,
+  updateDocument,
+} from '../actions';
 
 /**
  * One document: the rendered page, and everything that can be done to it.
@@ -81,6 +89,7 @@ export default async function DocumentPage({ params }: { params: Promise<Params>
       title: true,
       body: true,
       createdById: true,
+      shareToken: true,
       updatedAt: true,
       createdBy: { select: { name: true } },
     },
@@ -90,7 +99,13 @@ export default async function DocumentPage({ params }: { params: Promise<Params>
   const trail = ancestorChain(rows, document.id);
   const children = rows.filter((row) => row.parentId === document.id);
   const descendants = descendantIds(rows, document.id).size;
+  // Deleting and publishing carry the same gate: neither can be taken back from
+  // somebody who already has the subtree, or the link.
   const canDelete = document.createdById === ctx.user.id || atLeast(ctx.role, Role.ADMIN);
+  // Absolute, and built from APP_URL rather than the request -- this string is
+  // meant to be copied into a message to somebody outside the organization, and a
+  // link built out of a Host header is a link an attacker can choose.
+  const shareUrl = document.shareToken ? appUrl(publicDocumentPath(document.shareToken)) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -244,6 +259,55 @@ export default async function DocumentPage({ params }: { params: Promise<Params>
             </SubmitButton>
           </ActionForm>
         </details>
+
+        {canDelete ? (
+          <details open={shareUrl !== null}>
+            {/* Open when the document IS shared: "this page is public" is not
+                something to hide behind a closed disclosure. */}
+            <summary className={DISCLOSURE}>
+              {shareUrl ? 'Shared on a public link' : 'Share on a public link'}
+            </summary>
+            <div className="mt-3 flex flex-col gap-3">
+              {shareUrl ? (
+                <>
+                  {/* Readonly rather than plain text so it can be selected and
+                      copied in one gesture, with no client component to do it. */}
+                  <Input
+                    id="document-share-url"
+                    aria-label="Public link"
+                    readOnly
+                    value={shareUrl}
+                  />
+                  <p className="text-xs text-tertiary">
+                    Anyone with this link can read this document — the title, the body and
+                    the images in it — without signing in. Documents filed inside this one
+                    are not shared. Stopping breaks this link permanently; sharing again
+                    makes a new one.
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-tertiary">
+                  Makes a read-only page anyone with the link can open, no account needed.
+                  Only this document: anything filed inside it stays private.
+                </p>
+              )}
+              <ActionForm
+                action={setDocumentShared}
+                aria-label={shareUrl ? 'Stop sharing document' : 'Share document'}
+              >
+                <input type="hidden" name="documentId" value={document.id} />
+                <input type="hidden" name="shared" value={shareUrl ? 'false' : 'true'} />
+                <SubmitButton
+                  size="sm"
+                  color={shareUrl ? 'secondary' : 'primary'}
+                  pendingLabel={shareUrl ? 'Stopping...' : 'Creating...'}
+                >
+                  {shareUrl ? 'Stop sharing' : 'Create a public link'}
+                </SubmitButton>
+              </ActionForm>
+            </div>
+          </details>
+        ) : null}
 
         {canDelete ? (
           <details>

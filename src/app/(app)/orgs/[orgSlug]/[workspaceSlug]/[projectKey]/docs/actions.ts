@@ -23,6 +23,8 @@
  * recurring-template form splits CONTENT from SCHEDULE for the same reason.
  */
 
+import { randomBytes } from 'node:crypto';
+
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { Role } from '@prisma/client';
@@ -32,6 +34,7 @@ import {
   atLeast,
   docsPath,
   documentPath,
+  publicDocumentPath,
   requireDocument,
   requireProject,
   requireUser,
@@ -44,6 +47,9 @@ import { fail, ok, type ActionResult } from '@/lib/result';
 import { cuid, documentBodySchema, documentTitleSchema } from '@/lib/validation';
 
 const NOT_YOURS = 'Only the person who wrote this, or an admin, can delete it.';
+
+const NOT_YOURS_TO_SHARE =
+  'Only the person who wrote this, or an admin, can put it on a public link.';
 
 const WOULD_CYCLE = 'A document cannot be filed inside itself.';
 
@@ -301,4 +307,80 @@ export async function deleteDocument(
   if (!result.ok) return result;
   if (nav.to) redirect(nav.to);
   return result;
+}
+
+/* -------------------------------------------------------------------------- */
+/* setDocumentShared                                                           */
+/* -------------------------------------------------------------------------- */
+
+const shareSchema = z.object({
+  documentId: cuid,
+  /** One action with a boolean, because publishing and revoking are one column. */
+  shared: z.enum(['true', 'false']),
+});
+
+/**
+ * Publish a document on a public link, or take it back down.
+ *
+ * THE ONLY ACTION IN THIS FILE THAT CHANGES WHO CAN SEE SOMETHING, and the rules
+ * follow from that:
+ *
+ *   - AUTHOR OR ADMIN, the same gate as deleting. Both are irreversible from the
+ *     point of view of whoever already has the link: you cannot un-send a URL any
+ *     more than you can un-delete a subtree.
+ *
+ *   - PUBLISHING IS IDEMPOTENT. A document that already has a token keeps it, so
+ *     pressing the button twice does not silently invalidate the link somebody was
+ *     given an hour ago.
+ *
+ *   - REVOKING WRITES NULL, and re-publishing mints a NEW token. The old URL is
+ *     dead forever rather than dormant, which is the only behaviour that makes
+ *     "stop sharing" mean what it says.
+ *
+ *   - IT DOES NOT DESCEND. Children stay private; each is its own decision. The
+ *     public page therefore links to nothing, so a shared parent cannot be walked
+ *     into an unshared subtree.
+ *
+ * 32 bytes from `randomBytes` -- the same source and the same width as a session
+ * token, because this is a bearer credential in a URL and its whole security is
+ * that it cannot be guessed.
+ */
+export async function setDocumentShared(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = shareSchema.safeParse({
+      documentId: field(formData, 'documentId'),
+      shared: field(formData, 'shared'),
+    });
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    const ctx = await requireDocument(parsed.data.documentId);
+    if (ctx.document.createdById !== ctx.user.id && !atLeast(ctx.role, Role.ADMIN)) {
+      return fail(NOT_YOURS_TO_SHARE);
+    }
+
+    const shared = parsed.data.shared === 'true';
+    // Keeping an existing token is what makes this idempotent; `null` is what
+    // makes revocation permanent for the URL that was handed out.
+    const shareToken = shared
+      ? (ctx.document.shareToken ?? randomBytes(32).toString('base64url'))
+      : null;
+
+    await prisma.document.updateMany({
+      where: { id: ctx.document.id, projectId: ctx.project.id },
+      data: { shareToken },
+    });
+
+    revalidatePath(documentPath(ctx.org, ctx.project, ctx.document.id));
+    // The public page too: revoking has to stop serving the old token
+    // immediately, not whenever a cached render happens to expire.
+    if (ctx.document.shareToken) revalidatePath(publicDocumentPath(ctx.document.shareToken));
+    if (shareToken) revalidatePath(publicDocumentPath(shareToken));
+
+    return ok(shared ? 'Anyone with the link can read this.' : 'The link no longer works.');
+  });
 }

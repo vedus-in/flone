@@ -11,6 +11,7 @@ import {
   documentPath,
   isNextControlFlowError,
   issuesPath,
+  publicDocumentPath,
   orgPath,
   projectPath,
   projectSettingsPath,
@@ -35,6 +36,7 @@ import { prisma } from '@/lib/db';
 import { CHALLENGE_COLUMNS, columnForStateType } from '@/lib/challenges';
 import { ensureCycles } from '@/lib/cycles';
 import { ancestorChain, descendantIds, flattenTree } from '@/lib/documents';
+import { appUrl } from '@/lib/email';
 import { listNavTree } from '@/lib/nav';
 import {
   CHANNEL_CALLS,
@@ -85,6 +87,7 @@ import {
   createDocument,
   deleteDocument,
   moveDocument,
+  setDocumentShared,
   updateDocument,
 } from '@/app/(app)/orgs/[orgSlug]/[workspaceSlug]/[projectKey]/docs/actions';
 import {
@@ -3082,6 +3085,12 @@ export const TOOLS: Tool[] = [
         createdAt: detail.createdAt.toISOString(),
         updatedAt: detail.updatedAt.toISOString(),
         url: documentPath(ctx.org, ctx.project, ctx.document.id),
+        // Absolute, because this one is meant to be sent to somebody who has no
+        // account. Null is the ordinary answer: a document is private until it
+        // is deliberately published.
+        publicUrl: ctx.document.shareToken
+          ? appUrl(publicDocumentPath(ctx.document.shareToken))
+          : null,
       };
     },
   },
@@ -3213,6 +3222,48 @@ export const TOOLS: Tool[] = [
         documentId: ctx.document.id,
         parentId: parentId === '' ? null : parentId,
         url: documentPath(ctx.org, ctx.project, ctx.document.id),
+      };
+    },
+  },
+
+  {
+    name: 'set_document_shared',
+    title: 'Share a document on a public link',
+    description:
+      'Publish a document at a link anyone can open without an account, or revoke it. Only this document — anything filed inside it stays private. Revoking kills the URL permanently; sharing again mints a different one. The author, an ADMIN or an OWNER may do it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        documentId: DOCUMENT_ID,
+        shared: { type: 'boolean', description: 'True publishes it, false revokes the link.' },
+      },
+      required: ['documentId', 'shared'],
+      additionalProperties: false,
+    },
+    annotations: { idempotentHint: true },
+    run: async (args) => {
+      const ctx = await requireDocument(requiredId(args, 'documentId'));
+      const shared = requiredBoolean(args, 'shared');
+
+      must(
+        await setDocumentShared(
+          null,
+          form({ documentId: ctx.document.id, shared: String(shared) }),
+        ),
+      );
+
+      // Re-read: publishing an already-published document keeps its token, and
+      // publishing a private one mints a token this call has never seen.
+      const after = await prisma.document.findFirst({
+        where: { id: ctx.document.id, projectId: ctx.project.id },
+        select: { shareToken: true },
+      });
+
+      return {
+        ok: true,
+        documentId: ctx.document.id,
+        shared,
+        publicUrl: after?.shareToken ? appUrl(publicDocumentPath(after.shareToken)) : null,
       };
     },
   },
