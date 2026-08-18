@@ -227,6 +227,47 @@
 }
 
 /*
+ * Document-scale headings, layered ON TOP of `markdown` by the two document
+ * pages only. The base utility is sized for comments and issue descriptions,
+ * where a `#` heading an author typed must not shout over the page's own h1;
+ * a document IS the page, so its headings carry the hierarchy Notion gives
+ * them. Everything else -- lists, tables, code -- stays the base utility's.
+ *
+ * The screenshots this is tuned against: a 4xl page title, then h1/h2 clearly
+ * larger than body text with generous air above.
+ */
+@utility markdown-doc {
+    & h1,
+    & h2,
+    & h3 {
+        margin-top: 1.75em;
+        letter-spacing: -0.01em;
+    }
+
+    & h1 {
+        font-size: 1.65em;
+    }
+
+    & h2 {
+        font-size: 1.35em;
+    }
+
+    & h3 {
+        font-size: 1.15em;
+    }
+
+    /*
+     * The faint edge the polish checklist asks of images: pure white at low
+     * opacity (the app ships dark), inside the radius so it reads as the
+     * image's own edge rather than a border around it.
+     */
+    & img {
+        outline: 1px solid rgb(255 255 255 / 10%);
+        outline-offset: -1px;
+    }
+}
+
+/*
  * Drag surfaces (Kanban cards).
  *
  * Two different browser behaviours fight a pointer-based drag library and both
