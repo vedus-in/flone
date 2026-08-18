@@ -1,5 +1,3 @@
-import 'server-only';
-
 /**
  * What an attachment is allowed to be, and how it is named in the bucket.
  *
@@ -8,9 +6,17 @@ import 'server-only';
  * the file picker and nothing more, and a `POST` to `/api/attachments` never has
  * to have come from that input at all.
  *
- * NO DATABASE AND NO BUCKET IMPORT, on purpose. The rules are the part worth
- * testing without a Postgres connection or a credential, so the cleanup that
- * needs both lives at its one call site, beside `deleteIssue`.
+ * NO `import 'server-only'`, and the second lib module without one (`result.ts` is
+ * the other). The browser needs these rules too -- refusing a dropped PDF has to
+ * be immediate and has to say something, and a 25 MB file should not be uploaded
+ * just to be told no. THE POINT IS THAT IT IS THE SAME MODULE: a copy of the
+ * allowlist in a client component is a copy that drifts, and the day it drifts the
+ * browser and the server disagree about what is allowed. Nothing here is a secret
+ * and nothing here touches a credential, so there is nothing to leak by bundling
+ * it. `bucket.ts` -- which does hold the credential -- keeps its guard.
+ *
+ * NO DATABASE AND NO BUCKET IMPORT, on purpose, and now doubly so: the cleanup
+ * that needs both lives at its one call site, beside `deleteIssue`.
  */
 
 /**
@@ -98,4 +104,59 @@ export function attachmentKey(
   filename: string,
 ): string {
   return `attachments/${projectId}/${attachmentId}-${sanitizeFilename(filename)}`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Saying no, in words                                                         */
+/* -------------------------------------------------------------------------- */
+
+/** Kept in one place: the sentence and the allowlist must not drift apart. */
+const ALLOWED_LABEL = 'PNG, JPEG, GIF and WebP';
+const LIMIT_LABEL = '10 MB';
+
+/** One decimal, because "24.4 MB" answers "how far over?" and "24 MB" does not. */
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} bytes`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** A pathological filename must not be able to push the layout around. */
+function trimName(name: string): string {
+  const clean = name.replace(/\s+/g, ' ').trim();
+  return clean.length > 48 ? `${clean.slice(0, 47)}…` : clean;
+}
+
+/**
+ * What to tell someone who just dropped the wrong thing, or null when nothing was
+ * refused.
+ *
+ * SILENCE WAS THE BUG THIS FIXES. Dropping a PDF on a comment box used to do
+ * nothing at all -- no upload, no message, no clue that the file was even seen --
+ * which reads as a broken feature rather than as a refused file. So the message
+ * names the file, says why, and says what would work instead.
+ *
+ * It re-runs `validateUpload` rather than taking a reason as an argument, so the
+ * words can never describe a rule the server does not actually apply.
+ */
+export function rejectionMessage(
+  rejected: ReadonlyArray<{ name: string; type: string; size: number }>,
+): string | null {
+  if (rejected.length === 0) return null;
+
+  if (rejected.length > 1) {
+    return `${rejected.length} files were not attached. ${ALLOWED_LABEL} images only, up to ${LIMIT_LABEL} each.`;
+  }
+
+  const file = rejected[0];
+  const name = trimName(file.name);
+
+  switch (validateUpload(file)) {
+    case ATTACHMENT_ERRORS.TOO_LARGE:
+      return `“${name}” is ${formatBytes(file.size)}. Images must be ${LIMIT_LABEL} or smaller.`;
+    case ATTACHMENT_ERRORS.NO_FILE:
+      return `“${name}” is empty, so there is nothing to attach.`;
+    default:
+      return `“${name}” is not an image that can be attached. ${ALLOWED_LABEL} only, up to ${LIMIT_LABEL}.`;
+  }
 }

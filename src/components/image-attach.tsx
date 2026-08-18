@@ -11,6 +11,9 @@ import {
 
 import { Button } from '@/components/base/buttons/button';
 import { FormError, Textarea } from '@/components/ui';
+// The SAME rules the upload route validates with. Not a copy -- see that module's
+// header for why it is one of the two lib modules without `server-only`.
+import { rejectionMessage, validateUpload } from '@/lib/attachments';
 
 /**
  * Pasting, dropping and picking an image into a Markdown textarea.
@@ -35,12 +38,19 @@ import { FormError, Textarea } from '@/components/ui';
  * current draft is read from a ref rather than from the closure: uploads take
  * seconds and people keep typing.
  *
- * NO CLIENT-SIDE SIZE OR TYPE VALIDATION, deliberately. `accept="image/*"` is a
- * file-picker convenience and `file.type.startsWith('image/')` below only decides
- * whether to intercept the event at all. The rules live once, on the server, in
- * `src/lib/attachments.ts` -- a second copy here would be a second thing to get
- * out of date, and the server's refusal already arrives as a sentence worth
- * showing.
+ * A REFUSAL IS AN ANSWER AND MUST LOOK LIKE ONE. Dropping a PDF on a comment box
+ * used to do nothing whatsoever -- no upload, no message, nothing to distinguish a
+ * refused file from a broken feature -- and letting the browser have the drop
+ * instead is worse still: it navigates to the file and takes the half-written issue
+ * with it. So every file drop is intercepted, and anything unsupported comes back
+ * named, with the reason, from `rejectionMessage`.
+ *
+ * The rules are IMPORTED from `src/lib/attachments.ts`, the same module the upload
+ * route validates with, and are not restated here. That is what stops the browser
+ * refusing something the server would have accepted, and what stops 25 MB being
+ * uploaded over a hotel connection to be told no at the far end. `accept` on the
+ * file input is still only a picker convenience, and the server still re-checks
+ * everything: this is a faster no, not the only one.
  */
 
 const UPLOAD_FAILED = 'That image could not be uploaded. Try again.';
@@ -79,6 +89,10 @@ export type ImageAttach = {
     onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
     onDrop: (event: DragEvent<HTMLTextAreaElement>) => void;
     onDragOver: (event: DragEvent<HTMLTextAreaElement>) => void;
+    onDragEnter: (event: DragEvent<HTMLTextAreaElement>) => void;
+    onDragLeave: () => void;
+    /** Present only while files are over the field; styled by `globals.css`. */
+    'data-dragging'?: 'true';
   };
   /** For the attach button, or anything else holding files. */
   upload: (files: FileList | File[] | null) => void;
@@ -100,6 +114,7 @@ export function useImageAttach({
 
   const [inFlight, setInFlight] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const token = useRef(0);
 
   function read(): string {
@@ -162,44 +177,77 @@ export function useImageAttach({
     }
   }
 
+  /**
+   * Sort the batch into what can be uploaded and what has to be explained.
+   *
+   * The rules come from `@/lib/attachments` -- the SAME module the route validates
+   * with -- so the browser cannot refuse something the server would have taken, or
+   * spend a minute uploading 25 MB that the server was always going to reject.
+   */
   function upload(files: FileList | File[] | null): void {
-    const images = Array.from(files ?? []).filter((file) => file.type.startsWith('image/'));
-    if (images.length === 0) return;
-    setError(null);
+    const all = Array.from(files ?? []);
+    if (all.length === 0) return;
+
+    const accepted = all.filter((file) => validateUpload(file) === null);
+    const rejected = all.filter((file) => validateUpload(file) !== null);
+
+    // Always assigned, so a previous complaint clears when the next drop is fine.
+    setError(rejectionMessage(rejected));
+
     // Sequential, so the placeholders keep the order the files arrived in.
-    void images.reduce<Promise<void>>(
+    void accepted.reduce<Promise<void>>(
       (queue, file) => queue.then(() => uploadOne(file)),
       Promise.resolve(),
     );
   }
 
-  /** True when a drag or paste is carrying at least one image file. */
-  function hasImage(files: FileList | null | undefined): boolean {
-    return Array.from(files ?? []).some((file) => file.type.startsWith('image/'));
+  /** A drag or a paste carrying files at all -- supported or not. */
+  function carriesFiles(transfer: DataTransfer | null | undefined): boolean {
+    return (transfer?.files?.length ?? 0) > 0 || (transfer?.types.includes('Files') ?? false);
   }
 
   return {
     textareaProps: {
       onPaste: (event) => {
-        // Only an image paste is intercepted. Copying an image out of a web page
-        // also puts HTML and text on the clipboard, and pasting text must keep
-        // working exactly as it did before this feature existed.
-        if (!hasImage(event.clipboardData?.files)) return;
+        // A paste carrying NO file is left alone entirely: copying an image out of
+        // a web page also puts HTML and text on the clipboard, and pasting text has
+        // to keep working exactly as it did before this feature existed. A paste
+        // that does carry a file is ours to answer -- with the image, or with the
+        // reason it was refused.
+        if ((event.clipboardData?.files?.length ?? 0) === 0) return;
         event.preventDefault();
         upload(event.clipboardData.files);
       },
       onDrop: (event) => {
-        if (!hasImage(event.dataTransfer?.files)) return;
+        setDragging(false);
+        if (!carriesFiles(event.dataTransfer)) return;
+        // EVERY file drop is intercepted, not just an acceptable one. Letting an
+        // unsupported file through to the browser's default means NAVIGATING AWAY
+        // to it -- the page is replaced by a PDF viewer and the half-written issue
+        // is gone. Refusing it with a sentence is the whole fix.
         event.preventDefault();
         upload(event.dataTransfer.files);
       },
       onDragOver: (event) => {
         // Without this the browser refuses the drop and navigates to the file
-        // instead, losing the whole page and the draft with it. Guarded on `Files`
-        // so dragging selected TEXT into the textarea still behaves natively.
-        if (!event.dataTransfer?.types.includes('Files')) return;
+        // instead. Guarded on `Files` so dragging selected TEXT into the textarea
+        // still behaves natively.
+        if (!carriesFiles(event.dataTransfer)) return;
         event.preventDefault();
       },
+      onDragEnter: (event) => {
+        if (!carriesFiles(event.dataTransfer)) return;
+        event.preventDefault();
+        setDragging(true);
+      },
+      onDragLeave: () => setDragging(false),
+      /**
+       * Styled by one rule in `globals.css` rather than a class at each call site,
+       * so every textarea that spreads these props gets the affordance -- and a new
+       * one cannot forget it. An attribute, not a class, because these props are
+       * spread onto components whose `className` belongs to the caller.
+       */
+      'data-dragging': dragging ? 'true' : undefined,
     },
     upload,
     uploading: inFlight > 0,
@@ -265,14 +313,20 @@ export function AttachImageButton({
           event.target.value = '';
         }}
       />
-      <Button
-        size="sm"
-        color="link-gray"
-        isDisabled={attach.uploading}
-        onPress={() => inputRef.current?.click()}
-      >
-        {attach.uploading ? 'Uploading...' : label}
-      </Button>
+      {/* The `title` sits on a wrapper because Untitled UI's `Button` takes a
+          closed prop list and forwards no `title`. It says what is allowed before
+          anyone finds out by being refused; the message from a refusal is still
+          the real answer. */}
+      <span title="PNG, JPEG, GIF or WebP, up to 10 MB">
+        <Button
+          size="sm"
+          color="link-gray"
+          isDisabled={attach.uploading}
+          onPress={() => inputRef.current?.click()}
+        >
+          {attach.uploading ? 'Uploading...' : label}
+        </Button>
+      </span>
     </>
   );
 }

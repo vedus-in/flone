@@ -30,12 +30,16 @@ import assert from 'node:assert/strict';
 import type { BucketConfig } from '../src/lib/bucket';
 
 /**
- * Both modules open with `import 'server-only'`, which throws outside a Server
- * Component -- `bucket.ts` because it reads a bucket credential, and that guard is
- * what keeps the secret out of a client bundle. Stubbed for this script exactly as
+ * `bucket.ts` opens with `import 'server-only'`, which throws outside a Server
+ * Component -- it reads a bucket credential, and that guard is what keeps the
+ * secret out of a client bundle. Stubbed for this script exactly as
  * `check-email.ts` does it, and for the same reason: the boundary is a build-time
  * assertion enforced by `check:boundary`, and nothing it protects is exercised
  * here. Registered before the imports, which is why they are dynamic.
+ *
+ * `attachments.ts` needs no stub -- the browser applies those same rules, so it is
+ * deliberately not `server-only`. Its dynamic import below just keeps the two
+ * side by side.
  */
 declare const Bun: {
   plugin(plugin: {
@@ -62,6 +66,7 @@ const {
   MAX_ATTACHMENT_BYTES,
   attachmentKey,
   sanitizeFilename,
+  rejectionMessage,
   validateUpload,
 } = await import('../src/lib/attachments.ts');
 
@@ -237,6 +242,61 @@ check('a long name is capped', () => {
 check('the key names its project and its row', () => {
   const key = attachmentKey('prj_123', 'att_456', 'my shot.png');
   assert.equal(key, 'attachments/prj_123/att_456-my-shot.png');
+});
+
+
+/* -------------------------------------------------------------------------- */
+/* 4. Refusals have to say something                                           */
+/*                                                                             */
+/* Dropping an unsupported file used to do nothing at all -- the silence read as */
+/* a broken feature. These assert that every refusal produces a sentence, that   */
+/* it names the file, and that an acceptable batch produces none.                */
+/* -------------------------------------------------------------------------- */
+
+const file = (name: string, type: string, size: number) => ({ name, type, size });
+
+check('nothing refused, nothing said', () => {
+  assert.equal(rejectionMessage([]), null);
+});
+
+check('a wrong type is named, with what would work', () => {
+  const message = rejectionMessage([file('quarterly.pdf', 'application/pdf', 2048)]) ?? '';
+  assert.match(message, /quarterly\.pdf/);
+  assert.match(message, /PNG, JPEG, GIF and WebP/);
+  assert.match(message, /10 MB/);
+});
+
+check('an oversized image is told how far over it is', () => {
+  const message = rejectionMessage([file('shot.png', 'image/png', 25 * 1024 * 1024)]) ?? '';
+  assert.match(message, /shot\.png/);
+  assert.match(message, /25\.0 MB/);
+  assert.doesNotMatch(message, /not an image/);
+});
+
+check('an empty file says so rather than blaming its type', () => {
+  const message = rejectionMessage([file('shot.png', 'image/png', 0)]) ?? '';
+  assert.match(message, /empty/);
+});
+
+check('a batch is counted rather than listed', () => {
+  const message =
+    rejectionMessage([
+      file('a.pdf', 'application/pdf', 10),
+      file('b.zip', 'application/zip', 10),
+      file('c.mov', 'video/quicktime', 10),
+    ]) ?? '';
+  assert.match(message, /^3 files were not attached\./);
+});
+
+check('a hostile filename cannot push the layout around', () => {
+  const message = rejectionMessage([file(`${'x'.repeat(400)}.pdf`, 'application/pdf', 10)]) ?? '';
+  assert.ok(message.length < 200, `message was ${message.length} chars`);
+  assert.match(message, /…/);
+});
+
+/** The accepted case must stay silent, or every good paste shows an error. */
+check('an acceptable image is not refused', () => {
+  assert.equal(rejectionMessage([file('shot.png', 'image/png', 1024)].filter((f) => validateUpload(f) !== null)), null);
 });
 
 console.log(`check-bucket: ${passed} checks passed`);

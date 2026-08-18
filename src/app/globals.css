@@ -343,3 +343,15 @@ input[type="number"] {
 input[type="search"]::-webkit-search-cancel-button {
     -webkit-appearance: none;
 }
+
+/*
+ * A textarea that is accepting an image right now (`data-dragging` from
+ * `useImageAttach`). One rule rather than a class at five call sites, so every
+ * field that spreads those props shows the same affordance and a new one cannot
+ * forget it -- and so a drag over a plain textarea, which accepts nothing, still
+ * looks like nothing.
+ */
+textarea[data-dragging="true"] {
+    outline: 2px dashed var(--color-border-brand);
+    outline-offset: 2px;
+}

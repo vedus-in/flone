@@ -1,8 +1,11 @@
 /**
  * SPEC §4.11 — the Server Action return contract.
  *
- * This is the ONE lib module that is deliberately NOT `server-only`: client
- * components import the `ActionResult` type for `useActionState`.
+ * This is one of TWO lib modules deliberately NOT `server-only`: client
+ * components import the `ActionResult` type for `useActionState`. The other is
+ * `attachments.ts`, whose upload rules the browser applies before starting an
+ * upload the server would only refuse -- see its header for why sharing the module
+ * beats copying the values.
  *
  * `error` must be one of the `ERRORS` literals or a specific, closed,
  * user-meaningful literal declared in the action's own file
