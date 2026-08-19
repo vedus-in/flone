@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { prisma } from '@/lib/db';
-import { requireUser } from '@/lib/authz';
+import { requireUser, visibleProject } from '@/lib/authz';
 import { WORKSPACE_ORDER } from '@/lib/validation';
 
 /**
@@ -63,7 +63,13 @@ export async function listNavTree(): Promise<NavOrg[]> {
               id: true,
               name: true,
               slug: true,
+              // The visibility predicate, on the nested relation rather than
+              // the root: a workspace still lists, it simply lists fewer
+              // projects. A private project the viewer is not on is absent from
+              // the tree, which is the whole of "they stop seeing it" -- there
+              // is no greyed-out row to notice and ask about.
               projects: {
+                where: visibleProject(user.id),
                 orderBy: [{ name: 'asc' }, { id: 'asc' }],
                 select: { id: true, key: true, name: true },
               },

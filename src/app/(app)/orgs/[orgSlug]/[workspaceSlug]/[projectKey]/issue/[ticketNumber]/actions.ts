@@ -78,6 +78,7 @@ export async function createComment(
     await notifyNewComment({
       ticketId: ctx.ticket.id,
       organizationId: ctx.org.id,
+      projectId: ctx.project.id,
       actorId: user.id,
       actorName: user.name,
       body: parsed.data.body,
@@ -130,6 +131,7 @@ export async function updateComment(
     // ADDED are mailed -- `ctx.comment.body` is the pre-edit text.
     await notifyCommentEdited({
       organizationId: ctx.org.id,
+      projectId: ctx.project.id,
       actorId: ctx.user.id,
       actorName: ctx.user.name,
       previousBody: ctx.comment.body,

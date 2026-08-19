@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Role } from '@prisma/client';
 import { ChevronDown } from '@untitledui/icons';
 import { prisma } from '@/lib/db';
-import { atLeast, loadPage, requireOrgBySlug, workspacePath } from '@/lib/authz';
+import { atLeast, loadPage, requireOrgBySlug, visibleProject, workspacePath } from '@/lib/authz';
 import { WORKSPACE_ORDER } from '@/lib/validation';
 import { Card, EmptyState, Field, Input, SubmitButton } from '@/components/ui';
 import { ActionForm } from '../../action-form';
@@ -102,7 +102,12 @@ export default async function OrganizationPage({
       id: true,
       name: true,
       slug: true,
-      _count: { select: { projects: true } },
+      // The COUNT THE VIEWER CAN SEE, not the true one. `_count` cannot take a
+      // filter without a preview flag, so the ids are selected and length is
+      // taken -- an organization has tens of projects, not thousands, and a
+      // number that includes private projects you cannot open is an existence
+      // oracle sitting in a summary column.
+      projects: { where: visibleProject(ctx.user.id), select: { id: true } },
     },
     orderBy: WORKSPACE_ORDER,
   });
@@ -187,7 +192,7 @@ export default async function OrganizationPage({
                   /{workspace.slug}
                 </span>
                 <span className="text-end text-xs text-tertiary tabular-nums">
-                  {workspace._count.projects}
+                  {workspace.projects.length}
                 </span>
               </li>
             ))}

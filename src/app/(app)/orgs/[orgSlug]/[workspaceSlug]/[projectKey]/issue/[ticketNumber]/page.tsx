@@ -11,6 +11,7 @@ import {
   projectPath,
   requireTicketInPath,
   ticketPath,
+  visibleProject,
 } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { isDone, sortStatesForBoard } from '@/lib/model';
@@ -91,7 +92,7 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
         id: ctx.ticket.id,
         // Repeated rather than trusting the id alone, so this read is safe on
         // its own terms.
-        project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+        project: visibleProject(ctx.user.id),
       },
       select: {
         createdAt: true,
@@ -124,7 +125,7 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
     prisma.ticket.findMany({
       where: {
         parentId: ctx.ticket.id,
-        project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+        project: visibleProject(ctx.user.id),
       },
       orderBy: [{ number: 'asc' }],
       select: {

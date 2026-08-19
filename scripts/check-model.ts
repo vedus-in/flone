@@ -46,13 +46,25 @@
  *      type, a page or a query -- it is a board quietly growing duplicate
  *      tickets, or a review nobody notices went missing.
  *
+ *   7. Project visibility. `visibleProject` in `src/lib/authz.ts` is the ONE
+ *      predicate deciding who may see a project, and it works by being in every
+ *      project-rooted `where`. A new loader that spells the old organization
+ *      membership check out by hand instead compiles, type-checks, renders, and
+ *      quietly serves private projects to the whole organization -- nothing
+ *      fails, because a read returning MORE rows than it should looks exactly
+ *      like a read that works. So the check is textual: the old hand-written
+ *      shape must not reappear outside `authz.ts`, and the caller's scope must
+ *      keep being spread FIRST inside the predicate, or an `organization`
+ *      clause passed in silently overwrites the membership one.
+ *
  * Runs on plain Node — 22 strips the types. No test framework, no fixtures:
  *
  *   node scripts/check-model.ts
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
 
 import {
@@ -1005,6 +1017,56 @@ ok('dueDateFor always returns exact UTC midnight, whatever the time of day or of
     assert.equal(due.getUTCSeconds(), 0);
     assert.equal(due.getUTCMilliseconds(), 0);
   }
+});
+
+console.log('\nproject visibility');
+
+const AUTHZ = 'src/lib/authz.ts';
+
+function sourceFiles(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...sourceFiles(path));
+    else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) found.push(path);
+  }
+  return found;
+}
+
+ok('no project-rooted read spells the membership predicate out by hand', () => {
+  // The exact shape every loader used before `visibleProject` existed. Finding
+  // it again means somebody copied a pre-existing query and got a read that is
+  // scoped to the tenant but NOT to the project.
+  const banned = /project:\s*\{\s*organization:\s*\{\s*memberships:/;
+  const offenders = sourceFiles('src')
+    .filter((file) => !file.replaceAll('\\', '/').endsWith(AUTHZ))
+    .filter((file) => banned.test(readFileSync(file, 'utf8')));
+  assert.deepEqual(offenders, [], `use visibleProject() instead: ${offenders.join(', ')}`);
+});
+
+ok('visibleProject spreads the caller scope FIRST, so it cannot overwrite the predicate', () => {
+  const source = readFileSync(AUTHZ, 'utf8');
+  const start = source.indexOf('export function visibleProject');
+  const spread = source.indexOf('...scope,', start);
+  const membership = source.indexOf('memberships: { some: { userId } }', start);
+  const or = source.indexOf('OR: [', start);
+  assert.ok(spread > start, 'visibleProject must spread the caller scope');
+  assert.ok(membership > spread, 'the scope spread must come before the membership clause');
+  assert.ok(or > spread, 'the scope spread must come before the OR');
+});
+
+ok('the three ways to see a project are all still there', () => {
+  const source = readFileSync(AUTHZ, 'utf8');
+  const body = source.slice(
+    source.indexOf('export function visibleProject'),
+    source.indexOf('export async function canSeeProject'),
+  );
+  // Open to the org, named on the project, or the org owner. Losing the first
+  // hides every ordinary project; losing the last orphans one whose members
+  // have all left.
+  assert.match(body, /access: ProjectAccess\.OPEN/);
+  assert.match(body, /members: \{ some: \{ userId \} \}/);
+  assert.match(body, /role: Role\.OWNER/);
 });
 
 console.log(`\nAll good — ${checks} checks.\n`);

@@ -117,6 +117,7 @@ model User {
   recurringTickets        RecurringTicket[] @relation("RecurringTicketAssignee")
   createdRecurringTickets RecurringTicket[] @relation("RecurringTicketCreatedBy")
   documents               Document[]        @relation("DocumentCreatedBy")
+  projectMemberships      ProjectMember[]
 
   @@index([isAdmin])
 }
@@ -285,6 +286,16 @@ model Project {
   /// How many cycles beyond the current one to keep materialized.
   upcomingCycles Int     @default(3)
 
+  /// Who may SEE this project. `OPEN` -- the default, and what every project
+  /// was before this column existed -- means every member of the organization.
+  /// `PRIVATE` means the explicit `members` list below, plus the org OWNER.
+  ///
+  /// It gates VISIBILITY only. What you may DO once you can see a project is
+  /// still decided by your organization `Role`, which is why `ProjectMember`
+  /// carries no role of its own.
+  access         ProjectAccess @default(OPEN)
+
+  members    ProjectMember[]
   boards     Board[]
   states     WorkflowState[]
   cycles     Cycle[]
@@ -298,6 +309,43 @@ model Project {
 
   @@unique([organizationId, key])
   @@index([workspaceId])
+}
+
+/// Whether a project is visible to the whole organization or to a named few.
+///
+/// Two values, not a permission scheme. The Linear/GitHub shape: a flag on the
+/// container plus a collaborator list. Jira-style per-project role mappings buy
+/// flexibility nobody has asked for at the cost of a page nobody understands.
+enum ProjectAccess {
+  OPEN
+  PRIVATE
+}
+
+/// Explicit visibility of one PRIVATE project, for one person.
+///
+/// NO ROLE COLUMN, deliberately. This table answers "may you see it?" and
+/// nothing else; "what may you do with it?" is already answered by the
+/// `Membership` row this person must also hold in the organization. A second
+/// role here would be a second answer to a question that already has one, and
+/// the two would disagree the first time somebody was promoted.
+///
+/// Rows are allowed to exist on an `OPEN` project. They cost nothing there and
+/// are what makes flipping a project closed and open again non-destructive --
+/// the list survives the round trip instead of having to be rebuilt from memory.
+///
+/// Cascade on BOTH sides: a deleted project takes its list with it, and a
+/// removed user leaves no rows behind that would keep a project alive in a
+/// query. Losing a row can only ever remove access, never grant it.
+model ProjectMember {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, userId])
+  @@index([userId])
 }
 
 /// What an issue's status MEANS, independent of what a team called it.

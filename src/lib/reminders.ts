@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { canSeeProject } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { appUrl } from '@/lib/email';
 import { sendReminderMail } from '@/lib/mailer';
@@ -87,7 +88,7 @@ export async function runDueReminders(now: Date): Promise<TickResult> {
       },
       createdBy: { select: { name: true } },
       organization: { select: { name: true, slug: true } },
-      project: { select: { name: true } },
+      project: { select: { id: true, name: true } },
     },
   });
 
@@ -109,6 +110,18 @@ export async function runDueReminders(now: Date): Promise<TickResult> {
     });
     if (claim.count === 0) continue;
     result.claimed += 1;
+
+    // A reminder names its project, so it stops being deliverable the moment
+    // the recipient stops being able to see that project -- closing a project
+    // or removing somebody from it must not keep mailing them its name every
+    // morning. Checked AFTER the claim, for the same reason the unverified
+    // address check below is: filtering it out of the due query would leave the
+    // row permanently due and re-read by every tick forever. It counts as
+    // skipped, which is what a claimed row delivered nowhere always counts as.
+    if (reminder.project && !(await canSeeProject(reminder.project.id, reminder.recipient.id))) {
+      result.skipped += 1;
+      continue;
+    }
 
     const scope = reminder.project?.name ?? reminder.organization.name;
     // Null when they scheduled it themselves, which changes the copy on both

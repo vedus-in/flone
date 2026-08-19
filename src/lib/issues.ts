@@ -3,7 +3,7 @@ import 'server-only';
 import { Priority, Prisma, type WorkflowStateType } from '@prisma/client';
 
 import { prisma } from '@/lib/db';
-import { boardPath, ticketPath, type OrgRef, type ProjectRef } from '@/lib/authz';
+import { boardPath, ticketPath, visibleProject, type OrgRef, type ProjectRef } from '@/lib/authz';
 import { isDone, sortStatesForList, STATE_GROUP_RANK, type IssueTab } from '@/lib/model';
 import { TAB_STATE_TYPES, TICKET_ORDER } from '@/lib/validation';
 
@@ -191,7 +191,7 @@ export async function loadIssues(
     where: {
       projectId,
       type: { in: [...TAB_STATE_TYPES[filters.tab]] },
-      project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+      project: visibleProject(ctx.user.id),
     },
     select: { id: true, name: true, type: true, color: true, position: true },
   });
@@ -204,7 +204,7 @@ export async function loadIssues(
     stateId: { in: stateIds },
     // Repeated even though `projectId` came from an authorized walk: this query
     // is safe on its own terms, not on its caller's.
-    project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+    project: visibleProject(ctx.user.id),
     ...(filters.assigneeId ? { assigneeId: filters.assigneeId } : {}),
     ...(filters.labelId ? { labels: { some: { id: filters.labelId } } } : {}),
     ...(filters.boardId ? { boardId: filters.boardId } : {}),

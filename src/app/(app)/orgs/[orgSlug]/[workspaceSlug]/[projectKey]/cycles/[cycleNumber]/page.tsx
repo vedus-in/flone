@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 
 import { Burndown } from '@/components/burndown';
 import { Assignee, IssueListView } from '@/components/issue-row';
-import { cyclesPath, loadPage, requireCycleInPath, requireProjectByKey } from '@/lib/authz';
+import { cyclesPath, loadPage, requireCycleInPath, requireProjectByKey, visibleProject } from '@/lib/authz';
 import { ensureCycles } from '@/lib/cycles';
 import { prisma } from '@/lib/db';
 import { loadCycleProgress, loadIssues, parseIssueFilters } from '@/lib/issues';
@@ -68,7 +68,7 @@ export default async function CyclePage({
         projectId: ctx.project.id,
         cycleId: ctx.cycle.id,
         assigneeId: { not: null },
-        project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+        project: visibleProject(ctx.user.id),
       },
       distinct: ['assigneeId'],
       select: { assignee: { select: { id: true, name: true } } },

@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { Role } from '@prisma/client';
 import { prisma } from '@/lib/db';
-import { atLeast, loadPage, requireWorkspaceBySlug } from '@/lib/authz';
+import { atLeast, loadPage, requireWorkspaceBySlug, visibleProject } from '@/lib/authz';
 import { Card, Field, Input, SubmitButton } from '@/components/ui';
 import { ActionForm } from '../../../../action-form';
 import { deleteWorkspace, renameWorkspace } from '../actions';
@@ -27,11 +27,12 @@ export default async function WorkspaceSettingsPage({ params }: { params: Promis
   if (!atLeast(ctx.role, Role.ADMIN)) notFound();
   const canDelete = atLeast(ctx.role, Role.OWNER);
 
+  // The count the VIEWER can see. It never disagrees with the one that matters:
+  // deleting a workspace is OWNER-only, and an owner can see every project in
+  // the organization. An admin shown a smaller number cannot act on it either
+  // way, and the delete itself counts unfiltered.
   const projectCount = await prisma.project.count({
-    where: {
-      workspaceId: ctx.workspace.id,
-      organization: { memberships: { some: { userId: ctx.user.id } } },
-    },
+    where: visibleProject(ctx.user.id, { workspaceId: ctx.workspace.id }),
   });
 
   return (

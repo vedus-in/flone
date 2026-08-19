@@ -383,6 +383,16 @@ export async function removeMember(
         await tx.membership.deleteMany({
           where: { id: target.id, organizationId: ctx.org.id },
         });
+
+        // And every private-project grant they held here, in the same
+        // transaction. `ProjectMember` is not reachable from `Membership`, so
+        // nothing else would remove these -- and a row left behind is a grant
+        // that comes back to life the day somebody is re-invited, which is not
+        // what "removed" means. Access is never restored by accident; it is
+        // granted again on purpose or not at all.
+        await tx.projectMember.deleteMany({
+          where: { userId: target.userId, project: { organizationId: ctx.org.id } },
+        });
       });
     } catch (e) {
       if (e instanceof LastOwnerError) return fail(LAST_OWNER);

@@ -10,6 +10,7 @@ import {
   loadPage,
   projectPath,
   workspaceSettingsPath,
+  visibleProject,
 } from '@/lib/authz';
 import {
   Card,
@@ -78,10 +79,7 @@ export default async function WorkspacePage({ params }: { params: Promise<Params
   // query: `_count` cannot reach across two relations, and a project has a
   // handful of boards, not thousands.
   const projects = await prisma.project.findMany({
-    where: {
-      workspaceId: ctx.workspace.id,
-      organization: { memberships: { some: { userId: ctx.user.id } } },
-    },
+    where: visibleProject(ctx.user.id, { workspaceId: ctx.workspace.id }),
     select: {
       id: true,
       name: true,

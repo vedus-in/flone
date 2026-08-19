@@ -29,6 +29,7 @@ import {
   requireUser,
   ticketPath,
   viewsPath,
+  visibleProject,
   type BoardCtx,
   type TicketCtx,
 } from '@/lib/authz';
@@ -236,10 +237,7 @@ async function requireTicketArg(args: Args, key = 'ticketId'): Promise<TicketCtx
   const matches = await prisma.ticket.findMany({
     where: {
       number,
-      project: {
-        key: ref[1],
-        organization: { memberships: { some: { userId: user.id } } },
-      },
+      project: visibleProject(user.id, { key: ref[1] }),
     },
     // Deliberately not `findFirst`. Two organizations may each own a project
     // keyed ENG, and silently taking the first is how you edit the right ticket
@@ -690,7 +688,7 @@ export const TOOLS: Tool[] = [
           },
         }),
         prisma.project.findMany({
-          where: { organizationId: ctx.org.id },
+          where: visibleProject(ctx.user.id, { organizationId: ctx.org.id }),
           orderBy: [{ name: 'asc' }, { id: 'asc' }],
           select: {
             id: true,
@@ -926,7 +924,7 @@ export const TOOLS: Tool[] = [
       // issue, and walking through the board would have hidden every one of them.
       const rows = await prisma.ticket.findMany({
         where: {
-          project: { organization: { memberships: { some: { userId: user.id } } } },
+          project: visibleProject(user.id),
           OR: [
             { title: { contains: query, mode: 'insensitive' } },
             { description: { contains: query, mode: 'insensitive' } },
@@ -2224,7 +2222,13 @@ export const TOOLS: Tool[] = [
       const ctx = await requireOrgBySlug(requiredString(args, 'orgSlug'));
 
       const reminders = await prisma.reminder.findMany({
-        where: { organizationId: ctx.org.id },
+        // Scoped reminders name their project, so the list is narrowed by the
+        // same predicate the web page uses. Org-wide reminders carry no project
+        // and are not narrowed.
+        where: {
+          organizationId: ctx.org.id,
+          OR: [{ projectId: null }, { project: visibleProject(ctx.user.id) }],
+        },
         orderBy: [{ nextRunAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }],
         select: {
           id: true,

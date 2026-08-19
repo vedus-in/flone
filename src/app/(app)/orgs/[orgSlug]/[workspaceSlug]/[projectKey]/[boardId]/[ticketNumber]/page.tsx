@@ -1,6 +1,6 @@
 import { notFound, permanentRedirect } from 'next/navigation';
 
-import { loadPage, requireBoardInPath, ticketPath } from '@/lib/authz';
+import { loadPage, requireBoardInPath, ticketPath, visibleProject } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { ticketNumberSchema } from '@/lib/validation';
 
@@ -37,7 +37,7 @@ export default async function LegacyTicketPage({ params }: { params: Promise<Par
       number: parsedNumber.data,
       projectId: ctx.project.id,
       boardId: ctx.board.id,
-      project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+      project: visibleProject(ctx.user.id),
     },
     select: { number: true },
   });

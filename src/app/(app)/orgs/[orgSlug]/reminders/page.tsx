@@ -10,7 +10,7 @@ import {
   TableRow,
 } from '@/components/table';
 import { Badge, Breadcrumbs, Card, Field, Input, Label, PageHeader, SubmitButton } from '@/components/ui';
-import { atLeast, loadPage, orgPath, requireOrgBySlug } from '@/lib/authz';
+import { atLeast, loadPage, orgPath, requireOrgBySlug, visibleProject } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import {
   CHANNEL_CALLS,
@@ -86,7 +86,13 @@ export default async function RemindersPage({
 
   const [reminders, projects, members] = await Promise.all([
     prisma.reminder.findMany({
-      where: { organizationId: ctx.org.id },
+      // A reminder scoped to a project renders that project's name and key, so
+      // the list is filtered by the same predicate the rest of the app uses.
+      // Org-wide reminders carry no project and are simply not narrowed.
+      where: {
+        organizationId: ctx.org.id,
+        OR: [{ projectId: null }, { project: visibleProject(ctx.user.id) }],
+      },
       // Soonest first; the ones that have finished sending sink to the bottom
       // rather than disappearing, so a one-time reminder can be seen to have run.
       orderBy: [{ nextRunAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }],
@@ -110,7 +116,7 @@ export default async function RemindersPage({
       },
     }),
     prisma.project.findMany({
-      where: { organizationId: ctx.org.id },
+      where: visibleProject(ctx.user.id, { organizationId: ctx.org.id }),
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
       select: { id: true, name: true, key: true },
     }),

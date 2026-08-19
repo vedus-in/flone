@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Prisma, Priority } from '@prisma/client';
 
-import { challengesPath, loadPage, requireOrgBySlug, ticketPath } from '@/lib/authz';
+import { challengesPath, loadPage, requireOrgBySlug, ticketPath, visibleProject } from '@/lib/authz';
 import { columnForStateType } from '@/lib/challenges';
 import { prisma } from '@/lib/db';
 import { formatDay } from '@/lib/issues';
@@ -100,12 +100,10 @@ export default async function ChallengesPage({
   const picks = await prisma.challengePick.findMany({
     where: {
       userId: ctx.user.id,
-      ticket: {
-        project: {
-          organizationId: ctx.org.id,
-          organization: { memberships: { some: { userId: ctx.user.id } } },
-        },
-      },
+      // A pick survives on the board only while the project is still visible.
+      // Closing a project therefore takes its cards off the daily boards of
+      // everyone who is not on it, without a sweep and without a stale row.
+      ticket: { project: visibleProject(ctx.user.id, { organizationId: ctx.org.id }) },
     },
     // The arrangement first, then the default for a board nobody has dragged:
     // every `position` is 0 until the first drop, so the fallback IS the order
@@ -174,21 +172,17 @@ export default async function ChallengesPage({
   const keyMatch = ISSUE_KEY.exec(filters.q);
   const [projects, results] = await Promise.all([
     prisma.project.findMany({
-      where: {
-        organizationId: ctx.org.id,
-        organization: { memberships: { some: { userId: ctx.user.id } } },
-      },
+      where: visibleProject(ctx.user.id, { organizationId: ctx.org.id }),
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
       select: { id: true, name: true, key: true },
     }),
     prisma.ticket.findMany({
       where: {
-        project: {
+        project: visibleProject(ctx.user.id, {
           organizationId: ctx.org.id,
-          organization: { memberships: { some: { userId: ctx.user.id } } },
           ...(keyMatch ? { key: keyMatch[1].toUpperCase() } : {}),
           ...(filters.project ? { id: filters.project } : {}),
-        },
+        }),
         // Never offer something already on the board -- the row would be a no-op.
         challengePicks: { none: { userId: ctx.user.id } },
         state: { type: { in: [...TAB_STATE_TYPES[filters.tab as IssueTab]] } },

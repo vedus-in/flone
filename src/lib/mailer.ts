@@ -1,5 +1,5 @@
 import 'server-only';
-import { EmailTokenPurpose, type Role } from '@prisma/client';
+import { EmailTokenPurpose, ProjectAccess, Role } from '@prisma/client';
 
 import { prisma } from '@/lib/db';
 import { appUrl, queueMail, renderAndSend, tokenUrl } from '@/lib/email';
@@ -198,15 +198,29 @@ export async function notifyAddedToOrg(input: {
 /**
  * The one query every notification recipient goes through.
  *
- * The `where` clause is the enforcement point for both standing rules: `id: {
- * notIn: [actorId] }` drops the actor, `emailVerified: { not: null }` drops
- * unconfirmed addresses. A caller cannot opt out of either by passing a
+ * The `where` clause is the enforcement point for all three standing rules:
+ * `id !== actorId` drops the actor, `emailVerified: { not: null }` drops
+ * unconfirmed addresses, and `projectId` drops anyone who could not open the
+ * issue the mail is about. A caller cannot opt out of any of them by passing a
  * different list.
+ *
+ * THE PROJECT CHECK IS WHY THIS IS ONE FUNCTION. Every piece of issue mail
+ * carries the issue key, its title and the project's name, so mailing somebody
+ * who cannot see a private project hands them the contents past the door. It is
+ * enforced here rather than at each of the four call sites, because "who gets
+ * mail" grows a fifth reason and the fifth one is where it would be forgotten.
+ *
+ * The three branches are `visibleProject` read from the User side: named on the
+ * project, or the project is open to their organization, or they own it. The
+ * membership clause above them is the tenant boundary, and it is separate on
+ * purpose -- a `ProjectMember` row left behind by an ex-colleague must not, by
+ * itself, be enough.
  */
 async function recipients(
   userIds: ReadonlyArray<string | null | undefined>,
   actorId: string,
   preference: 'notifyAssigned' | 'notifyComments' | 'notifyOrgMembership',
+  projectId: string,
 ): Promise<Array<{ id: string; name: string; email: string }>> {
   const ids = [...new Set(userIds.filter((id): id is string => typeof id === 'string'))].filter(
     (id) => id !== actorId,
@@ -218,6 +232,22 @@ async function recipients(
       id: { in: ids },
       emailVerified: { not: null },
       [preference]: true,
+      memberships: { some: { organization: { projects: { some: { id: projectId } } } } },
+      OR: [
+        {
+          memberships: {
+            some: {
+              organization: { projects: { some: { id: projectId, access: ProjectAccess.OPEN } } },
+            },
+          },
+        },
+        { projectMemberships: { some: { projectId } } },
+        {
+          memberships: {
+            some: { role: Role.OWNER, organization: { projects: { some: { id: projectId } } } },
+          },
+        },
+      ],
     },
     select: { id: true, name: true, email: true },
   });
@@ -231,6 +261,7 @@ export type IssueContext = {
 };
 
 export async function notifyIssueAssigned(input: {
+  projectId: string;
   assigneeId: string | null;
   actorId: string;
   actorName: string;
@@ -238,7 +269,12 @@ export async function notifyIssueAssigned(input: {
 }): Promise<void> {
   if (!input.assigneeId) return;
 
-  const targets = await recipients([input.assigneeId], input.actorId, 'notifyAssigned');
+  const targets = await recipients(
+    [input.assigneeId],
+    input.actorId,
+    'notifyAssigned',
+    input.projectId,
+  );
 
   for (const target of targets) {
     queueMail(
@@ -270,6 +306,12 @@ function preview(body: string): string {
  * `organizationId` always arrives from an authorized upward walk, which is what
  * confines a mention to the tenant: a body naming someone from another
  * organization matches nobody, because they are not in this list.
+ *
+ * Deliberately NOT narrowed to the project. `recipients` is what decides who is
+ * mailed, and narrowing here as well would only change WHICH name a typo
+ * resolves to -- two people called Sam, one on the project and one not, should
+ * still both be candidates for the composer's text, and the one who cannot see
+ * the issue simply receives nothing.
  */
 async function orgMembers(organizationId: string): Promise<Array<{ id: string; name: string }>> {
   const rows = await prisma.membership.findMany({
@@ -304,6 +346,7 @@ function queueMention(
 export async function notifyNewComment(input: {
   ticketId: string;
   organizationId: string;
+  projectId: string;
   actorId: string;
   actorName: string;
   body: string;
@@ -326,11 +369,12 @@ export async function notifyNewComment(input: {
   if (!ticket) return;
 
   const [mentions, thread] = await Promise.all([
-    recipients(mentionedIds(input.body, members), input.actorId, 'notifyComments'),
+    recipients(mentionedIds(input.body, members), input.actorId, 'notifyComments', input.projectId),
     recipients(
       [ticket.createdById, ticket.assigneeId, ...ticket.comments.map((c) => c.authorId)],
       input.actorId,
       'notifyComments',
+      input.projectId,
     ),
   ]);
 
@@ -368,6 +412,7 @@ export async function notifyNewComment(input: {
  */
 export async function notifyCommentEdited(input: {
   organizationId: string;
+  projectId: string;
   actorId: string;
   actorName: string;
   previousBody: string;
@@ -379,7 +424,7 @@ export async function notifyCommentEdited(input: {
   const added = mentionedIds(input.body, members).filter((id) => !known.has(id));
   if (added.length === 0) return;
 
-  const targets = await recipients(added, input.actorId, 'notifyComments');
+  const targets = await recipients(added, input.actorId, 'notifyComments', input.projectId);
   for (const target of targets) queueMention(target, input);
 }
 

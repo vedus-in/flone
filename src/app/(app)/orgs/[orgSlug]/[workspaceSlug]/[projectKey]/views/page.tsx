@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-import { issuesPath, loadPage, requireProjectByKey } from '@/lib/authz';
+import { issuesPath, loadPage, requireProjectByKey, visibleProject } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { ActionForm } from '../../../../../action-form';
 import { deleteSavedView } from '../actions';
@@ -34,7 +34,7 @@ export default async function ViewsPage({ params }: { params: Promise<Params> })
       projectId: ctx.project.id,
       // Shared, or your own. Never anyone else's private view.
       OR: [{ isShared: true }, { createdById: ctx.user.id }],
-      project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+      project: visibleProject(ctx.user.id),
     },
     orderBy: [{ name: 'asc' }, { id: 'asc' }],
     select: {

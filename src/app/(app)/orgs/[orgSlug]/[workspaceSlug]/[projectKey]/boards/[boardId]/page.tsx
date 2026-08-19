@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { boardsPath, loadPage, requireBoardInPath, ticketPath } from '@/lib/authz';
+import { boardsPath, loadPage, requireBoardInPath, ticketPath, visibleProject } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { sortStatesForBoard } from '@/lib/model';
 import { defaultComposeState } from '@/lib/states';
@@ -46,7 +46,7 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
       boardId: ctx.board.id,
       // Repeated rather than trusting the ids alone, so this read is safe on its
       // own terms.
-      project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+      project: visibleProject(ctx.user.id),
     },
     orderBy: TICKET_ORDER,
     select: {

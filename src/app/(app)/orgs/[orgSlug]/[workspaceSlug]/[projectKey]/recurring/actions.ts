@@ -32,6 +32,7 @@ import { z } from 'zod';
 
 import {
   atLeast,
+  canSeeProject,
   filterLabelsInProject,
   recurringPath,
   requireProjectByKeyInOrg,
@@ -53,7 +54,7 @@ import {
   tzOffsetSchema,
 } from '@/lib/validation';
 
-const NOT_A_MEMBER = 'That person is not a member of this organization.';
+const NOT_A_MEMBER = 'That person cannot be assigned work in this project.';
 
 const NOT_YOURS = 'Only the person who set this up, or an admin, can delete it.';
 
@@ -67,22 +68,22 @@ const IN_THE_PAST = 'Pick a time in the future.';
 const PAST_SLACK_MS = 60_000;
 
 /**
- * Non-throwing membership check, copied rather than imported.
+ * Non-throwing "may this person be given work here?".
  *
- * Byte-identical to the one in `issue-actions.ts`, including why it exists:
- * `assertOrgMember` throws NOT_FOUND, which is right when the caller should not
- * learn whether the account exists, but here the caller is already inside the
- * organization and picked a name from a list, so a plain rejection reads better
- * than a 404. It cannot be shared: every export of a `'use server'` module is a
- * directly addressable POST endpoint, so a helper cannot be exported from
- * either file. The organization id still comes from the upward walk.
+ * Scoped to the PROJECT, not the organization: on a private project the people
+ * who may hold an issue are the ones who can open it, and putting somebody
+ * else's name in the assignee column would both hand them nothing and tell
+ * everyone the project exists. `canSeeProject` is the same predicate every
+ * loader runs, asked about the candidate instead of the caller.
+ *
+ * Non-throwing because `assertOrgMember` answers with NOT_FOUND, which is right
+ * when the caller should not learn whether the account exists. Here the caller
+ * is already inside the organization and picked a name from a list, so a plain
+ * rejection reads better than a 404 -- and the project id still comes from the
+ * upward walk.
  */
-async function isOrgMember(organizationId: string, userId: string): Promise<boolean> {
-  const membership = await prisma.membership.findFirst({
-    where: { organizationId, userId },
-    select: { id: true },
-  });
-  return membership !== null;
+async function isOrgMember(projectId: string, userId: string): Promise<boolean> {
+  return canSeeProject(projectId, userId);
 }
 
 /**
@@ -163,7 +164,7 @@ export async function createRecurringTicket(
     // Any role may create: these are tickets the same person could file by hand.
     const ctx = await requireProjectByKeyInOrg(input.orgSlug, input.projectKey);
 
-    if (input.assigneeId !== '' && !(await isOrgMember(ctx.org.id, input.assigneeId))) {
+    if (input.assigneeId !== '' && !(await isOrgMember(ctx.project.id, input.assigneeId))) {
       return fail(NOT_A_MEMBER);
     }
     const labelIds = await filterLabelsInProject(ctx.project.id, input.labelIds);
@@ -281,7 +282,7 @@ export async function updateRecurringTicket(
     if (!template) return fail(INVALID_INPUT);
 
     if (input.part === CONTENT) {
-      if (input.assigneeId !== '' && !(await isOrgMember(ctx.org.id, input.assigneeId))) {
+      if (input.assigneeId !== '' && !(await isOrgMember(ctx.project.id, input.assigneeId))) {
         return fail(NOT_A_MEMBER);
       }
       const labelIds = await filterLabelsInProject(ctx.project.id, input.labelIds);

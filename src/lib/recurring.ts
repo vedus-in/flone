@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { ticketPath } from '@/lib/authz';
+import { canSeeProject, ticketPath } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { appUrl } from '@/lib/email';
 import { sendRecurringTicketMail } from '@/lib/mailer';
@@ -142,19 +142,18 @@ export async function runDueRecurringTickets(now: Date): Promise<RecurringTickRe
     const dueDate = dueDateFor(dueAt, template.tzOffsetMinutes);
 
     // The assignee is RE-PROVED at spawn time, after the claim. The template may
-    // be months old and the person may have left the organization since; someone
-    // who has spawns an UNASSIGNED ticket that sits on the board, not an error
-    // that kills the batch. Applied after the claim rather than as a filter on
-    // the due query for the same reason the reminders tick applies its
-    // unverified-address rule there -- filtering in the query would leave the
-    // row permanently due and re-read by every tick forever.
-    const assignee = template.assigneeId
-      ? await prisma.membership.findFirst({
-          where: { organizationId: template.project.organization.id, userId: template.assigneeId },
-          select: { id: true },
-        })
-      : null;
-    const assigneeId = assignee ? template.assigneeId : null;
+    // be months old and the person may have left the organization since -- or
+    // just this project, now that a project can be private. Either way they
+    // spawn an UNASSIGNED ticket that sits on the board, not an error that kills
+    // the batch and not a mail about an issue they cannot open. Applied after
+    // the claim rather than as a filter on the due query for the same reason the
+    // reminders tick applies its unverified-address rule there -- filtering in
+    // the query would leave the row permanently due and re-read by every tick
+    // forever.
+    const assigned = template.assigneeId
+      ? await canSeeProject(template.project.id, template.assigneeId)
+      : false;
+    const assigneeId = assigned ? template.assigneeId : null;
 
     const title = `${template.title} — ${formatDateStamp(dueAt, template.tzOffsetMinutes)}`;
 

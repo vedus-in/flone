@@ -17,11 +17,12 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { Role } from '@prisma/client';
+import { ProjectAccess, Role } from '@prisma/client';
 import { z } from 'zod';
 
 import { prisma } from '@/lib/db';
 import {
+  assertOrgMember,
   boardPath,
   boardsPath,
   issuesPath,
@@ -36,6 +37,7 @@ import {
   requireUser,
   runAction,
   viewsPath,
+  visibleProject,
   workspacePath,
 } from '@/lib/authz';
 import { ERRORS, fail, ok, type ActionResult } from '@/lib/result';
@@ -108,10 +110,7 @@ export async function updateProject(
     // The key is immutable: it is the URL segment and the issue prefix, and
     // rewriting it would break every link and every `VED-153` anyone has typed.
     await prisma.project.updateMany({
-      where: {
-        id: ctx.project.id,
-        organization: { memberships: { some: { userId: ctx.user.id } } },
-      },
+      where: visibleProject(ctx.user.id, { id: ctx.project.id }),
       data: { name: parsed.data.name, description: parsed.data.description ?? null },
     });
 
@@ -168,10 +167,7 @@ export async function moveProjectToWorkspace(input: {
     if (!destination) return fail(ERRORS.NOT_FOUND);
 
     await prisma.project.updateMany({
-      where: {
-        id: ctx.project.id,
-        organization: { memberships: { some: { userId: ctx.user.id } } },
-      },
+      where: visibleProject(ctx.user.id, { id: ctx.project.id }),
       data: { workspaceId: destination.id },
     });
 
@@ -221,10 +217,7 @@ export async function deleteProject(
 
     // Cascades through boards, states, cycles, labels, issues and comments.
     await prisma.project.deleteMany({
-      where: {
-        id: ctx.project.id,
-        organization: { memberships: { some: { userId: ctx.user.id } } },
-      },
+      where: visibleProject(ctx.user.id, { id: ctx.project.id }),
     });
 
     revalidatePath(orgPath(ctx.org));
@@ -235,6 +228,155 @@ export async function deleteProject(
   if (!result.ok) return result;
   if (nav.to) redirect(nav.to);
   return result;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Access                                                                      */
+/*                                                                             */
+/* Who may SEE this project. ADMIN+, like every other thing on the settings     */
+/* page -- the same people who can rename it or delete it outright.            */
+/* -------------------------------------------------------------------------- */
+
+const projectAccessSchema = z.object({
+  orgSlug: slugSchema,
+  projectKey: projectKeySchema,
+  access: z.nativeEnum(ProjectAccess),
+});
+
+/**
+ * Open the project to the whole organization, or close it to a named few.
+ *
+ * CLOSING IT ADDS THE PERSON DOING IT. Without that, an admin who is not an org
+ * owner closes a project and it disappears from their own sidebar on the next
+ * render -- with no page left to undo it from, because the settings page they
+ * were standing on has just 404ed. Both writes are one transaction so the
+ * project is never private-and-empty, not even between two statements.
+ *
+ * Opening it leaves the member list alone. The rows cost nothing on an open
+ * project and mean closing it again restores exactly the list it had, instead
+ * of asking somebody to remember who was on it.
+ */
+export async function setProjectAccess(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = projectAccessSchema.safeParse({
+      orgSlug: formData.get('orgSlug'),
+      projectKey: formData.get('projectKey'),
+      access: formData.get('access'),
+    });
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    const ctx = await requireProjectByKeyInOrg(parsed.data.orgSlug, parsed.data.projectKey);
+    requireRole(ctx, Role.ADMIN);
+
+    const closing = parsed.data.access === ProjectAccess.PRIVATE;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.project.updateMany({
+        where: visibleProject(ctx.user.id, { id: ctx.project.id }),
+        data: { access: parsed.data.access },
+      });
+      if (closing) {
+        // `skipDuplicates` rather than a read-then-write: the row is already
+        // there whenever the project has been closed before, and this is not
+        // worth a round trip to find out.
+        await tx.projectMember.createMany({
+          data: [{ projectId: ctx.project.id, userId: ctx.user.id }],
+          skipDuplicates: true,
+        });
+      }
+    });
+
+    // The sidebar is rendered from the nav tree on every page, and a project
+    // that just went private has to leave everyone else's immediately.
+    revalidatePath('/', 'layout');
+    revalidatePath(projectSettingsPath(ctx.org, ctx.project));
+    return ok(closing ? 'This project is now private.' : 'This project is open to the organization.');
+  });
+}
+
+const projectMemberSchema = z.object({
+  orgSlug: slugSchema,
+  projectKey: projectKeySchema,
+  userId: cuid,
+});
+
+/**
+ * Put somebody on the project.
+ *
+ * `assertOrgMember` is the guard, at ORGANIZATION scope deliberately: project
+ * membership is a narrowing of org membership, never a way around it, so an id
+ * from another tenant is NOT_FOUND rather than a new colleague.
+ */
+export async function addProjectMember(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = projectMemberSchema.safeParse({
+      orgSlug: formData.get('orgSlug'),
+      projectKey: formData.get('projectKey'),
+      userId: formData.get('userId'),
+    });
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    const ctx = await requireProjectByKeyInOrg(parsed.data.orgSlug, parsed.data.projectKey);
+    requireRole(ctx, Role.ADMIN);
+    await assertOrgMember(ctx.org.id, parsed.data.userId);
+
+    await prisma.projectMember.createMany({
+      data: [{ projectId: ctx.project.id, userId: parsed.data.userId }],
+      skipDuplicates: true,
+    });
+
+    revalidatePath('/', 'layout');
+    revalidatePath(projectSettingsPath(ctx.org, ctx.project));
+    return ok('Added to the project.');
+  });
+}
+
+/**
+ * Take somebody off it.
+ *
+ * No last-member guard, and none is needed: the org owner can always see every
+ * project, so emptying the list orphans nothing. Removing yourself is allowed
+ * for the same reason -- an owner can put you back.
+ *
+ * `deleteMany` scoped to this project, so a membership id from elsewhere
+ * deletes nothing rather than erroring, which is the same shape every other
+ * scoped write in this file takes.
+ */
+export async function removeProjectMember(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireUser();
+
+    const parsed = projectMemberSchema.safeParse({
+      orgSlug: formData.get('orgSlug'),
+      projectKey: formData.get('projectKey'),
+      userId: formData.get('userId'),
+    });
+    if (!parsed.success) return fail(INVALID_INPUT, fieldErrorsOf(parsed.error));
+
+    const ctx = await requireProjectByKeyInOrg(parsed.data.orgSlug, parsed.data.projectKey);
+    requireRole(ctx, Role.ADMIN);
+
+    await prisma.projectMember.deleteMany({
+      where: { projectId: ctx.project.id, userId: parsed.data.userId },
+    });
+
+    revalidatePath('/', 'layout');
+    revalidatePath(projectSettingsPath(ctx.org, ctx.project));
+    return ok('Removed from the project.');
+  });
 }
 
 const cycleConfigSchema = z.object({
@@ -737,7 +879,7 @@ export async function updateBoard(
     await prisma.board.updateMany({
       where: {
         id: ctx.board.id,
-        project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+        project: visibleProject(ctx.user.id),
       },
       data: {
         name: parsed.data.name,
@@ -786,7 +928,7 @@ export async function deleteBoard(
     await prisma.board.deleteMany({
       where: {
         id: ctx.board.id,
-        project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+        project: visibleProject(ctx.user.id),
       },
     });
 
@@ -820,7 +962,7 @@ export async function renameBoard(
     await prisma.board.updateMany({
       where: {
         id: ctx.board.id,
-        project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+        project: visibleProject(ctx.user.id),
       },
       data: { name: parsed.data.name },
     });

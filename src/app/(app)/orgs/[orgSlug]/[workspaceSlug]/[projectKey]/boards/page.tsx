@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { BoardStatus, Role } from '@prisma/client';
 
-import { boardPath, issuesPath, loadPage, requireProjectByKey, atLeast } from '@/lib/authz';
+import { boardPath, issuesPath, loadPage, requireProjectByKey, visibleProject, atLeast } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { colorClass, isDone } from '@/lib/model';
 import { cx } from '@/lib/utils/cx';
@@ -47,7 +47,7 @@ export default async function BoardsPage({ params }: { params: Promise<Params> }
     prisma.board.findMany({
       where: {
         projectId: ctx.project.id,
-        project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+        project: visibleProject(ctx.user.id),
       },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
       select: {

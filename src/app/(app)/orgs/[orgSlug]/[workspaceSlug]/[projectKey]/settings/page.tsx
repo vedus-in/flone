@@ -1,4 +1,4 @@
-import { Role, WorkflowStateType } from '@prisma/client';
+import { ProjectAccess, Role, WorkflowStateType } from '@prisma/client';
 import { notFound } from 'next/navigation';
 
 import { StateIcon } from '@/components/issue-row';
@@ -11,12 +11,15 @@ import { cx } from '@/lib/utils/cx';
 
 import { ActionForm } from '../../../../../action-form';
 import {
+  addProjectMember,
   createLabel,
   createState,
   deleteLabel,
   deleteProject,
   deleteState,
   moveState,
+  removeProjectMember,
+  setProjectAccess,
   updateCycleConfig,
   updateLabel,
   updateProject,
@@ -115,7 +118,7 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
   // A 404, not a 403: the same shape every other refusal in this app takes.
   if (!atLeast(ctx.role, Role.ADMIN)) notFound();
 
-  const [states, labels, cadence, counts] = await Promise.all([
+  const [states, labels, cadence, counts, orgMembers] = await Promise.all([
     listStates(ctx.project.id),
     prisma.label.findMany({
       where: { projectId: ctx.project.id },
@@ -125,10 +128,12 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
     prisma.project.findUnique({
       where: { id: ctx.project.id },
       select: {
+        access: true,
         cyclesEnabled: true,
         cycleWeeks: true,
         cycleStartDay: true,
         upcomingCycles: true,
+        members: { select: { userId: true } },
       },
     }),
     prisma.ticket.groupBy({
@@ -136,10 +141,30 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
       where: { projectId: ctx.project.id },
       _count: { _all: true },
     }),
+    // The pool the access list picks from. Project membership is a narrowing of
+    // organization membership, so there is nobody else to offer.
+    prisma.membership.findMany({
+      where: { organizationId: ctx.org.id },
+      orderBy: [{ user: { name: 'asc' } }, { id: 'asc' }],
+      select: { role: true, user: { select: { id: true, name: true, email: true } } },
+    }),
   ]);
 
   if (!cadence) notFound();
   const heldByState = new Map(counts.map((row) => [row.stateId, row._count._all] as const));
+
+  const isPrivate = cadence.access === ProjectAccess.PRIVATE;
+  const onProject = new Set(cadence.members.map((row) => row.userId));
+  // Owners are listed as already having access even without a row, because they
+  // do -- the predicate in `@/lib/authz` lets an owner see every project in the
+  // organization. Offering an Add button for them would be a button that
+  // changes nothing anyone can observe.
+  const named = orgMembers.filter(
+    (member) => onProject.has(member.user.id) || member.role === Role.OWNER,
+  );
+  const addable = orgMembers.filter(
+    (member) => !onProject.has(member.user.id) && member.role !== Role.OWNER,
+  );
 
   return (
     <div className="flex flex-col gap-8">
@@ -185,6 +210,108 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
               <SubmitButton color="secondary">Save</SubmitButton>
             </div>
           </ActionForm>
+        </Card>
+      </section>
+
+      {/* ------------------------------------------------------------------ */}
+      <section className="flex flex-col gap-3" aria-labelledby="access-heading">
+        <div className="flex flex-col gap-1">
+          <h2 id="access-heading" className="text-sm font-medium text-primary">
+            Access
+          </h2>
+          <p className="max-w-prose text-xs text-tertiary">
+            A <strong>private</strong> project is invisible to everyone who is not on it: it leaves
+            their sidebar, their search, and every list in the organization. What people may DO here
+            is still their organization role &mdash; this decides only who can see it at all.
+          </p>
+        </div>
+
+        <Card className="gap-4 p-5">
+          <ActionForm
+            action={setProjectAccess}
+            className="flex flex-col gap-3"
+            aria-label="Project access"
+          >
+            <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+            <input type="hidden" name="projectKey" value={ctx.project.key} />
+            <input
+              type="hidden"
+              name="access"
+              value={isPrivate ? ProjectAccess.OPEN : ProjectAccess.PRIVATE}
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-[0.8125rem] text-primary">
+                {isPrivate
+                  ? `${ctx.project.key} is private to the people below.`
+                  : `${ctx.project.key} is open to everyone in ${ctx.org.name}.`}
+              </span>
+              <SubmitButton color="secondary">
+                {isPrivate ? 'Open to the organization' : 'Make private'}
+              </SubmitButton>
+            </div>
+          </ActionForm>
+
+          <Separator />
+
+          <ul className="flex flex-col gap-2">
+            {named.map((member) => (
+              <li key={member.user.id} className="flex flex-wrap items-center gap-2">
+                <span className="text-[0.8125rem] text-primary">{member.user.name}</span>
+                <span className="text-[0.6875rem] text-tertiary">{member.user.email}</span>
+                {member.role === Role.OWNER && !onProject.has(member.user.id) ? (
+                  <span className="text-[0.6875rem] text-tertiary">Owner &mdash; always</span>
+                ) : (
+                  <ActionForm
+                    action={removeProjectMember}
+                    aria-label={`Remove ${member.user.name} from this project`}
+                  >
+                    <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                    <input type="hidden" name="projectKey" value={ctx.project.key} />
+                    <input type="hidden" name="userId" value={member.user.id} />
+                    <button
+                      type="submit"
+                      className="h-7 rounded-lg px-2 text-[0.6875rem] text-tertiary transition-colors hover:text-error-primary"
+                    >
+                      Remove
+                    </button>
+                  </ActionForm>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          {addable.length > 0 ? (
+            <ActionForm
+              action={addProjectMember}
+              className="flex flex-wrap items-center gap-2"
+              aria-label="Add someone to this project"
+            >
+              <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+              <input type="hidden" name="projectKey" value={ctx.project.key} />
+              <select name="userId" aria-label="Person" className={SELECT}>
+                {addable.map((member) => (
+                  <option key={member.user.id} value={member.user.id}>
+                    {member.user.name} &mdash; {member.user.email}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="submit"
+                className="h-8 rounded-lg bg-brand-solid px-2.5 text-[0.8125rem] font-medium text-white transition-opacity hover:opacity-90"
+              >
+                Add
+              </button>
+            </ActionForm>
+          ) : (
+            <p className="text-xs text-tertiary">Everyone in this organization is already on it.</p>
+          )}
+
+          {isPrivate ? null : (
+            <p className="text-xs text-tertiary">
+              The list is kept while the project is open, so closing it again restores exactly these
+              people.
+            </p>
+          )}
         </Card>
       </section>
 

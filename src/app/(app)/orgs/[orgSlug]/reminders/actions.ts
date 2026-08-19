@@ -127,16 +127,22 @@ export async function createReminder(
 
     const ctx = await requireOrgBySlug(input.orgSlug);
 
+    // The scope is resolved FIRST, because it is what the recipients are then
+    // checked against. A project reminder puts the project's name and key on
+    // the recipient's page and in their mail, so for a private project the
+    // eligible recipients are its members -- not the whole organization.
+    const project =
+      input.scope === ORG_SCOPE
+        ? null
+        : await requireProjectInOrg(ctx.org.id, input.scope, ctx.user.id);
+
     // Every member may schedule a reminder, for themselves or for a colleague:
     // it is a nudge, not access to anything. The only thing role-gated here is
     // deleting somebody else's, below. Checked one at a time rather than with a
     // count, so a forged id is NOT_FOUND rather than silently dropped.
     for (const recipientId of input.recipientIds) {
-      await assertOrgMember(ctx.org.id, recipientId);
+      await assertOrgMember(ctx.org.id, recipientId, project?.id ?? null);
     }
-
-    const project =
-      input.scope === ORG_SCOPE ? null : await requireProjectInOrg(ctx.org.id, input.scope);
 
     // `localDateTimeSchema` already proved this parses; the null branch is for
     // the type checker, not for a reachable input.

@@ -26,6 +26,7 @@ import { z } from 'zod';
 
 import {
   boardPath,
+  canSeeProject,
   filterLabelsInProject,
   issuesPath,
   projectPath,
@@ -60,22 +61,25 @@ import {
   ticketTitleSchema,
 } from '@/lib/validation';
 
-const NOT_A_MEMBER = 'That person is not a member of this organization.';
+const NOT_A_MEMBER = 'That person cannot be assigned work in this project.';
 
 /**
- * Non-throwing membership check.
+ * Non-throwing "may this person be given work here?".
  *
- * `assertOrgMember` throws NOT_FOUND, which is right when the caller should not
- * learn whether the account exists. Here the caller is already inside the
- * organization and picked a name from a list, so a plain rejection reads better
- * than a 404 -- and the organization id still comes from the upward walk.
+ * Scoped to the PROJECT, not the organization: on a private project the people
+ * who may hold an issue are the ones who can open it, and putting somebody
+ * else's name in the assignee column would both hand them nothing and tell
+ * everyone the project exists. `canSeeProject` is the same predicate every
+ * loader runs, asked about the candidate instead of the caller.
+ *
+ * Non-throwing because `assertOrgMember` answers with NOT_FOUND, which is right
+ * when the caller should not learn whether the account exists. Here the caller
+ * is already inside the organization and picked a name from a list, so a plain
+ * rejection reads better than a 404 -- and the project id still comes from the
+ * upward walk.
  */
-async function isOrgMember(organizationId: string, userId: string): Promise<boolean> {
-  const membership = await prisma.membership.findFirst({
-    where: { organizationId, userId },
-    select: { id: true },
-  });
-  return membership !== null;
+async function isOrgMember(projectId: string, userId: string): Promise<boolean> {
+  return canSeeProject(projectId, userId);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -157,7 +161,7 @@ export async function createIssue(
     if (parsed.data.cycleId !== '') {
       await requireCycleInProject(ctx.project.id, parsed.data.cycleId);
     }
-    if (parsed.data.assigneeId !== '' && !(await isOrgMember(ctx.org.id, parsed.data.assigneeId))) {
+    if (parsed.data.assigneeId !== '' && !(await isOrgMember(ctx.project.id, parsed.data.assigneeId))) {
       return fail(NOT_A_MEMBER);
     }
     // A parent must belong to this project and must not itself be a sub-issue.
@@ -197,6 +201,7 @@ export async function createIssue(
     // assigning yourself on creation stays silent.
     if (parsed.data.assigneeId !== '') {
       await notifyIssueAssigned({
+        projectId: ctx.project.id,
         assigneeId: parsed.data.assigneeId,
         actorId: user.id,
         actorName: user.name,
@@ -612,7 +617,7 @@ export async function setIssueAssignee(input: {
     // MANDATORY before any write of `assigneeId`: a candidate outside this
     // organization is refused, so assignment cannot be used to probe for user
     // ids across the tenant boundary.
-    if (parsed.data.assigneeId !== '' && !(await isOrgMember(ctx.org.id, parsed.data.assigneeId))) {
+    if (parsed.data.assigneeId !== '' && !(await isOrgMember(ctx.project.id, parsed.data.assigneeId))) {
       return fail(NOT_A_MEMBER);
     }
 
@@ -627,6 +632,7 @@ export async function setIssueAssignee(input: {
     // board menu does readily -- must not re-send the mail.
     if (assigneeId !== ctx.ticket.assigneeId) {
       await notifyIssueAssigned({
+        projectId: ctx.project.id,
         assigneeId,
         actorId: ctx.user.id,
         actorName: ctx.user.name,

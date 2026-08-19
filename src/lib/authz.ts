@@ -1,7 +1,7 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { notFound, redirect } from 'next/navigation';
-import { Role, type WorkflowStateType } from '@prisma/client';
+import { Prisma, ProjectAccess, Role, type WorkflowStateType } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { readSession, touchSessionCookie } from '@/lib/session';
 import { ERRORS, type ActionResult } from '@/lib/result';
@@ -30,6 +30,12 @@ import { ERRORS, type ActionResult } from '@/lib/result';
  * ticket -> project -> organization. Walking through the board would have made
  * a board-less issue unreachable, which is exactly the kind of hole that reads
  * as a 404 and gets shrugged at.
+ *
+ * The project is now the SECOND boundary, not just a link in the chain: a
+ * project may be private to a named list. That is one predicate, `visibleProject`
+ * below, and it belongs in the `where` of every read that can reach a project --
+ * here and everywhere else. `npm run check:model` refuses the old hand-written
+ * shape, because a read that forgets it returns MORE rows and so fails nothing.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -155,6 +161,75 @@ export function isNextControlFlowError(e: unknown): boolean {
     digest.startsWith('NEXT_REDIRECT') ||
     digest.startsWith('NEXT_HTTP_ERROR_FALLBACK')
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Project visibility -- THE predicate                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Anything a caller wants to ADD to a project lookup. `organization` is narrowed
+ * to a plain where-input so the membership predicate below can be merged into
+ * it, and `OR` is withheld entirely -- a caller who supplied one would silently
+ * replace the visibility clause and open every private project in the instance.
+ */
+type ProjectScope = Omit<Prisma.ProjectWhereInput, 'organization' | 'OR'> & {
+  organization?: Prisma.OrganizationWhereInput;
+};
+
+/**
+ * THE PROJECT PREDICATE. Every read that can reach a project goes through here,
+ * including the ones that reach it through a board, an issue, a comment, an
+ * attachment or a document.
+ *
+ * It answers two questions in one `where`, because they are one question:
+ *
+ *   1. Is the caller in the organization?  -- the tenant boundary, unchanged.
+ *   2. May the caller see THIS project?    -- OPEN, or named on it, or the owner.
+ *
+ * Splitting them would mean a lookup that succeeds followed by an `if` that
+ * refuses, which is exactly the shape the top of this file forbids: it would
+ * make "no such project" and "not yours" distinguishable by timing and by which
+ * branch fired. Both still produce the same `null` from the same single query.
+ *
+ * Org OWNER is the escape hatch, and only OWNER. A project whose last member
+ * leaves would otherwise be visible to nobody and deletable by nobody, which is
+ * a support ticket nobody can resolve. ADMIN deliberately does NOT get it --
+ * "manages the org" and "reads everything in it" are different powers, and
+ * Linear draws the line in the same place.
+ *
+ * `access: OPEN` is the default, so a project nobody has touched matches the
+ * first branch and this predicate costs one more OR than the old one did.
+ */
+export function visibleProject(userId: string, scope: ProjectScope = {}): Prisma.ProjectWhereInput {
+  return {
+    ...scope,
+    organization: { ...scope.organization, memberships: { some: { userId } } },
+    OR: [
+      { access: ProjectAccess.OPEN },
+      { members: { some: { userId } } },
+      { organization: { memberships: { some: { userId, role: Role.OWNER } } } },
+    ],
+  };
+}
+
+/**
+ * Non-throwing "may this person see this project?", for the callers that need
+ * the answer about SOMEBODY ELSE: the assignee pickers, the recurring-ticket
+ * spawn, and the reminder tick. Same predicate, applied to the candidate's id
+ * rather than the caller's, so a private project cannot be used to hand work to
+ * somebody who cannot open it -- and so work already handed out stops following
+ * them the moment they come off the project.
+ *
+ * `projectId` must come from an authorized upward walk -- this proves the
+ * CANDIDATE's access, never the caller's.
+ */
+export async function canSeeProject(projectId: string, candidateUserId: string): Promise<boolean> {
+  const row = await prisma.project.findFirst({
+    where: visibleProject(candidateUserId, { id: projectId }),
+    select: { id: true },
+  });
+  return row !== null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -475,13 +550,11 @@ export async function requireProjectByKey(
 ): Promise<ProjectCtx> {
   const user = await requireUser();
   const row = await prisma.project.findFirst({
-    where: {
+    where: visibleProject(user.id, {
       key: projectKey,
-      workspace: {
-        slug: workspaceSlug,
-        organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
-      },
-    },
+      organization: { slug: orgSlug },
+      workspace: { slug: workspaceSlug },
+    }),
     select: projectSelect(user.id),
   });
   if (!row) throw new AuthzError('NOT_FOUND');
@@ -508,12 +581,7 @@ export async function findProjectByKeyInOrg(
 ): Promise<ProjectCtx | null> {
   const user = await requireUser();
   const row = await prisma.project.findFirst({
-    where: {
-      key: projectKey,
-      workspace: {
-        organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
-      },
-    },
+    where: visibleProject(user.id, { key: projectKey, organization: { slug: orgSlug } }),
     select: projectSelect(user.id),
   });
   return row ? toProjectCtx(user, row) : null;
@@ -538,13 +606,11 @@ export async function requireBoardInPath(
   const row = await prisma.board.findFirst({
     where: {
       id: boardId,
-      project: {
+      project: visibleProject(user.id, {
         key: projectKey,
-        workspace: {
-          slug: workspaceSlug,
-          organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
-        },
-      },
+        organization: { slug: orgSlug },
+        workspace: { slug: workspaceSlug },
+      }),
     },
     select: { id: true, name: true, project: { select: projectSelect(user.id) } },
   });
@@ -569,13 +635,11 @@ export async function requireTicketInPath(
   const row = await prisma.ticket.findFirst({
     where: {
       number: ticketNumber,
-      project: {
+      project: visibleProject(user.id, {
         key: projectKey,
-        workspace: {
-          slug: workspaceSlug,
-          organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
-        },
-      },
+        organization: { slug: orgSlug },
+        workspace: { slug: workspaceSlug },
+      }),
     },
     select: ticketSelect(user.id),
   });
@@ -593,13 +657,11 @@ export async function requireCycleInPath(
   const row = await prisma.cycle.findFirst({
     where: {
       number: cycleNumber,
-      project: {
+      project: visibleProject(user.id, {
         key: projectKey,
-        workspace: {
-          slug: workspaceSlug,
-          organization: { slug: orgSlug, memberships: { some: { userId: user.id } } },
-        },
-      },
+        organization: { slug: orgSlug },
+        workspace: { slug: workspaceSlug },
+      }),
     },
     select: {
       id: true,
@@ -624,10 +686,7 @@ export async function requireCycleInPath(
 export async function requireProject(projectId: string): Promise<ProjectCtx> {
   const user = await requireUser();
   const row = await prisma.project.findFirst({
-    where: {
-      id: projectId,
-      organization: { memberships: { some: { userId: user.id } } },
-    },
+    where: visibleProject(user.id, { id: projectId }),
     select: projectSelect(user.id),
   });
   if (!row) throw new AuthzError('NOT_FOUND');
@@ -639,7 +698,7 @@ export async function requireBoard(boardId: string): Promise<BoardCtx> {
   const row = await prisma.board.findFirst({
     where: {
       id: boardId,
-      project: { organization: { memberships: { some: { userId: user.id } } } },
+      project: visibleProject(user.id),
     },
     select: { id: true, name: true, project: { select: projectSelect(user.id) } },
   });
@@ -652,7 +711,7 @@ export async function requireTicket(ticketId: string): Promise<TicketCtx> {
   const row = await prisma.ticket.findFirst({
     where: {
       id: ticketId,
-      project: { organization: { memberships: { some: { userId: user.id } } } },
+      project: visibleProject(user.id),
     },
     select: ticketSelect(user.id),
   });
@@ -665,7 +724,7 @@ export async function requireComment(commentId: string): Promise<CommentCtx> {
   const row = await prisma.comment.findFirst({
     where: {
       id: commentId,
-      ticket: { project: { organization: { memberships: { some: { userId: user.id } } } } },
+      ticket: { project: visibleProject(user.id) },
     },
     select: {
       id: true,
@@ -700,7 +759,7 @@ export async function requireAttachment(attachmentId: string): Promise<Attachmen
   const row = await prisma.attachment.findFirst({
     where: {
       id: attachmentId,
-      project: { organization: { memberships: { some: { userId: user.id } } } },
+      project: visibleProject(user.id),
     },
     select: {
       id: true,
@@ -735,7 +794,7 @@ export async function requireDocument(documentId: string): Promise<DocumentCtx> 
   const row = await prisma.document.findFirst({
     where: {
       id: documentId,
-      project: { organization: { memberships: { some: { userId: user.id } } } },
+      project: visibleProject(user.id),
     },
     select: {
       id: true,
@@ -803,6 +862,12 @@ export async function findSharedDocument(token: string): Promise<SharedDocument 
  * share and the image closes with it, in the same query, with nothing to remember
  * to also turn off.
  *
+ * `Project.access` is deliberately NOT consulted here. Making an image go dark
+ * when its project is closed would revoke a link that was published on purpose,
+ * and the token on the DOCUMENT is what is being honoured -- publishing a page
+ * out of a private project is the same deliberate act as publishing one out of
+ * an open project, and the same act revokes it.
+ *
  * `contains` on the body rather than a parsed reference list, for the reason the
  * schema gives for never parsing bodies on the delete path: a parser is a second
  * source of truth about which images a document uses, and getting it wrong here
@@ -862,13 +927,19 @@ export async function requireStateInProject(
  * already-authorized organization -- the reminder scope selector is the only
  * caller today. Returns the same `ProjectRef` shape the path builders take, so
  * a scoped reminder can be linked without a second query.
+ *
+ * Takes the CALLER's id as well as the organization, because "a project in this
+ * org" stopped being enough the moment projects could be private: without it,
+ * scoping a reminder to a project you cannot see would put its name on a page
+ * that is otherwise careful never to show it.
  */
 export async function requireProjectInOrg(
   organizationId: string,
   projectId: string,
+  userId: string,
 ): Promise<ProjectRef> {
   const project = await prisma.project.findFirst({
-    where: { id: projectId, organizationId },
+    where: visibleProject(userId, { id: projectId, organizationId }),
     select: {
       id: true,
       name: true,
@@ -955,11 +1026,32 @@ export async function filterLabelsInProject(
  * MANDATORY before any write of `Ticket.assigneeId`. NOT_FOUND if the candidate
  * has no Membership in this organization, so assignment cannot be used to probe
  * for user ids across the tenant boundary.
+ *
+ * Pass `projectId` whenever the thing being handed over BELONGS to a project --
+ * an issue, or a reminder scoped to one. The check then narrows to people who
+ * can actually see that project, which for a private one is its member list
+ * rather than the whole organization. Handing somebody an issue they cannot
+ * open is not a courtesy, and their name in the assignee column is itself a
+ * disclosure that the project exists.
+ *
+ * Omit it only for genuinely org-wide subjects -- an unscoped reminder.
  */
 export async function assertOrgMember(
   organizationId: string,
   candidateUserId: string,
+  projectId?: string | null,
 ): Promise<void> {
+  if (projectId) {
+    // The project predicate already proves organization membership, so this is
+    // one query rather than two -- and the same one every loader above runs.
+    const project = await prisma.project.findFirst({
+      where: visibleProject(candidateUserId, { id: projectId, organizationId }),
+      select: { id: true },
+    });
+    if (!project) throw new AuthzError('NOT_FOUND');
+    return;
+  }
+
   const membership = await prisma.membership.findFirst({
     where: { organizationId, userId: candidateUserId },
     select: { id: true },

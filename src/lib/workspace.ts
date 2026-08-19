@@ -1,5 +1,8 @@
 import 'server-only';
 
+import { ProjectAccess, Role } from '@prisma/client';
+
+import { visibleProject } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { ensureDefaultStates, type ProjectState } from '@/lib/states';
 import { CYCLE_ORDER } from '@/lib/validation';
@@ -46,7 +49,7 @@ export async function loadWorkspace(ctx: {
     prisma.board.findMany({
       where: {
         projectId,
-        project: { organization: { memberships: { some: { userId: ctx.user.id } } } },
+        project: visibleProject(ctx.user.id),
       },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
       select: { id: true, name: true, color: true },
@@ -61,8 +64,23 @@ export async function loadWorkspace(ctx: {
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
       select: { id: true, name: true, color: true },
     }),
+    // WHO MAY BE HANDED WORK HERE. On an open project that is everyone in the
+    // organization, exactly as it always was. On a private one it is the people
+    // named on the project, plus the org owner -- the same three branches
+    // `visibleProject` ORs together, asked from the membership side.
+    //
+    // The OPEN branch is written as a condition on the PROJECT rather than a
+    // flag read in JS, so this stays one query and cannot disagree with the
+    // predicate the rest of the app runs.
     prisma.membership.findMany({
-      where: { organizationId: ctx.org.id },
+      where: {
+        organizationId: ctx.org.id,
+        OR: [
+          { organization: { projects: { some: { id: projectId, access: ProjectAccess.OPEN } } } },
+          { user: { projectMemberships: { some: { projectId } } } },
+          { role: Role.OWNER },
+        ],
+      },
       orderBy: [{ user: { name: 'asc' } }, { userId: 'asc' }],
       select: { user: { select: { id: true, name: true } } },
     }),
