@@ -1,5 +1,5 @@
 import type { ReactNode, SelectHTMLAttributes } from 'react';
-import { ChevronDown, InfoCircle } from '@untitledui/icons';
+import { ChevronDown, DotsVertical, InfoCircle } from '@untitledui/icons';
 
 import { COLOR_TOKENS, colorClass } from '@/lib/model';
 import { cx } from '@/lib/utils/cx';
@@ -247,3 +247,50 @@ export function initials(name: string): string {
     .map((part) => part[0]!.toUpperCase())
     .join('');
 }
+
+/* -------------------------------------------------------------------------- */
+/* Row menu                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The per-row overflow menu, and the confirm step for whatever is inside it.
+ *
+ * A `<details>` rather than a listbox: it is the third disclosure on these pages
+ * and, like the other two, it ships no client JavaScript and works before
+ * hydration. The shared `name` makes the group exclusive -- opening one row's
+ * menu closes every other one -- which is the single behaviour a plain
+ * `<details>` does not give a menu for free.
+ *
+ * Being two clicks from a destructive submit IS the confirm: the panel says what
+ * the action does before it offers the button, so nothing irreversible sits
+ * under a stray click on a row. That is a lower gate than `DangerZone`'s
+ * type-the-name, and deliberately so -- removing one person is undone by adding
+ * them back.
+ */
+export function RowMenu({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <details name="settings-row-menu" className="relative shrink-0">
+      <summary
+        aria-label={label}
+        className="grid size-8 cursor-pointer list-none place-items-center rounded-lg text-tertiary transition-colors outline-focus-ring hover:bg-primary_hover hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-1"
+      >
+        <DotsVertical aria-hidden="true" className="size-4" />
+      </summary>
+      <div className="absolute end-0 z-10 mt-1 flex w-64 flex-col gap-3 rounded-xl border border-secondary bg-primary p-3 text-start shadow-lg">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+/** The line of explanation a `RowMenu` opens with. */
+export function MenuNote({ children }: { children: ReactNode }) {
+  return <p className="text-xs text-tertiary">{children}</p>;
+}
+
+/** Full-width submits inside a `RowMenu`. Plain buttons: one click, then a revalidate. */
+export const MENU_ITEM_CLASS =
+  'w-full rounded-lg border border-secondary px-3 py-1.5 text-sm font-medium text-primary transition-colors outline-focus-ring hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-offset-1';
+
+export const MENU_DANGER_CLASS =
+  'w-full rounded-lg border border-error px-3 py-1.5 text-sm font-semibold text-error-primary transition-colors outline-focus-ring hover:bg-error-primary focus-visible:outline-2 focus-visible:outline-offset-1';

@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { Role } from '@prisma/client';
-import { ChevronDown, Plus, XClose } from '@untitledui/icons';
+import { ProjectAccess, Role } from '@prisma/client';
+import { ChevronDown, Mail01, Plus } from '@untitledui/icons';
 
 import { prisma } from '@/lib/db';
 import {
@@ -9,6 +9,7 @@ import {
   orgPath,
   orgSettingsPath,
   requireOrgBySlug,
+  visibleProject,
   type OrgRef,
 } from '@/lib/authz';
 import {
@@ -23,7 +24,11 @@ import {
 } from '@/components/ui';
 import {
   DangerZone,
+  MENU_DANGER_CLASS,
+  MENU_ITEM_CLASS,
+  MenuNote,
   NEW_ROW_CLASS,
+  RowMenu,
   SettingsRow,
   SettingsSelect,
   initials,
@@ -137,6 +142,25 @@ export default async function OrganizationSettingsPage({
 
   const canManage = atLeast(ctx.role, Role.ADMIN);
 
+  /**
+   * What each member can reach that not everyone can (KANB-14).
+   *
+   * Scoped with `visibleProject` rather than by role: a private project is
+   * invisible to an ADMIN who is not on it, and this page is readable by every
+   * member, so listing the org's private projects unscoped would turn the
+   * members table into the leak the access flag exists to prevent. Everyone
+   * therefore sees this column filled in only for the projects they could have
+   * opened anyway.
+   */
+  const privateProjects = await prisma.project.findMany({
+    where: visibleProject(ctx.user.id, {
+      organizationId: ctx.org.id,
+      access: ProjectAccess.PRIVATE,
+    }),
+    select: { name: true, members: { select: { userId: true } } },
+    orderBy: { name: 'asc' },
+  });
+
   // Only admins can act on invitations, so only admins are shown them. The read
   // is skipped entirely for everyone else rather than fetched and hidden.
   const invites = canManage ? await pendingInvites(ctx.org.id) : [];
@@ -194,6 +218,16 @@ export default async function OrganizationSettingsPage({
             const actionable = canManage && !isSelf && (!targetIsOwner || isOwner);
             const lastOwner = targetIsOwner && ownerCount <= 1;
             const roleFieldId = `role-${member.id}`;
+            // An owner is on every private project by role, not by row, so the
+            // list of rows would understate what they can open.
+            const access = targetIsOwner
+              ? 'every private project'
+              : privateProjects
+                  .filter((project) =>
+                    project.members.some((entry) => entry.userId === member.user.id),
+                  )
+                  .map((project) => project.name)
+                  .join(', ');
 
             return (
               <SettingsRow key={member.id} className="justify-between">
@@ -205,79 +239,144 @@ export default async function OrganizationSettingsPage({
                         {member.user.name}
                       </span>
                       {isSelf ? <Badge>you</Badge> : null}
+                      {lastOwner ? (
+                        <Badge tone="warning">last owner</Badge>
+                      ) : null}
                     </div>
                     <span className="truncate text-xs text-tertiary">{member.user.email}</span>
+                    {privateProjects.length > 0 && access ? (
+                      <span className="truncate text-xs text-tertiary" title={access}>
+                        Private access: {access}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {/*
+                    * The role select saves itself on change. Removal is a
+                    * separate form inside the menu rather than a second control
+                    * on the row: it must not be something a stray change event
+                    * can reach, and it should not have a one-click target on a
+                    * line somebody is only trying to re-role.
+                    */}
                   {actionable ? (
-                    <>
-                      {/*
-                        * Two forms, not one: the role select saves itself on
-                        * change, and removal must stay its own submit rather
-                        * than something a stray change event can trigger.
-                        */}
-                      <ActionForm
-                        action={changeMemberRole}
-                        autosave
-                        className="flex items-center"
-                        aria-label={`Change role for ${member.user.name}`}
+                    <ActionForm
+                      action={changeMemberRole}
+                      autosave
+                      className="flex items-center"
+                      aria-label={`Change role for ${member.user.name}`}
+                    >
+                      <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                      <input type="hidden" name="membershipId" value={member.id} />
+                      <Label htmlFor={roleFieldId} className="visually-hidden">
+                        Role for {member.user.name}
+                      </Label>
+                      <SettingsSelect
+                        id={roleFieldId}
+                        name="role"
+                        defaultValue={member.role}
+                        className="w-32"
                       >
-                        <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-                        <input type="hidden" name="membershipId" value={member.id} />
-                        <Label htmlFor={roleFieldId} className="visually-hidden">
-                          Role for {member.user.name}
-                        </Label>
-                        <SettingsSelect
-                          id={roleFieldId}
-                          name="role"
-                          defaultValue={member.role}
-                          className="w-32"
-                        >
-                          {assignableRoles.map((role) => (
-                            <option key={role} value={role}>
-                              {ROLE_LABEL[role]}
-                            </option>
-                          ))}
-                        </SettingsSelect>
-                      </ActionForm>
-
-                      <ActionForm
-                        action={removeMember}
-                        className="flex items-center"
-                        aria-label={`Remove ${member.user.name}`}
-                      >
-                        <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-                        <input type="hidden" name="membershipId" value={member.id} />
-                        <button
-                          type="submit"
-                          title={`Remove ${member.user.name} from ${ctx.org.name}`}
-                          className="grid size-8 place-items-center rounded-lg text-tertiary transition-colors outline-focus-ring hover:bg-error-primary hover:text-error-primary focus-visible:outline-2 focus-visible:outline-offset-1"
-                        >
-                          <XClose aria-hidden="true" className="size-4" />
-                          <span className="visually-hidden">Remove {member.user.name}</span>
-                        </button>
-                      </ActionForm>
-                    </>
+                        {assignableRoles.map((role) => (
+                          <option key={role} value={role}>
+                            {ROLE_LABEL[role]}
+                          </option>
+                        ))}
+                      </SettingsSelect>
+                    </ActionForm>
                   ) : (
                     <Badge tone={targetIsOwner ? 'accent' : 'neutral'}>
                       {ROLE_LABEL[member.role]}
                     </Badge>
                   )}
 
-                  {lastOwner ? (
-                    <span
-                      className="text-xs whitespace-nowrap text-tertiary"
-                      title="An organization must always have at least one owner."
-                    >
-                      Last owner
-                    </span>
+                  {actionable ? (
+                    <RowMenu label={`More actions for ${member.user.name}`}>
+                      <MenuNote>
+                        Removing {member.user.name} ends their access to everything in{' '}
+                        {ctx.org.name} straight away. The issues and comments they wrote stay.
+                      </MenuNote>
+                      <ActionForm
+                        action={removeMember}
+                        className="flex flex-col gap-2"
+                        aria-label={`Remove ${member.user.name}`}
+                      >
+                        <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                        <input type="hidden" name="membershipId" value={member.id} />
+                        <button type="submit" className={MENU_DANGER_CLASS}>
+                          Remove from {ctx.org.name}
+                        </button>
+                      </ActionForm>
+                    </RowMenu>
                   ) : null}
                 </div>
               </SettingsRow>
             );
           })}
+
+          {/*
+           * Invitations, as rows of this table rather than a table of their own.
+           * An address that has been offered a seat is a seat: it belongs in the
+           * roster, one badge away from the people who have taken theirs.
+           * Admins only -- `invites` is not even read for anybody else.
+           */}
+          {invites.map((invite) => (
+            <SettingsRow key={invite.id} className="justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                <span
+                  aria-hidden="true"
+                  className="grid size-8 shrink-0 place-items-center rounded-full border border-dashed border-secondary text-tertiary"
+                >
+                  <Mail01 className="size-4" />
+                </span>
+                <div className="flex min-w-0 flex-col">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-sm font-medium text-primary">
+                      {invite.email}
+                    </span>
+                    <Badge tone="warning">pending</Badge>
+                  </div>
+                  <span className="text-xs text-tertiary">
+                    Expires {invite.expiresAt.toISOString().slice(0, 10)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Badge tone="neutral">{ROLE_LABEL[invite.role ?? Role.MEMBER]}</Badge>
+
+                <RowMenu label={`More actions for the invitation to ${invite.email}`}>
+                  <MenuNote>
+                    Nobody has accepted this yet. Resending starts the seven days again;
+                    revoking makes the link in the sent email stop working.
+                  </MenuNote>
+                  <ActionForm
+                    action={resendInvitation}
+                    className="flex flex-col gap-2"
+                    aria-label={`Resend the invitation to ${invite.email}`}
+                  >
+                    <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                    <input type="hidden" name="tokenId" value={invite.id} />
+                    <button type="submit" className={MENU_ITEM_CLASS}>
+                      Resend invitation
+                    </button>
+                  </ActionForm>
+                  <ActionForm
+                    action={revokeInvitation}
+                    className="flex flex-col gap-2"
+                    aria-label={`Revoke the invitation to ${invite.email}`}
+                  >
+                    <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                    <input type="hidden" name="tokenId" value={invite.id} />
+                    <button type="submit" className={MENU_DANGER_CLASS}>
+                      Revoke invitation
+                    </button>
+                  </ActionForm>
+                </RowMenu>
+              </div>
+            </SettingsRow>
+          ))}
 
           {canManage ? (
             <ActionForm
@@ -330,71 +429,6 @@ export default async function OrganizationSettingsPage({
           </Card.Description>
         ) : null}
       </Card>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Pending invitations                                                 */}
-      {/* ------------------------------------------------------------------ */}
-      {/*
-       * Admins only, and hidden entirely when there are none -- an empty card on
-       * every settings page would be pure furniture. These are addresses that
-       * have been offered access but do not yet correspond to any account, so
-       * they are not part of the member roster above.
-       */}
-      {canManage && invites.length > 0 ? (
-        <Card aria-labelledby="invites-heading">
-          <Card.Header>
-            <Card.Title id="invites-heading">Pending invitations</Card.Title>
-            <Card.Description className="text-xs">
-              Nobody has accepted these yet. They stop working on the date shown.
-            </Card.Description>
-          </Card.Header>
-
-          <div className="flex flex-col gap-2">
-            {invites.map((invite) => (
-              <SettingsRow key={invite.id} className="justify-between">
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-sm text-primary">{invite.email}</span>
-                  <span className="text-xs text-tertiary">
-                    {ROLE_LABEL[invite.role ?? Role.MEMBER]} &middot; expires{' '}
-                    {invite.expiresAt.toISOString().slice(0, 10)}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <ActionForm
-                    action={resendInvitation}
-                    className="flex items-center"
-                    aria-label={`Resend the invitation to ${invite.email}`}
-                  >
-                    <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-                    <input type="hidden" name="tokenId" value={invite.id} />
-                    <SubmitButton color="secondary" size="sm" pendingLabel="Sending...">
-                      Resend
-                    </SubmitButton>
-                  </ActionForm>
-
-                  <ActionForm
-                    action={revokeInvitation}
-                    className="flex items-center"
-                    aria-label={`Revoke the invitation to ${invite.email}`}
-                  >
-                    <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-                    <input type="hidden" name="tokenId" value={invite.id} />
-                    <button
-                      type="submit"
-                      title={`Revoke the invitation to ${invite.email}`}
-                      className="grid size-8 place-items-center rounded-lg text-tertiary transition-colors outline-focus-ring hover:bg-error-primary hover:text-error-primary focus-visible:outline-2 focus-visible:outline-offset-1"
-                    >
-                      <XClose aria-hidden="true" className="size-4" />
-                      <span className="visually-hidden">Revoke {invite.email}</span>
-                    </button>
-                  </ActionForm>
-                </div>
-              </SettingsRow>
-            ))}
-          </div>
-        </Card>
-      ) : null}
 
       {/* ------------------------------------------------------------------ */}
       {/* Rename                                                              */}
