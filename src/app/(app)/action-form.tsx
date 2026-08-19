@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useRef, type ReactNode } from 'react';
+import { useActionState, useEffect, useRef, type ChangeEvent, type ReactNode } from 'react';
 import type { ActionResult } from '@/lib/result';
 
 /**
@@ -40,19 +40,40 @@ type Props = {
   className?: string;
   /** Clear the fields and refocus the first one when the action returns `ok`. */
   resetOnSuccess?: boolean;
+  /**
+   * Submit on change instead of on a button: typing is debounced, picking from
+   * a select or flipping a switch is immediate. The form's own constraints are
+   * checked first, so half-typed input is simply not sent rather than raising a
+   * validation bubble under the cursor.
+   */
+  autosave?: boolean;
+  /**
+   * The line the autosaving forms end with -- "Saves automatically" and its
+   * dot. Present tense while idle, and it says so while a save is in flight.
+   */
+  saveHint?: string;
   'aria-label'?: string;
 };
+
+/** Types that a person types into, and so wants debounced. */
+const TYPED = new Set(['text', 'email', 'search', 'url', 'tel', 'password', 'number']);
 
 export function ActionForm({
   action,
   children,
   className,
   resetOnSuccess = false,
+  autosave = false,
+  saveHint,
   'aria-label': ariaLabel,
 }: Props) {
-  const [state, formAction] = useActionState<ActionResult | null, FormData>(action, null);
+  const [state, formAction, isPending] = useActionState<ActionResult | null, FormData>(
+    action,
+    null,
+  );
   const formRef = useRef<HTMLFormElement>(null);
   const submitted = useRef<Array<[string, string]> | null>(null);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /**
    * React 19 resets a `<form action={fn}>` as soon as the action settles, and it
@@ -100,6 +121,36 @@ export function ActionForm({
     first?.focus();
   }, [state, resetOnSuccess]);
 
+  /**
+   * One `change` listener on the form rather than a handler per control: the
+   * children are server-rendered and passed through untouched, so there is
+   * nowhere to hang a per-field callback even if it were worth the repetition.
+   * React's `onChange` is the native `input` event, so this fires per keystroke
+   * -- hence the debounce, and hence the immediate path for the controls that
+   * only ever change once per interaction.
+   */
+  const handleChange = (event: ChangeEvent<HTMLFormElement>) => {
+    if (!autosave) return;
+    const target = event.target;
+    const typed =
+      target instanceof HTMLTextAreaElement ||
+      (target instanceof HTMLInputElement && TYPED.has(target.type));
+
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = setTimeout(
+      () => {
+        const form = formRef.current;
+        if (!form || !form.checkValidity()) return;
+        form.requestSubmit();
+      },
+      typed ? 700 : 0,
+    );
+  };
+
+  useEffect(() => () => {
+    if (debounce.current) clearTimeout(debounce.current);
+  }, []);
+
   const fieldErrors =
     state && !state.ok && state.fieldErrors ? Object.entries(state.fieldErrors) : [];
 
@@ -107,10 +158,25 @@ export function ActionForm({
     <form
       ref={formRef}
       action={submitAction}
+      onChange={handleChange}
       className={className ?? 'flex flex-col gap-4'}
       aria-label={ariaLabel}
     >
       {children}
+
+      {saveHint ? (
+        <p className="flex items-center gap-2 text-xs text-tertiary" aria-live="polite">
+          <span
+            aria-hidden="true"
+            className={
+              isPending
+                ? 'size-1.5 rounded-full bg-warning-solid'
+                : 'size-1.5 rounded-full bg-success-solid'
+            }
+          />
+          {isPending ? 'Saving...' : saveHint}
+        </p>
+      ) : null}
 
       {state && !state.ok ? (
         <div className="flex flex-col gap-1.5">
@@ -132,7 +198,7 @@ export function ActionForm({
         </div>
       ) : null}
 
-      {state && state.ok && state.message ? (
+      {state && state.ok && state.message && !autosave ? (
         <p
           role="status"
           className="rounded-lg bg-success-primary px-3 py-2 text-sm text-success-primary"

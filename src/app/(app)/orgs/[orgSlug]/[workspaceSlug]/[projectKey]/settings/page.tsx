@@ -1,11 +1,24 @@
 import { ProjectAccess, Role, WorkflowStateType } from '@prisma/client';
 import { notFound } from 'next/navigation';
+import type { ReactNode } from 'react';
+import { Trash01 } from '@untitledui/icons';
 
 import { StateIcon } from '@/components/issue-row';
-import { Card, Field, Input, Separator, SubmitButton, Textarea } from '@/components/ui';
+import { Avatar, Badge, Card, Field, Input, SubmitButton, Textarea } from '@/components/ui';
+import { SettingsNav, type SettingsNavItem } from '@/components/settings-nav';
+import {
+  ColorSwatches,
+  DangerZone,
+  InfoNote,
+  NEW_ROW_CLASS,
+  SettingsRow,
+  SettingsSelect,
+  Switch,
+  initials,
+} from '@/components/settings-ui';
 import { atLeast, loadPage, requireProjectByKey } from '@/lib/authz';
 import { prisma } from '@/lib/db';
-import { COLOR_TOKENS, colorClass } from '@/lib/model';
+import { colorClass } from '@/lib/model';
 import { listStates } from '@/lib/states';
 import { cx } from '@/lib/utils/cx';
 
@@ -33,16 +46,21 @@ import {
  * ADMIN+ only. A MEMBER who reaches this URL gets a 404 rather than a 403 --
  * the same posture as every other authorization failure in the app, so nothing
  * here confirms what it is guarding.
+ *
+ * Six sections down one column, so the page carries its own side-nav and every
+ * section is an anchor. Everything that can be edited saves on change; the two
+ * things that cannot be undone (deleting a state, deleting the project) still
+ * take a deliberate press.
  */
 
 type Params = { orgSlug: string; workspaceSlug: string; projectKey: string };
 
 const STATE_TYPES: Array<{ value: WorkflowStateType; label: string; hint: string }> = [
-  { value: WorkflowStateType.BACKLOG, label: 'Backlog', hint: 'Not planned yet' },
-  { value: WorkflowStateType.UNSTARTED, label: 'Unstarted', hint: 'Planned, not begun' },
-  { value: WorkflowStateType.STARTED, label: 'Started', hint: 'In flight' },
-  { value: WorkflowStateType.COMPLETED, label: 'Completed', hint: 'Counts as done' },
-  { value: WorkflowStateType.CANCELED, label: 'Canceled', hint: 'Left the scope' },
+  { value: WorkflowStateType.BACKLOG, label: 'Backlog', hint: 'not planned yet' },
+  { value: WorkflowStateType.UNSTARTED, label: 'Unstarted', hint: 'planned' },
+  { value: WorkflowStateType.STARTED, label: 'Started', hint: 'in flight' },
+  { value: WorkflowStateType.COMPLETED, label: 'Completed', hint: 'counts as done' },
+  { value: WorkflowStateType.CANCELED, label: 'Canceled', hint: 'left the scope' },
 ];
 
 const WEEKDAYS = [
@@ -55,12 +73,32 @@ const WEEKDAYS = [
   { value: 7, label: 'Sunday' },
 ];
 
-const SELECT =
-  'h-8 rounded-lg border border-secondary bg-primary px-2 text-[0.8125rem] text-primary focus:outline-2 focus:outline-offset-1 focus:outline-focus-ring';
-const TEXT =
-  'h-8 rounded-lg border border-secondary bg-primary px-2.5 text-[0.8125rem] text-primary placeholder:text-tertiary focus:outline-2 focus:outline-offset-1 focus:outline-focus-ring';
+const NAV: SettingsNavItem[] = [
+  { id: 'general', label: 'General' },
+  { id: 'access', label: 'Access' },
+  { id: 'workflow', label: 'Workflow' },
+  { id: 'labels', label: 'Labels' },
+  { id: 'cycles', label: 'Cycles' },
+  { id: 'danger', label: 'Danger zone', tone: 'danger' },
+];
 
-/** One nudge along the board order. A no-op at the edges, so it is disabled there. */
+/** The compact text input the editable rows use. */
+const ROW_INPUT =
+  'h-9 min-w-0 rounded-lg border border-secondary bg-primary px-3 text-sm text-primary shadow-xs outline-focus-ring placeholder:text-tertiary focus-visible:outline-2 focus-visible:outline-offset-1';
+
+/** The small square icon button the rows use for destructive actions. */
+const ICON_BUTTON =
+  'grid size-8 shrink-0 place-items-center rounded-lg text-tertiary transition-colors outline-focus-ring hover:bg-error-primary hover:text-error-primary focus-visible:outline-2 focus-visible:outline-offset-1 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-tertiary';
+
+/**
+ * One nudge along the board order. A no-op at the edges, so it is disabled
+ * there.
+ *
+ * Still two arrows rather than the drag handle the design draws: half a dozen
+ * rows are reordered once, and this works on a phone, from the keyboard, and
+ * before hydration. Stacked tight in the row's leading slot, they read as the
+ * grip they replace.
+ */
 function MoveButton({
   projectId,
   stateId,
@@ -75,7 +113,7 @@ function MoveButton({
   name: string;
 }) {
   return (
-    <ActionForm action={moveState} aria-label={`Move ${name} ${direction}`}>
+    <ActionForm action={moveState} className="flex" aria-label={`Move ${name} ${direction}`}>
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="stateId" value={stateId} />
       <input type="hidden" name="direction" value={direction} />
@@ -83,7 +121,7 @@ function MoveButton({
         type="submit"
         disabled={disabled}
         aria-label={`Move ${name} ${direction}`}
-        className="grid size-4 place-items-center rounded text-tertiary transition-colors hover:text-primary disabled:opacity-25"
+        className="grid h-3.5 w-4 place-items-center rounded text-quaternary transition-colors outline-focus-ring hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-1 disabled:opacity-25 disabled:hover:text-quaternary"
       >
         <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3">
           <path
@@ -99,21 +137,27 @@ function MoveButton({
   );
 }
 
-function ColorSelect({ name, defaultValue }: { name: string; defaultValue: string }) {
+function Section({
+  id,
+  labelledBy,
+  children,
+}: {
+  id: string;
+  labelledBy: string;
+  children: ReactNode;
+}) {
   return (
-    <select name={name} defaultValue={defaultValue} aria-label="Colour" className={SELECT}>
-      {COLOR_TOKENS.map((token) => (
-        <option key={token} value={token}>
-          {token}
-        </option>
-      ))}
-    </select>
+    <section id={id} aria-labelledby={labelledBy} className="scroll-mt-20">
+      {children}
+    </section>
   );
 }
 
 export default async function ProjectSettingsPage({ params }: { params: Promise<Params> }) {
   const { orgSlug, workspaceSlug, projectKey } = await params;
-  const ctx = await loadPage(() => requireProjectByKey(orgSlug, workspaceSlug, projectKey.toUpperCase()));
+  const ctx = await loadPage(() =>
+    requireProjectByKey(orgSlug, workspaceSlug, projectKey.toUpperCase()),
+  );
 
   // A 404, not a 403: the same shape every other refusal in this app takes.
   if (!atLeast(ctx.role, Role.ADMIN)) notFound();
@@ -167,475 +211,502 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
   );
 
   return (
-    <div className="flex flex-col gap-8">
-      <h1 className="text-lg font-semibold text-primary">Project settings</h1>
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+      <header className="flex flex-col gap-1">
+        <h1 className="text-xl font-semibold text-primary">Project settings</h1>
+        <p className="flex flex-wrap items-center gap-2 text-sm text-tertiary">
+          {ctx.project.name} &middot; key
+          <Badge tone="neutral">{ctx.project.key}</Badge>
+        </p>
+      </header>
 
-      {/* ------------------------------------------------------------------ */}
-      <section className="flex flex-col gap-3" aria-labelledby="general-heading">
-        <h2 id="general-heading" className="text-sm font-medium text-primary">
-          General
-        </h2>
-        <Card className="gap-4 p-5">
-          <ActionForm action={updateProject} className="flex flex-col gap-4" aria-label="Update project">
-            <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-            <input type="hidden" name="projectKey" value={ctx.project.key} />
+      <div className="grid gap-6 lg:grid-cols-[9rem_minmax(0,1fr)] lg:gap-8">
+        <SettingsNav items={NAV} label="Project settings sections" />
 
-            <Field
-              htmlFor="project-name"
-              label="Name"
-              hint={`The key ${ctx.project.key} is part of every link and every issue id, and cannot be changed.`}
-              className="max-w-md"
-            >
-              <Input
-                id="project-name"
-                name="name"
-                required
-                maxLength={80}
-                autoComplete="off"
-                defaultValue={ctx.project.name}
-              />
-            </Field>
+        <div className="flex min-w-0 flex-col gap-6">
+          {/* -------------------------------------------------------------- */}
+          <Section id="general" labelledBy="general-heading">
+            <Card>
+              <Card.Title id="general-heading">General</Card.Title>
 
-            <Field htmlFor="project-description" label="Description" hint="Optional.">
-              <Textarea
-                id="project-description"
-                name="description"
-                rows={3}
-                maxLength={2000}
-                defaultValue={ctx.project.description ?? ''}
-              />
-            </Field>
+              <ActionForm
+                action={updateProject}
+                autosave
+                saveHint="Changes save automatically"
+                className="flex flex-col gap-4"
+                aria-label="Update project"
+              >
+                <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                <input type="hidden" name="projectKey" value={ctx.project.key} />
 
-            <div className="flex">
-              <SubmitButton color="secondary">Save</SubmitButton>
-            </div>
-          </ActionForm>
-        </Card>
-      </section>
+                <Field
+                  htmlFor="project-name"
+                  label="Project name"
+                  hint={`The key ${ctx.project.key} lives in every link and issue id and cannot change -- the name can.`}
+                >
+                  <Input
+                    id="project-name"
+                    name="name"
+                    required
+                    maxLength={80}
+                    autoComplete="off"
+                    defaultValue={ctx.project.name}
+                  />
+                </Field>
 
-      {/* ------------------------------------------------------------------ */}
-      <section className="flex flex-col gap-3" aria-labelledby="access-heading">
-        <div className="flex flex-col gap-1">
-          <h2 id="access-heading" className="text-sm font-medium text-primary">
-            Access
-          </h2>
-          <p className="max-w-prose text-xs text-tertiary">
-            A <strong>private</strong> project is invisible to everyone who is not on it: it leaves
-            their sidebar, their search, and every list in the organization. What people may DO here
-            is still their organization role &mdash; this decides only who can see it at all.
-          </p>
-        </div>
+                <Field
+                  htmlFor="project-description"
+                  label={
+                    <>
+                      Description <span className="text-tertiary">(optional)</span>
+                    </>
+                  }
+                >
+                  <Textarea
+                    id="project-description"
+                    name="description"
+                    rows={3}
+                    maxLength={2000}
+                    placeholder="What is this project for?"
+                    defaultValue={ctx.project.description ?? ''}
+                  />
+                </Field>
+              </ActionForm>
+            </Card>
+          </Section>
 
-        <Card className="gap-4 p-5">
-          <ActionForm
-            action={setProjectAccess}
-            className="flex flex-col gap-3"
-            aria-label="Project access"
-          >
-            <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-            <input type="hidden" name="projectKey" value={ctx.project.key} />
-            <input
-              type="hidden"
-              name="access"
-              value={isPrivate ? ProjectAccess.OPEN : ProjectAccess.PRIVATE}
-            />
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-[0.8125rem] text-primary">
-                {isPrivate
-                  ? `${ctx.project.key} is private to the people below.`
-                  : `${ctx.project.key} is open to everyone in ${ctx.org.name}.`}
-              </span>
-              <SubmitButton color="secondary">
-                {isPrivate ? 'Open to the organization' : 'Make private'}
-              </SubmitButton>
-            </div>
-          </ActionForm>
+          {/* -------------------------------------------------------------- */}
+          <Section id="access" labelledBy="access-heading">
+            <Card>
+              <Card.Header>
+                <Card.Title id="access-heading">Access</Card.Title>
+                <Card.Description>
+                  Visibility decides who can <em>see</em> the project. What people can do here is
+                  still set by their organization role.
+                </Card.Description>
+              </Card.Header>
 
-          <Separator />
+              <ActionForm
+                action={setProjectAccess}
+                autosave
+                className="flex flex-col"
+                aria-label="Project access"
+              >
+                <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                <input type="hidden" name="projectKey" value={ctx.project.key} />
 
-          <ul className="flex flex-col gap-2">
-            {named.map((member) => (
-              <li key={member.user.id} className="flex flex-wrap items-center gap-2">
-                <span className="text-[0.8125rem] text-primary">{member.user.name}</span>
-                <span className="text-[0.6875rem] text-tertiary">{member.user.email}</span>
-                {member.role === Role.OWNER && !onProject.has(member.user.id) ? (
-                  <span className="text-[0.6875rem] text-tertiary">Owner &mdash; always</span>
-                ) : (
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-secondary bg-secondary_subtle px-4 py-3">
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className="text-sm font-semibold text-primary">
+                      {ctx.project.key} is open to everyone in {ctx.org.name}
+                    </span>
+                    <span id="access-hint" className="text-xs text-tertiary">
+                      {isPrivate
+                        ? 'Only the people below can find and view it.'
+                        : 'Anyone in the organization can find and view it.'}
+                    </span>
+                  </div>
+                  {/*
+                    * The switch submits the enum itself, and the hidden input
+                    * carries the other value. Order matters: `FormData.get`
+                    * returns the FIRST entry, so an unchecked box falls through
+                    * to PRIVATE without the action needing to know a checkbox
+                    * was involved.
+                    */}
+                  <Switch
+                    name="access"
+                    value={ProjectAccess.OPEN}
+                    defaultChecked={!isPrivate}
+                    aria-label={`Open ${ctx.project.key} to everyone in ${ctx.org.name}`}
+                    aria-describedby="access-hint"
+                  />
+                  <input type="hidden" name="access" value={ProjectAccess.PRIVATE} />
+                </div>
+              </ActionForm>
+
+              <div className="flex flex-col gap-2">
+                <h3 className="text-sm font-medium text-primary">Members</h3>
+
+                {named.map((member) => (
+                  <SettingsRow key={member.user.id} className="justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <Avatar size="sm" initials={initials(member.user.name)} />
+                      <div className="flex min-w-0 flex-col">
+                        <span className="truncate text-sm text-primary">{member.user.name}</span>
+                        <span className="truncate text-xs text-tertiary">{member.user.email}</span>
+                      </div>
+                    </div>
+
+                    {member.role === Role.OWNER && !onProject.has(member.user.id) ? (
+                      <Badge tone="accent">Owner</Badge>
+                    ) : (
+                      <ActionForm
+                        action={removeProjectMember}
+                        className="flex"
+                        aria-label={`Remove ${member.user.name} from this project`}
+                      >
+                        <input type="hidden" name="orgSlug" value={ctx.org.slug} />
+                        <input type="hidden" name="projectKey" value={ctx.project.key} />
+                        <input type="hidden" name="userId" value={member.user.id} />
+                        <SubmitButton color="secondary" size="sm" pendingLabel="Removing...">
+                          Remove
+                        </SubmitButton>
+                      </ActionForm>
+                    )}
+                  </SettingsRow>
+                ))}
+
+                {addable.length > 0 ? (
                   <ActionForm
-                    action={removeProjectMember}
-                    aria-label={`Remove ${member.user.name} from this project`}
+                    action={addProjectMember}
+                    className={NEW_ROW_CLASS}
+                    aria-label="Add someone to this project"
                   >
                     <input type="hidden" name="orgSlug" value={ctx.org.slug} />
                     <input type="hidden" name="projectKey" value={ctx.project.key} />
-                    <input type="hidden" name="userId" value={member.user.id} />
-                    <button
-                      type="submit"
-                      className="h-7 rounded-lg px-2 text-[0.6875rem] text-tertiary transition-colors hover:text-error-primary"
-                    >
-                      Remove
-                    </button>
-                  </ActionForm>
-                )}
-              </li>
-            ))}
-          </ul>
-
-          {addable.length > 0 ? (
-            <ActionForm
-              action={addProjectMember}
-              className="flex flex-wrap items-center gap-2"
-              aria-label="Add someone to this project"
-            >
-              <input type="hidden" name="orgSlug" value={ctx.org.slug} />
-              <input type="hidden" name="projectKey" value={ctx.project.key} />
-              <select name="userId" aria-label="Person" className={SELECT}>
-                {addable.map((member) => (
-                  <option key={member.user.id} value={member.user.id}>
-                    {member.user.name} &mdash; {member.user.email}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="submit"
-                className="h-8 rounded-lg bg-brand-solid px-2.5 text-[0.8125rem] font-medium text-white transition-opacity hover:opacity-90"
-              >
-                Add
-              </button>
-            </ActionForm>
-          ) : (
-            <p className="text-xs text-tertiary">Everyone in this organization is already on it.</p>
-          )}
-
-          {isPrivate ? null : (
-            <p className="text-xs text-tertiary">
-              The list is kept while the project is open, so closing it again restores exactly these
-              people.
-            </p>
-          )}
-        </Card>
-      </section>
-
-      {/* ------------------------------------------------------------------ */}
-      <section className="flex flex-col gap-3" aria-labelledby="states-heading">
-        <div className="flex flex-col gap-1">
-          <h2 id="states-heading" className="text-sm font-medium text-primary">
-            Workflow states
-          </h2>
-          <p className="max-w-prose text-xs text-tertiary">
-            The <strong>type</strong> is what the app reasons about, not the name: it decides which
-            tab an issue falls under, whether it counts as done for cycle and sub-issue progress,
-            and whether moving into it stamps a start or completion time. Rename freely; change the
-            type deliberately.
-          </p>
-        </div>
-
-        <Card className="gap-3 p-5">
-          <p className="text-xs text-tertiary">
-            The order here is the BOARD order, left to right. The issues list groups by type
-            instead, leading with whatever is in flight.
-          </p>
-
-          <ul className="flex flex-col gap-2">
-            {states.map((state, index) => {
-              const held = heldByState.get(state.id) ?? 0;
-              return (
-                <li key={state.id} className="flex flex-col gap-2 border-b border-secondary pb-2 last:border-b-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {/* Two buttons rather than drag-and-drop: half a dozen rows
-                        reordered once, and this works on a phone, from the
-                        keyboard, and before hydration. */}
-                    <div className="flex flex-col">
-                      <MoveButton
-                        projectId={ctx.project.id}
-                        stateId={state.id}
-                        direction="up"
-                        disabled={index === 0}
-                        name={state.name}
-                      />
-                      <MoveButton
-                        projectId={ctx.project.id}
-                        stateId={state.id}
-                        direction="down"
-                        disabled={index === states.length - 1}
-                        name={state.name}
-                      />
-                    </div>
-
-                  <ActionForm
-                    action={updateState}
-                    className="flex flex-wrap items-center gap-2"
-                    aria-label={`Update ${state.name}`}
-                  >
-                    <input type="hidden" name="projectId" value={ctx.project.id} />
-                    <input type="hidden" name="stateId" value={state.id} />
-                    <StateIcon type={state.type} color={state.color} />
-                    <input
-                      name="name"
-                      required
-                      maxLength={40}
-                      defaultValue={state.name}
-                      aria-label="State name"
-                      className={cx(TEXT, 'w-40')}
-                    />
-                    <select name="type" defaultValue={state.type} aria-label="Type" className={SELECT}>
-                      {STATE_TYPES.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label} — {option.hint}
+                    <SettingsSelect name="userId" aria-label="Person" className="min-w-0 flex-1">
+                      {addable.map((member) => (
+                        <option key={member.user.id} value={member.user.id}>
+                          {member.user.name} &mdash; {member.user.email}
                         </option>
                       ))}
-                    </select>
-                    <ColorSelect name="color" defaultValue={state.color} />
-                    <span className="text-[0.6875rem] text-tertiary tabular-nums">
-                      {held} {held === 1 ? 'issue' : 'issues'}
-                    </span>
-                    <button
-                      type="submit"
-                      className="h-8 rounded-lg border border-secondary px-2.5 text-[0.8125rem] text-primary transition-colors hover:bg-secondary"
-                    >
-                      Save
-                    </button>
+                    </SettingsSelect>
+                    <SubmitButton pendingLabel="Adding...">Add</SubmitButton>
                   </ActionForm>
-                  </div>
+                ) : (
+                  <InfoNote>
+                    Everyone in this organization already has access, so there is no one to add.
+                  </InfoNote>
+                )}
+              </div>
 
-                  {states.length > 1 ? (
-                    <ActionForm
-                      action={deleteState}
-                      className="flex flex-wrap items-center gap-2"
-                      aria-label={`Delete ${state.name}`}
-                    >
-                      <input type="hidden" name="projectId" value={ctx.project.id} />
-                      <input type="hidden" name="stateId" value={state.id} />
-                      {held > 0 ? (
-                        <>
-                          <span className="text-[0.6875rem] text-tertiary">Move its issues to</span>
-                          <select name="reassignToId" aria-label="Move issues to" className={SELECT}>
-                            {states
-                              .filter((candidate) => candidate.id !== state.id)
-                              .map((candidate) => (
-                                <option key={candidate.id} value={candidate.id}>
-                                  {candidate.name}
-                                </option>
-                              ))}
-                          </select>
-                        </>
-                      ) : null}
-                      <button
-                        type="submit"
-                        className="h-7 rounded-lg px-2 text-[0.6875rem] text-tertiary transition-colors hover:text-error-primary"
+              {isPrivate ? null : (
+                <Card.Description className="text-xs">
+                  The list is kept while the project is open, so making it private again restores
+                  exactly these people.
+                </Card.Description>
+              )}
+            </Card>
+          </Section>
+
+          {/* -------------------------------------------------------------- */}
+          <Section id="workflow" labelledBy="workflow-heading">
+            <Card>
+              <Card.Header>
+                <Card.Title id="workflow-heading">Workflow states</Card.Title>
+                <Card.Description>
+                  The <strong className="font-semibold text-secondary">type</strong> drives
+                  behaviour &mdash; which tab an issue lands on and when it counts as done. Rename
+                  freely; use the arrows to set the board order.
+                </Card.Description>
+              </Card.Header>
+
+              <div className="flex flex-col gap-2">
+                {states.map((state, index) => {
+                  const held = heldByState.get(state.id) ?? 0;
+                  return (
+                    <SettingsRow key={state.id}>
+                      <div className="flex flex-col">
+                        <MoveButton
+                          projectId={ctx.project.id}
+                          stateId={state.id}
+                          direction="up"
+                          disabled={index === 0}
+                          name={state.name}
+                        />
+                        <MoveButton
+                          projectId={ctx.project.id}
+                          stateId={state.id}
+                          direction="down"
+                          disabled={index === states.length - 1}
+                          name={state.name}
+                        />
+                      </div>
+
+                      <ActionForm
+                        action={updateState}
+                        autosave
+                        className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+                        aria-label={`Update ${state.name}`}
                       >
-                        Delete state
-                      </button>
-                    </ActionForm>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
+                        <input type="hidden" name="projectId" value={ctx.project.id} />
+                        <input type="hidden" name="stateId" value={state.id} />
+                        <StateIcon type={state.type} color={state.color} />
+                        <input
+                          name="name"
+                          required
+                          maxLength={40}
+                          defaultValue={state.name}
+                          aria-label="State name"
+                          className={cx(ROW_INPUT, 'w-40 flex-1')}
+                        />
+                        <SettingsSelect
+                          name="type"
+                          defaultValue={state.type}
+                          aria-label="Type"
+                          className="w-52"
+                        >
+                          {STATE_TYPES.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label} &mdash; {option.hint}
+                            </option>
+                          ))}
+                        </SettingsSelect>
+                        <ColorSwatches name="color" defaultValue={state.color} />
+                        <span className="w-16 shrink-0 text-end text-xs text-tertiary tabular-nums">
+                          {held > 0 ? `${held} ${held === 1 ? 'issue' : 'issues'}` : null}
+                        </span>
+                      </ActionForm>
 
-          <Separator />
+                      {states.length > 1 ? (
+                        <ActionForm
+                          action={deleteState}
+                          className="flex items-center gap-2"
+                          aria-label={`Delete ${state.name}`}
+                        >
+                          <input type="hidden" name="projectId" value={ctx.project.id} />
+                          <input type="hidden" name="stateId" value={state.id} />
+                          {/*
+                            * A state that holds issues cannot simply vanish, so
+                            * the row asks where they go before it offers the
+                            * bin. Deliberately NOT an autosaving form.
+                            */}
+                          {held > 0 ? (
+                            <SettingsSelect
+                              name="reassignToId"
+                              aria-label={`Move the issues in ${state.name} to`}
+                              className="w-36"
+                            >
+                              {states
+                                .filter((candidate) => candidate.id !== state.id)
+                                .map((candidate) => (
+                                  <option key={candidate.id} value={candidate.id}>
+                                    Move to {candidate.name}
+                                  </option>
+                                ))}
+                            </SettingsSelect>
+                          ) : null}
+                          <button
+                            type="submit"
+                            title={`Delete ${state.name}`}
+                            className={ICON_BUTTON}
+                          >
+                            <Trash01 aria-hidden="true" className="size-4" />
+                            <span className="visually-hidden">Delete {state.name}</span>
+                          </button>
+                        </ActionForm>
+                      ) : (
+                        <span className="size-8 shrink-0" aria-hidden="true" />
+                      )}
+                    </SettingsRow>
+                  );
+                })}
 
-          <ActionForm
-            action={createState}
-            className="flex flex-wrap items-center gap-2"
-            aria-label="Add a state"
-            resetOnSuccess
-          >
-            <input type="hidden" name="projectId" value={ctx.project.id} />
-            <input
-              name="name"
-              required
-              maxLength={40}
-              placeholder="New state"
-              aria-label="State name"
-              className={cx(TEXT, 'w-40')}
-            />
-            <select name="type" defaultValue={WorkflowStateType.STARTED} aria-label="Type" className={SELECT}>
-              {STATE_TYPES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label} — {option.hint}
-                </option>
-              ))}
-            </select>
-            <ColorSelect name="color" defaultValue="gray" />
-            <button
-              type="submit"
-              className="h-8 rounded-lg bg-brand-solid px-2.5 text-[0.8125rem] font-medium text-white transition-opacity hover:opacity-90"
-            >
-              Add
-            </button>
-          </ActionForm>
-        </Card>
-      </section>
-
-      {/* ------------------------------------------------------------------ */}
-      <section className="flex flex-col gap-3" aria-labelledby="labels-heading">
-        <h2 id="labels-heading" className="text-sm font-medium text-primary">
-          Labels
-        </h2>
-        <Card className="gap-3 p-5">
-          {labels.length === 0 ? (
-            <p className="text-sm text-tertiary">No labels yet.</p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {labels.map((label) => (
-                <li key={label.id} className="flex flex-wrap items-center gap-2">
-                  <ActionForm
-                    action={updateLabel}
-                    className="flex flex-wrap items-center gap-2"
-                    aria-label={`Update ${label.name}`}
+                <ActionForm
+                  action={createState}
+                  className={NEW_ROW_CLASS}
+                  aria-label="Add a state"
+                  resetOnSuccess
+                >
+                  <input type="hidden" name="projectId" value={ctx.project.id} />
+                  <input
+                    name="name"
+                    required
+                    maxLength={40}
+                    placeholder="New state name"
+                    aria-label="State name"
+                    className={cx(ROW_INPUT, 'w-40 flex-1')}
+                  />
+                  <SettingsSelect
+                    name="type"
+                    defaultValue={WorkflowStateType.STARTED}
+                    aria-label="Type"
+                    className="w-52"
                   >
-                    <input type="hidden" name="projectId" value={ctx.project.id} />
-                    <input type="hidden" name="labelId" value={label.id} />
-                    <span
-                      aria-hidden="true"
-                      className={cx('size-2.5 rounded-full', colorClass(label.color).dot)}
-                    />
-                    <input
-                      name="name"
-                      required
-                      maxLength={40}
-                      defaultValue={label.name}
-                      aria-label="Label name"
-                      className={cx(TEXT, 'w-40')}
-                    />
-                    <ColorSelect name="color" defaultValue={label.color} />
-                    <span className="text-[0.6875rem] text-tertiary tabular-nums">
-                      {label._count.tickets}
-                    </span>
-                    <button
-                      type="submit"
-                      className="h-8 rounded-lg border border-secondary px-2.5 text-[0.8125rem] text-primary transition-colors hover:bg-secondary"
+                    {STATE_TYPES.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label} &mdash; {option.hint}
+                      </option>
+                    ))}
+                  </SettingsSelect>
+                  <ColorSwatches name="color" defaultValue="gray" />
+                  <SubmitButton pendingLabel="Adding...">Add state</SubmitButton>
+                </ActionForm>
+              </div>
+            </Card>
+          </Section>
+
+          {/* -------------------------------------------------------------- */}
+          <Section id="labels" labelledBy="labels-heading">
+            <Card>
+              <Card.Header>
+                <Card.Title id="labels-heading">Labels</Card.Title>
+                <Card.Description>Tag issues across this project.</Card.Description>
+              </Card.Header>
+
+              <div className="flex flex-col gap-2">
+                {labels.length === 0 ? (
+                  <p className="text-sm text-tertiary italic">
+                    No labels yet &mdash; add the first one below.
+                  </p>
+                ) : (
+                  labels.map((label) => (
+                    <SettingsRow key={label.id}>
+                      <ActionForm
+                        action={updateLabel}
+                        autosave
+                        className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+                        aria-label={`Update ${label.name}`}
+                      >
+                        <input type="hidden" name="projectId" value={ctx.project.id} />
+                        <input type="hidden" name="labelId" value={label.id} />
+                        <span
+                          aria-hidden="true"
+                          className={cx('size-2.5 shrink-0 rounded-full', colorClass(label.color).dot)}
+                        />
+                        <input
+                          name="name"
+                          required
+                          maxLength={40}
+                          defaultValue={label.name}
+                          aria-label="Label name"
+                          className={cx(ROW_INPUT, 'w-40 flex-1')}
+                        />
+                        <ColorSwatches name="color" defaultValue={label.color} />
+                        <span className="w-16 shrink-0 text-end text-xs text-tertiary tabular-nums">
+                          {label._count.tickets > 0
+                            ? `${label._count.tickets} ${label._count.tickets === 1 ? 'issue' : 'issues'}`
+                            : null}
+                        </span>
+                      </ActionForm>
+
+                      <ActionForm
+                        action={deleteLabel}
+                        className="flex"
+                        aria-label={`Delete ${label.name}`}
+                      >
+                        <input type="hidden" name="projectId" value={ctx.project.id} />
+                        <input type="hidden" name="labelId" value={label.id} />
+                        <button type="submit" title={`Delete ${label.name}`} className={ICON_BUTTON}>
+                          <Trash01 aria-hidden="true" className="size-4" />
+                          <span className="visually-hidden">Delete {label.name}</span>
+                        </button>
+                      </ActionForm>
+                    </SettingsRow>
+                  ))
+                )}
+
+                <ActionForm
+                  action={createLabel}
+                  className={NEW_ROW_CLASS}
+                  aria-label="Add a label"
+                  resetOnSuccess
+                >
+                  <input type="hidden" name="projectId" value={ctx.project.id} />
+                  <input
+                    name="name"
+                    required
+                    maxLength={40}
+                    placeholder="New label name"
+                    aria-label="Label name"
+                    className={cx(ROW_INPUT, 'w-40 flex-1')}
+                  />
+                  <ColorSwatches name="color" defaultValue="gray" />
+                  <SubmitButton pendingLabel="Adding...">Add label</SubmitButton>
+                </ActionForm>
+              </div>
+            </Card>
+          </Section>
+
+          {/* -------------------------------------------------------------- */}
+          <Section id="cycles" labelledBy="cycles-heading">
+            <Card>
+              <ActionForm
+                action={updateCycleConfig}
+                autosave
+                className="flex flex-col gap-4"
+                aria-label="Cycle settings"
+              >
+                <input type="hidden" name="projectId" value={ctx.project.id} />
+
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <Card.Title id="cycles-heading">Cycles</Card.Title>
+                    <Card.Description id="cycles-hint">
+                      Time-boxed sprints, generated from this cadence. Finished cycles keep their
+                      dates.
+                    </Card.Description>
+                  </div>
+                  <Switch
+                    name="cyclesEnabled"
+                    defaultChecked={cadence.cyclesEnabled}
+                    aria-label="Use cycles in this project"
+                    aria-describedby="cycles-hint"
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-4">
+                  <Field htmlFor="cycle-weeks" label="Length">
+                    <SettingsSelect
+                      id="cycle-weeks"
+                      name="cycleWeeks"
+                      defaultValue={cadence.cycleWeeks}
+                      className="w-36"
                     >
-                      Save
-                    </button>
-                  </ActionForm>
+                      {[1, 2, 3, 4, 6, 8].map((weeks) => (
+                        <option key={weeks} value={weeks}>
+                          {weeks} {weeks === 1 ? 'week' : 'weeks'}
+                        </option>
+                      ))}
+                    </SettingsSelect>
+                  </Field>
 
-                  <ActionForm action={deleteLabel} aria-label={`Delete ${label.name}`}>
-                    <input type="hidden" name="projectId" value={ctx.project.id} />
-                    <input type="hidden" name="labelId" value={label.id} />
-                    <button
-                      type="submit"
-                      className="h-7 rounded-lg px-2 text-[0.6875rem] text-tertiary transition-colors hover:text-error-primary"
+                  <Field htmlFor="cycle-start" label="Starts on">
+                    <SettingsSelect
+                      id="cycle-start"
+                      name="cycleStartDay"
+                      defaultValue={cadence.cycleStartDay}
+                      className="w-36"
                     >
-                      Delete
-                    </button>
-                  </ActionForm>
-                </li>
-              ))}
-            </ul>
-          )}
+                      {WEEKDAYS.map((day) => (
+                        <option key={day.value} value={day.value}>
+                          {day.label}
+                        </option>
+                      ))}
+                    </SettingsSelect>
+                  </Field>
 
-          <Separator />
+                  <Field htmlFor="cycle-upcoming" label="Upcoming cycles kept">
+                    <SettingsSelect
+                      id="cycle-upcoming"
+                      name="upcomingCycles"
+                      defaultValue={cadence.upcomingCycles}
+                      className="w-36"
+                    >
+                      {[1, 2, 3, 4, 6, 8, 12].map((count) => (
+                        <option key={count} value={count}>
+                          {count}
+                        </option>
+                      ))}
+                    </SettingsSelect>
+                  </Field>
+                </div>
+              </ActionForm>
+            </Card>
+          </Section>
 
-          <ActionForm
-            action={createLabel}
-            className="flex flex-wrap items-center gap-2"
-            aria-label="Add a label"
-            resetOnSuccess
-          >
-            <input type="hidden" name="projectId" value={ctx.project.id} />
-            <input
-              name="name"
-              required
-              maxLength={40}
-              placeholder="New label"
-              aria-label="Label name"
-              className={cx(TEXT, 'w-40')}
-            />
-            <ColorSelect name="color" defaultValue="gray" />
-            <button
-              type="submit"
-              className="h-8 rounded-lg bg-brand-solid px-2.5 text-[0.8125rem] font-medium text-white transition-opacity hover:opacity-90"
+          {/* -------------------------------------------------------------- */}
+          <Section id="danger" labelledBy="danger-heading">
+            <DangerZone
+              title="Danger zone"
+              description={`Deleting removes every issue, cycle, and label in this project for everyone. This cannot be undone.`}
+              buttonLabel="Delete this project..."
             >
-              Add
-            </button>
-          </ActionForm>
-        </Card>
-      </section>
-
-      {/* ------------------------------------------------------------------ */}
-      <section className="flex flex-col gap-3" aria-labelledby="cycles-heading">
-        <div className="flex flex-col gap-1">
-          <h2 id="cycles-heading" className="text-sm font-medium text-primary">
-            Cycles
-          </h2>
-          <p className="max-w-prose text-xs text-tertiary">
-            Cycles are generated from this cadence when somebody opens the cycles pages — there is no
-            scheduler to configure. Changing the cadence leaves existing cycles alone, so a finished
-            sprint&rsquo;s dates stay a historical fact.
-          </p>
-        </div>
-
-        <Card className="gap-4 p-5">
-          <ActionForm action={updateCycleConfig} className="flex flex-col gap-4" aria-label="Cycle settings">
-            <input type="hidden" name="projectId" value={ctx.project.id} />
-
-            <label className="flex w-fit cursor-pointer items-center gap-2 text-[0.8125rem] text-primary">
-              <input
-                type="checkbox"
-                name="cyclesEnabled"
-                defaultChecked={cadence.cyclesEnabled}
-                className="size-4 accent-brand-600"
-              />
-              Use cycles in this project
-            </label>
-
-            <div className="flex flex-wrap items-end gap-4">
-              <label className="flex flex-col gap-1.5 text-xs text-tertiary">
-                Length
-                <select name="cycleWeeks" defaultValue={cadence.cycleWeeks} className={SELECT}>
-                  {[1, 2, 3, 4, 6, 8].map((weeks) => (
-                    <option key={weeks} value={weeks}>
-                      {weeks} {weeks === 1 ? 'week' : 'weeks'}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="flex flex-col gap-1.5 text-xs text-tertiary">
-                Starts on
-                <select name="cycleStartDay" defaultValue={cadence.cycleStartDay} className={SELECT}>
-                  {WEEKDAYS.map((day) => (
-                    <option key={day.value} value={day.value}>
-                      {day.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="flex flex-col gap-1.5 text-xs text-tertiary">
-                Upcoming cycles kept
-                <select name="upcomingCycles" defaultValue={cadence.upcomingCycles} className={SELECT}>
-                  {[1, 2, 3, 4, 6, 8, 12].map((count) => (
-                    <option key={count} value={count}>
-                      {count}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <SubmitButton color="secondary">Save cycles</SubmitButton>
-            </div>
-          </ActionForm>
-        </Card>
-      </section>
-
-      {/* ------------------------------------------------------------------ */}
-      <section className="flex flex-col gap-3" aria-labelledby="danger-heading">
-        <h2 id="danger-heading" className="text-sm font-medium text-error-primary">
-          Danger zone
-        </h2>
-        <Card className="gap-0 p-0 ring-error_subtle">
-          <details className="group">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-5 py-4 text-sm font-medium text-error-primary">
-              Delete this project
-            </summary>
-            <div className="flex flex-col gap-4 px-5 pb-5">
-              <p className="max-w-prose text-sm text-tertiary">
-                Every board, workflow state, cycle, label, issue and comment in {ctx.project.key} is
-                deleted permanently. This cannot be undone.
-              </p>
-              <ActionForm action={deleteProject} className="flex flex-col gap-3" aria-label="Delete project">
+              <ActionForm
+                action={deleteProject}
+                className="flex flex-col gap-4"
+                aria-label="Delete project"
+              >
                 <input type="hidden" name="orgSlug" value={ctx.org.slug} />
                 <input type="hidden" name="projectKey" value={ctx.project.key} />
                 <Field
@@ -658,10 +729,10 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
                   </SubmitButton>
                 </div>
               </ActionForm>
-            </div>
-          </details>
-        </Card>
-      </section>
+            </DangerZone>
+          </Section>
+        </div>
+      </div>
     </div>
   );
 }

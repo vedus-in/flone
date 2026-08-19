@@ -1069,4 +1069,39 @@ ok('the three ways to see a project are all still there', () => {
   assert.match(body, /role: Role\.OWNER/);
 });
 
+/* -------------------------------------------------------------------------- */
+/* Settings switches                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The project access switch is a checkbox that submits the enum itself, paired
+ * with a hidden input carrying the opposite value. It only works because
+ * `FormData.get` returns the FIRST entry under a name, so the checkbox must
+ * come first in the markup: unchecked, it submits nothing at all and the hidden
+ * PRIVATE falls through.
+ *
+ * Reversed, the switch reads the right way round and does the exact opposite --
+ * flipping it "on" would make the project private, and there is no type, no
+ * failing page and no failing query to notice. Hence both halves below: the
+ * platform semantics the trick rests on, and the order it needs on the page.
+ */
+const PROJECT_SETTINGS =
+  'src/app/(app)/orgs/[orgSlug]/[workspaceSlug]/[projectKey]/settings/page.tsx';
+
+ok('FormData.get still returns the first entry under a name', () => {
+  const form = new FormData();
+  form.append('access', 'OPEN');
+  form.append('access', 'PRIVATE');
+  assert.equal(form.get('access'), 'OPEN');
+});
+
+ok('the access switch is submitted before the hidden fallback', () => {
+  const source = readFileSync(PROJECT_SETTINGS, 'utf8');
+  const toggle = source.indexOf('value={ProjectAccess.OPEN}');
+  const fallback = source.indexOf('value={ProjectAccess.PRIVATE}');
+  assert.ok(toggle > -1, 'the access switch must still submit ProjectAccess.OPEN');
+  assert.ok(fallback > -1, 'the access form must still carry a PRIVATE fallback');
+  assert.ok(toggle < fallback, 'the switch must come BEFORE the hidden PRIVATE input');
+});
+
 console.log(`\nAll good — ${checks} checks.\n`);
