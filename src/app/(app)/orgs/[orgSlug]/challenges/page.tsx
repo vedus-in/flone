@@ -10,7 +10,7 @@ import { PageHeader } from '@/components/ui';
 import { PriorityIcon } from '@/components/issue-row';
 
 import { AddChallengeButton } from './add-button';
-import { ChallengePicker, type PickerFilters } from './challenge-picker';
+import { BoardProjectFilter, ChallengePicker, type PickerFilters } from './challenge-picker';
 import { ChallengeBoard, type ChallengeBoardData, type ChallengeCard } from './challenge-board';
 
 /**
@@ -226,17 +226,8 @@ export default async function ChallengesPage({
       <PageHeader
         title="Daily Challenges"
         description="Issues you have picked to work on today, from any project in this organization. Moving a card changes the issue's real status everywhere; the Completed column only clears it from here."
+        actions={<BoardProjectFilter projects={projects} />}
       />
-
-      {filters.project ? (
-        <p className="-mt-2 text-sm text-tertiary">
-          Showing only{' '}
-          <span className="font-medium text-primary">
-            {projects.find((p) => p.id === filters.project)?.name ?? 'a project you can no longer see'}
-          </span>
-          {' '}&mdash; the project filter below scopes the whole page.
-        </p>
-      ) : null}
 
       <ChallengeBoard data={board} />
 

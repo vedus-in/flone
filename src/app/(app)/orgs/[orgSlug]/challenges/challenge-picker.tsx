@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/lib/model';
 import { cx } from '@/lib/utils/cx';
@@ -38,6 +38,40 @@ const DEBOUNCE_MS = 250;
 
 const CONTROL =
   'h-9 rounded-lg border border-secondary bg-primary px-2.5 text-sm text-primary transition-colors hover:border-tertiary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring';
+
+/**
+ * The board's own project filter, up in the page header. It writes the same
+ * `?project=` the picker's select does -- the server scopes the whole page on
+ * it, so the two controls can never disagree -- and edits the LIVE URL rather
+ * than a filter snapshot, so it preserves whatever search the picker holds.
+ */
+export function BoardProjectFilter({ projects }: { projects: PickerProject[] }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const search = useSearchParams();
+
+  return (
+    <select
+      aria-label="Filter board by project"
+      value={search.get('project') ?? ''}
+      onChange={(event) => {
+        const params = new URLSearchParams(search);
+        if (event.target.value) params.set('project', event.target.value);
+        else params.delete('project');
+        const query = params.toString();
+        router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      }}
+      className={CONTROL}
+    >
+      <option value="">All projects</option>
+      {projects.map((project) => (
+        <option key={project.id} value={project.id}>
+          {project.name} ({project.key})
+        </option>
+      ))}
+    </select>
+  );
+}
 
 /** Whole-record equality over the five fields. There are no others. */
 function sameFilters(a: PickerFilters, b: PickerFilters): boolean {
