@@ -103,7 +103,14 @@ export default async function ChallengesPage({
       // A pick survives on the board only while the project is still visible.
       // Closing a project therefore takes its cards off the daily boards of
       // everyone who is not on it, without a sweep and without a stale row.
-      ticket: { project: visibleProject(ctx.user.id, { organizationId: ctx.org.id }) },
+      // The project filter scopes the BOARD too, not just the picker below:
+      // one `?project=` means one thing everywhere on this page.
+      ticket: {
+        project: visibleProject(ctx.user.id, {
+          organizationId: ctx.org.id,
+          ...(filters.project ? { id: filters.project } : {}),
+        }),
+      },
     },
     // The arrangement first, then the default for a board nobody has dragged:
     // every `position` is 0 until the first drop, so the fallback IS the order
@@ -220,6 +227,16 @@ export default async function ChallengesPage({
         title="Daily Challenges"
         description="Issues you have picked to work on today, from any project in this organization. Moving a card changes the issue's real status everywhere; the Completed column only clears it from here."
       />
+
+      {filters.project ? (
+        <p className="-mt-2 text-sm text-tertiary">
+          Showing only{' '}
+          <span className="font-medium text-primary">
+            {projects.find((p) => p.id === filters.project)?.name ?? 'a project you can no longer see'}
+          </span>
+          {' '}&mdash; the project filter below scopes the whole page.
+        </p>
+      ) : null}
 
       <ChallengeBoard data={board} />
 
