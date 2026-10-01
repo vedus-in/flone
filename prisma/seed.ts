@@ -35,14 +35,7 @@ import { DEFAULT_STATES, stampsFor } from '../src/lib/model.ts';
  * that eventually is. Seeding a non-local database means editing this list and
  * owning that edit.
  */
-const LOCAL_HOSTS = [
-  'localhost',
-  '127.0.0.1',
-  '::1',
-  // No host at all, as in `postgresql:///flone` -- a Unix socket, which cannot
-  // reach another machine. Not an oversight; do not drop it.
-  '',
-];
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1'];
 
 function assertLocalDatabase(): void {
   if (process.env.NODE_ENV === 'production') {
@@ -51,16 +44,35 @@ function assertLocalDatabase(): void {
   const raw = process.env.DATABASE_URL;
   if (!raw) throw new Error('DATABASE_URL is not set.');
 
-  let host: string;
+  let url: URL;
   try {
-    // Brackets survive URL parsing for IPv6; strip them before comparing.
-    host = new URL(raw).hostname.replace(/^\[|\]$/g, '');
+    url = new URL(raw);
   } catch {
     throw new Error('DATABASE_URL is not a URL this script can check. Refusing to seed.');
   }
+
+  // Brackets survive URL parsing for IPv6; strip them before comparing.
+  const host = url.hostname.replace(/^\[|\]$/g, '');
   if (!LOCAL_HOSTS.includes(host)) {
     throw new Error(
       `Refusing to seed "${host}": local databases only. This script writes a known password.`,
+    );
+  }
+
+  /**
+   * `?host=` wins over the hostname, so checking the hostname alone is not a
+   * check at all: `postgresql://u:p@localhost:5432/db?host=192.0.2.1` reads as
+   * localhost and connects to 192.0.2.1 over TCP. Verified against this Prisma
+   * -- it reports "Can't reach database server at `192.0.2.1:5432`".
+   *
+   * The legitimate use is a Unix socket DIRECTORY (`?host=/var/run/postgresql`),
+   * which is always an absolute path and cannot name another machine. Anything
+   * else is a hostname wearing a query parameter.
+   */
+  const override = url.searchParams.get('host');
+  if (override !== null && !override.startsWith('/')) {
+    throw new Error(
+      `Refusing to seed: ?host=${override} overrides "${host}". Only a socket path (/...) is allowed.`,
     );
   }
 }
