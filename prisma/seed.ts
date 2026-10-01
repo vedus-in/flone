@@ -15,6 +15,13 @@
 import { EmailTokenPurpose, PrismaClient, ProjectAccess, Role } from '@prisma/client';
 import crypto from 'node:crypto';
 
+// `model.ts` is deliberately not `server-only` and free of path aliases, for
+// exactly this: `scripts/check-model.ts` already imports it straight from Node.
+// Taking the states and the stamping rule from it rather than restating them
+// is the difference between seed data the app could have written and seed data
+// that merely looks like it.
+import { DEFAULT_STATES, stampsFor } from '../src/lib/model.ts';
+
 /**
  * Loopback only, enforced rather than asked for.
  *
@@ -82,16 +89,6 @@ function hashPassword(plain: string): Promise<string> {
     ),
   );
 }
-
-/** Mirrors `DEFAULT_STATES` in `src/lib/model.ts`, which is also server-only. */
-const DEFAULT_STATES = [
-  { name: 'Backlog', type: 'BACKLOG', color: 'gray', position: 0 },
-  { name: 'Todo', type: 'UNSTARTED', color: 'gray', position: 1 },
-  { name: 'In Progress', type: 'STARTED', color: 'warning', position: 2 },
-  { name: 'In Review', type: 'STARTED', color: 'brand', position: 3 },
-  { name: 'Done', type: 'COMPLETED', color: 'success', position: 4 },
-  { name: 'Canceled', type: 'CANCELED', color: 'gray', position: 5 },
-] as const;
 
 /**
  * The password is rewritten on every run, not just on create.
@@ -204,12 +201,11 @@ async function main() {
             title: `Seeded issue ${number} in ${state.name}`,
             position: i,
             createdById: owner.id,
-            // Stamped here because the real write path stamps them on the
-            // transition into a STARTED / COMPLETED state (see `Ticket.startedAt`).
-            // Seed rows that skip this are rows the app could not have produced,
-            // and the cycle burndown reads these two columns.
-            startedAt: state.type === 'STARTED' ? new Date() : null,
-            completedAt: state.type === 'COMPLETED' ? new Date() : null,
+            // The same rule the real write path uses, not a restatement of it:
+            // a hand-written version had COMPLETED set `completedAt` alone,
+            // where `stampsFor` sets both -- a finished ticket that was never
+            // started. The cycle burndown reads these two columns.
+            ...stampsFor(state.type, { startedAt: null, completedAt: null }),
           },
         });
         number++;
