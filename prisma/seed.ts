@@ -11,11 +11,45 @@
  * holding issues and one holding none.
  *
  * Idempotent, so running it twice is the same as running it once.
- *
- * NEVER point this at anything but a local database. It writes a known password.
  */
 import { EmailTokenPurpose, PrismaClient, ProjectAccess, Role } from '@prisma/client';
 import crypto from 'node:crypto';
+
+/**
+ * Loopback only, enforced rather than asked for.
+ *
+ * This script writes accounts whose password is a constant three lines below
+ * and resets the role on every membership it touches. `.env` points at whatever
+ * the last person connected to, so "don't run this against staging" is a rule
+ * that gets broken by a shell that was already open -- and the failure is a set
+ * of real-looking accounts anyone who read this file can sign into.
+ *
+ * No override flag on purpose: a seed that can be pointed somewhere else is one
+ * that eventually is. Seeding a non-local database means editing this list and
+ * owning that edit.
+ */
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1', ''];
+
+function assertLocalDatabase(): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to seed with NODE_ENV=production.');
+  }
+  const raw = process.env.DATABASE_URL;
+  if (!raw) throw new Error('DATABASE_URL is not set.');
+
+  let host: string;
+  try {
+    // Brackets survive URL parsing for IPv6; strip them before comparing.
+    host = new URL(raw).hostname.replace(/^\[|\]$/g, '');
+  } catch {
+    throw new Error('DATABASE_URL is not a URL this script can check. Refusing to seed.');
+  }
+  if (!LOCAL_HOSTS.includes(host)) {
+    throw new Error(
+      `Refusing to seed "${host}": local databases only. This script writes a known password.`,
+    );
+  }
+}
 
 const prisma = new PrismaClient();
 
@@ -59,18 +93,21 @@ const DEFAULT_STATES = [
   { name: 'Canceled', type: 'CANCELED', color: 'gray', position: 5 },
 ] as const;
 
+/**
+ * The password is rewritten on every run, not just on create.
+ *
+ * Skipping the hash for a row that already exists is the cheaper branch -- and
+ * it means a seeded account whose password was since changed keeps the old one
+ * while the banner below still prints the constant. A seed script whose closing
+ * line is wrong about how to sign in has failed at its only job, and ~250ms per
+ * user is not worth that.
+ */
 async function upsertUser(email: string, name: string) {
-  // The hash is only computed for a new row: scrypt at these parameters costs
-  // ~250ms, and re-seeding should not spend a second re-hashing the same string.
-  const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-  if (existing) {
-    return prisma.user.update({
-      where: { email },
-      data: { name, emailVerified: new Date() },
-    });
-  }
-  return prisma.user.create({
-    data: { email, name, passwordHash: await hashPassword(PASSWORD), emailVerified: new Date() },
+  const passwordHash = await hashPassword(PASSWORD);
+  return prisma.user.upsert({
+    where: { email },
+    update: { name, passwordHash, emailVerified: new Date() },
+    create: { email, name, passwordHash, emailVerified: new Date() },
   });
 }
 
@@ -167,6 +204,12 @@ async function main() {
             title: `Seeded issue ${number} in ${state.name}`,
             position: i,
             createdById: owner.id,
+            // Stamped here because the real write path stamps them on the
+            // transition into a STARTED / COMPLETED state (see `Ticket.startedAt`).
+            // Seed rows that skip this are rows the app could not have produced,
+            // and the cycle burndown reads these two columns.
+            startedAt: state.type === 'STARTED' ? new Date() : null,
+            completedAt: state.type === 'COMPLETED' ? new Date() : null,
           },
         });
         number++;
@@ -202,6 +245,8 @@ Seeded.
   project settings   /orgs/acme/general/ENG/settings
 `);
 }
+
+assertLocalDatabase();
 
 main()
   .then(() => prisma.$disconnect())
