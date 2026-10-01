@@ -395,7 +395,7 @@ export function DocActions({
             <Input
               id="child-document-title"
               name="title"
-              isRequired
+              required
               maxLength={200}
               autoComplete="off"
               placeholder="Deployment checklist"

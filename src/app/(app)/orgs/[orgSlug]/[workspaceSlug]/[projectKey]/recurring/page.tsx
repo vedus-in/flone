@@ -334,15 +334,10 @@ export default async function RecurringPage({ params }: { params: Promise<Params
                 </>
               }
             >
-              {/* `isRequired`, not `required`: `InputBase` spreads its props
-                  and THEN writes `required={isRequired}`, so a plain `required`
-                  is overwritten with undefined and the browser never blocks the
-                  submit. The action rejects it either way; this is the half
-                  that says so before a round trip. */}
               <Input
                 id="new-recurring-title"
                 name="title"
-                isRequired
+                required
                 maxLength={160}
                 autoComplete="off"
                 placeholder="XAU breakout daily review"
@@ -388,7 +383,7 @@ export default async function RecurringPage({ params }: { params: Promise<Params
                   id="new-recurring-run-at"
                   name="runAt"
                   type="datetime-local"
-                  isRequired
+                  required
                   autoComplete="off"
                 />
               </Field>
@@ -533,7 +528,7 @@ export default async function RecurringPage({ params }: { params: Promise<Params
                                   <Input
                                     id={`${template.id}-title`}
                                     name="title"
-                                    isRequired
+                                    required
                                     maxLength={160}
                                     autoComplete="off"
                                     defaultValue={template.title}
@@ -613,7 +608,7 @@ export default async function RecurringPage({ params }: { params: Promise<Params
                                       id={`${template.id}-run-at`}
                                       name="runAt"
                                       type="datetime-local"
-                                      isRequired
+                                      required
                                       autoComplete="off"
                                     />
                                   </Field>
