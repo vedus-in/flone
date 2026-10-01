@@ -69,10 +69,14 @@ function assertLocalDatabase(): void {
    * which is always an absolute path and cannot name another machine. Anything
    * else is a hostname wearing a query parameter.
    */
-  const override = url.searchParams.get('host');
-  if (override !== null && !override.startsWith('/')) {
+  // `getAll`, not `get`: a URL may repeat the parameter, and reading only the
+  // first would pass `?host=/var/run/postgresql&host=192.0.2.1` on the strength
+  // of a value the connector may not be the one to use. Every occurrence has to
+  // be a path.
+  const offending = url.searchParams.getAll('host').find((value) => !value.startsWith('/'));
+  if (offending !== undefined) {
     throw new Error(
-      `Refusing to seed: ?host=${override} overrides "${host}". Only a socket path (/...) is allowed.`,
+      `Refusing to seed: ?host=${offending} overrides "${host}". Only a socket path (/...) is allowed.`,
     );
   }
 }
