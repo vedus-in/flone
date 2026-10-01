@@ -35,7 +35,14 @@ import { DEFAULT_STATES, stampsFor } from '../src/lib/model.ts';
  * that eventually is. Seeding a non-local database means editing this list and
  * owning that edit.
  */
-const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1', ''];
+const LOCAL_HOSTS = [
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  // No host at all, as in `postgresql:///flone` -- a Unix socket, which cannot
+  // reach another machine. Not an oversight; do not drop it.
+  '',
+];
 
 function assertLocalDatabase(): void {
   if (process.env.NODE_ENV === 'production') {
@@ -201,10 +208,9 @@ async function main() {
             title: `Seeded issue ${number} in ${state.name}`,
             position: i,
             createdById: owner.id,
-            // The same rule the real write path uses, not a restatement of it:
-            // a hand-written version had COMPLETED set `completedAt` alone,
-            // where `stampsFor` sets both -- a finished ticket that was never
-            // started. The cycle burndown reads these two columns.
+            // The same rule the real write path uses, not a restatement of it,
+            // so these rows stay ones the app could have written if the slice
+            // above ever widens. The cycle burndown reads these two columns.
             ...stampsFor(state.type, { startedAt: null, completedAt: null }),
           },
         });
