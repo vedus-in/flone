@@ -549,8 +549,8 @@ if (!ranTokenChecks) {
    * "this is CI" would fail the check on the one machine asking it not to.
    */
   console.log('check-email: token single-use checks SKIPPED (no reachable database)');
-  const onCI = process.env.CI && process.env.CI !== 'false' && process.env.CI !== '0';
-  if (onCI) {
+  const ci = (process.env.CI ?? '').toLowerCase();
+  if (ci !== '' && ci !== 'false' && ci !== '0') {
     console.error(
       'check-email: CI is set, so a skipped check is a failed one. Is the database up and migrated?',
     );

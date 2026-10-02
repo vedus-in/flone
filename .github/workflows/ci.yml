@@ -20,9 +20,13 @@ on:
 permissions:
   contents: read
 
-# A second push to a PR makes the first run irrelevant. A second push to main
-# does not: cancelling there would leave a merged commit with no completed CI
-# result, which is the one place the answer actually has to be recorded.
+# A second push to a PR makes the first run irrelevant, so PRs cancel. A merged
+# commit is the one place the answer has to be recorded, so main does not.
+#
+# This narrows the window rather than closing it: GitHub keeps at most one
+# PENDING run per group regardless, so a burst of merges can still drop a middle
+# one while it waits. Fixing that properly means a merge queue, which is a
+# bigger change than this repository currently needs.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -34,10 +38,10 @@ jobs:
 
     # Everything here passes without a database EXCEPT six assertions:
     # `check:email` skips its token single-use checks when no database is
-    # reachable and reports 22 instead of 28. Those six prove a one-time email token cannot be
-    # spent twice, which is not a check worth having only on the machines that
-    # happen to have Postgres running. A throwaway service container is cheaper
-    # than the gap.
+    # reachable and reports 22 instead of 28. Those six prove a one-time email
+    # token cannot be spent twice, which is not a check worth having only on the
+    # machines that happen to have Postgres running. A throwaway service
+    # container is cheaper than the gap.
     #
     # Off CI that skip exits 0, so a laptop without Postgres still runs the other
     # 22. Here the same skip exits 1 -- `check-email.ts` treats `CI` as "a skipped
