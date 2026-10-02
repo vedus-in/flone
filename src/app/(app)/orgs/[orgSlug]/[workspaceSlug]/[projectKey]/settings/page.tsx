@@ -10,7 +10,10 @@ import {
   ColorSwatches,
   DangerZone,
   InfoNote,
+  MENU_DANGER_CLASS,
+  MenuNote,
   NEW_ROW_CLASS,
+  RowMenu,
   SettingsRow,
   SettingsSelect,
   Switch,
@@ -55,12 +58,20 @@ import {
 
 type Params = { orgSlug: string; workspaceSlug: string; projectKey: string };
 
-const STATE_TYPES: Array<{ value: WorkflowStateType; label: string; hint: string }> = [
-  { value: WorkflowStateType.BACKLOG, label: 'Backlog', hint: 'not planned yet' },
-  { value: WorkflowStateType.UNSTARTED, label: 'Unstarted', hint: 'planned' },
-  { value: WorkflowStateType.STARTED, label: 'Started', hint: 'in flight' },
-  { value: WorkflowStateType.COMPLETED, label: 'Completed', hint: 'counts as done' },
-  { value: WorkflowStateType.CANCELED, label: 'Canceled', hint: 'left the scope' },
+/**
+ * The label only. The hint each of these used to carry ("Completed -- counts as
+ * done") made the longest option 270px wide inside a 208px select, so three of
+ * the five truncated mid-word -- the control explaining what a type means was
+ * the one you could not read. The sentence under the card heading says the same
+ * thing with room to say it, so the hints moved there and the select shrank to
+ * fit its widest real option.
+ */
+const STATE_TYPES: Array<{ value: WorkflowStateType; label: string }> = [
+  { value: WorkflowStateType.BACKLOG, label: 'Backlog' },
+  { value: WorkflowStateType.UNSTARTED, label: 'Unstarted' },
+  { value: WorkflowStateType.STARTED, label: 'Started' },
+  { value: WorkflowStateType.COMPLETED, label: 'Completed' },
+  { value: WorkflowStateType.CANCELED, label: 'Canceled' },
 ];
 
 const WEEKDAYS = [
@@ -297,8 +308,17 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
 
                 <div className="flex items-center justify-between gap-4 rounded-lg border border-secondary bg-secondary_subtle px-4 py-3">
                   <div className="flex min-w-0 flex-col gap-0.5">
+                    {/*
+                      * Reads the flag, like the hint under it. Hardcoded, this
+                      * line said "open to everyone" over a hint reading "only the
+                      * people below" with the switch plainly off -- the heading
+                      * contradicting both the sentence beneath it and the control
+                      * beside it.
+                      */}
                     <span className="text-sm font-semibold text-primary">
-                      {ctx.project.key} is open to everyone in {ctx.org.name}
+                      {isPrivate
+                        ? `${ctx.project.key} is private`
+                        : `${ctx.project.key} is open to everyone in ${ctx.org.name}`}
                     </span>
                     <span id="access-hint" className="text-xs text-tertiary">
                       {isPrivate
@@ -396,8 +416,13 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
                 <Card.Title id="workflow-heading">Workflow states</Card.Title>
                 <Card.Description>
                   The <strong className="font-semibold text-secondary">type</strong> drives
-                  behaviour &mdash; which tab an issue lands on and when it counts as done. Rename
-                  freely; use the arrows to set the board order.
+                  behaviour &mdash; which tab an issue lands on and when it counts as done.{' '}
+                  <strong className="font-semibold text-secondary">Backlog</strong> is not planned
+                  yet and <strong className="font-semibold text-secondary">Unstarted</strong> is;{' '}
+                  <strong className="font-semibold text-secondary">Started</strong> is in flight,{' '}
+                  <strong className="font-semibold text-secondary">Completed</strong> counts as
+                  done, and <strong className="font-semibold text-secondary">Canceled</strong> has
+                  left the scope. Rename freely; use the arrows to set the board order.
                 </Card.Description>
               </Card.Header>
 
@@ -444,11 +469,11 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
                           name="type"
                           defaultValue={state.type}
                           aria-label="Type"
-                          className="w-52"
+                          className="w-36"
                         >
                           {STATE_TYPES.map((option) => (
                             <option key={option.value} value={option.value}>
-                              {option.label} &mdash; {option.hint}
+                              {option.label}
                             </option>
                           ))}
                         </SettingsSelect>
@@ -458,43 +483,56 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
                         </span>
                       </ActionForm>
 
+                      {/*
+                        * In the menu rather than inline, because a state that
+                        * holds issues cannot simply vanish and the picker that
+                        * asks where they go is 144px wide -- inline, it appeared
+                        * on some rows and not others, and the row's flex layout
+                        * passed the difference straight to the name field, which
+                        * halved to 80px and truncated "In Progress" to "In Progr"
+                        * on exactly the rows that had any work in them. The menu
+                        * makes every row's trailing control the same 32px, and a
+                        * destructive action that needs a decision first is what
+                        * `RowMenu` is for. Deliberately NOT an autosaving form.
+                        *
+                        * Labels keep their one-click bin: deleting one only
+                        * untags issues, so there is nothing to ask and nothing to
+                        * orphan.
+                        */}
                       {states.length > 1 ? (
-                        <ActionForm
-                          action={deleteState}
-                          className="flex items-center gap-2"
-                          aria-label={`Delete ${state.name}`}
-                        >
-                          <input type="hidden" name="projectId" value={ctx.project.id} />
-                          <input type="hidden" name="stateId" value={state.id} />
-                          {/*
-                            * A state that holds issues cannot simply vanish, so
-                            * the row asks where they go before it offers the
-                            * bin. Deliberately NOT an autosaving form.
-                            */}
-                          {held > 0 ? (
-                            <SettingsSelect
-                              name="reassignToId"
-                              aria-label={`Move the issues in ${state.name} to`}
-                              className="w-36"
-                            >
-                              {states
-                                .filter((candidate) => candidate.id !== state.id)
-                                .map((candidate) => (
-                                  <option key={candidate.id} value={candidate.id}>
-                                    Move to {candidate.name}
-                                  </option>
-                                ))}
-                            </SettingsSelect>
-                          ) : null}
-                          <button
-                            type="submit"
-                            title={`Delete ${state.name}`}
-                            className={ICON_BUTTON}
+                        <RowMenu label={`More actions for ${state.name}`}>
+                          <MenuNote>
+                            {held > 0
+                              ? `${state.name} holds ${held} ${held === 1 ? 'issue' : 'issues'}. They move to the state you pick; deleting cannot be undone.`
+                              : `${state.name} holds no issues. Deleting cannot be undone.`}
+                          </MenuNote>
+                          <ActionForm
+                            action={deleteState}
+                            className="flex flex-col gap-2"
+                            aria-label={`Delete ${state.name}`}
                           >
-                            <Trash01 aria-hidden="true" className="size-4" />
-                            <span className="visually-hidden">Delete {state.name}</span>
-                          </button>
-                        </ActionForm>
+                            <input type="hidden" name="projectId" value={ctx.project.id} />
+                            <input type="hidden" name="stateId" value={state.id} />
+                            {held > 0 ? (
+                              <SettingsSelect
+                                name="reassignToId"
+                                aria-label={`Move the issues in ${state.name} to`}
+                                className="w-full"
+                              >
+                                {states
+                                  .filter((candidate) => candidate.id !== state.id)
+                                  .map((candidate) => (
+                                    <option key={candidate.id} value={candidate.id}>
+                                      Move to {candidate.name}
+                                    </option>
+                                  ))}
+                              </SettingsSelect>
+                            ) : null}
+                            <button type="submit" className={MENU_DANGER_CLASS}>
+                              Delete {state.name}
+                            </button>
+                          </ActionForm>
+                        </RowMenu>
                       ) : (
                         <span className="size-8 shrink-0" aria-hidden="true" />
                       )}
@@ -521,11 +559,11 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
                     name="type"
                     defaultValue={WorkflowStateType.STARTED}
                     aria-label="Type"
-                    className="w-52"
+                    className="w-36"
                   >
                     {STATE_TYPES.map((option) => (
                       <option key={option.value} value={option.value}>
-                        {option.label} &mdash; {option.hint}
+                        {option.label}
                       </option>
                     ))}
                   </SettingsSelect>
@@ -698,6 +736,7 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
           {/* -------------------------------------------------------------- */}
           <Section id="danger" labelledBy="danger-heading">
             <DangerZone
+              id="danger-heading"
               title="Danger zone"
               description={`Deleting removes every issue, cycle, and label in this project for everyone. This cannot be undone.`}
               buttonLabel="Delete this project..."

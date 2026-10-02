@@ -208,11 +208,14 @@ export function SettingsRow({
  * lower it. The summary is styled as the outline button the design asks for.
  */
 export function DangerZone({
+  id,
   title,
   description,
   buttonLabel,
   children,
 }: {
+  /** On the heading, so a `<section aria-labelledby>` can point at it. */
+  id?: string;
   title: string;
   description: ReactNode;
   buttonLabel: string;
@@ -220,7 +223,9 @@ export function DangerZone({
 }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl bg-primary p-5 shadow-xs ring-1 ring-error_subtle">
-      <h2 className="text-md font-semibold text-error-primary">{title}</h2>
+      <h2 id={id} className="text-md font-semibold text-error-primary">
+        {title}
+      </h2>
       <p className="max-w-prose text-sm text-tertiary">{description}</p>
       <details className="group flex flex-col gap-4">
         <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded-lg border border-error px-3 py-2 text-sm font-semibold text-error-primary transition-colors outline-focus-ring hover:bg-error-primary focus-visible:outline-2 focus-visible:outline-offset-2">

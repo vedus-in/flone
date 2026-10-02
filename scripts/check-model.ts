@@ -1104,4 +1104,47 @@ ok('the access switch is submitted before the hidden fallback', () => {
   assert.ok(toggle < fallback, 'the switch must come BEFORE the hidden PRIVATE input');
 });
 
+/* -------------------------------------------------------------------------- */
+/* Required inputs                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `InputBase` sets `required` AFTER spreading the caller's props, so that one
+ * attribute is the only prop on the component that can be silently dropped.
+ *
+ * It was. Every call site in this app passes the plain HTML `required`, not
+ * Untitled UI's `isRequired`, so `required={isRequired}` overwrote all 23 of
+ * them with `undefined` -- sign-in, registration, password reset, the invite
+ * form and both type-to-confirm delete gates all rendered without the
+ * constraint, and `ActionForm`'s autosave guard (`form.checkValidity()` before
+ * sending) went along with it, because a form with no required field is always
+ * valid. Nothing else catches this: it is not a type error, not a failing
+ * query, and not a failing page -- just a gate that silently stopped gating.
+ */
+const INPUT_BASE = 'src/components/base/input/input.tsx';
+
+ok('InputBase does not clobber a caller-supplied `required`', () => {
+  const source = readFileSync(INPUT_BASE, 'utf8');
+  assert.match(
+    source,
+    /required=\{isRequired \?\? inputProps\.required\}/,
+    'the `?? inputProps.required` fallback is load-bearing -- this prop sits after the spread',
+  );
+});
+
+ok('every Input that asks for `required` still spells it the way InputBase reads', () => {
+  // `isRequired` is Untitled UI's own spelling and is honoured too, but a call
+  // site that used it while the fallback above was missing would have masked
+  // the bug. This asserts the app keeps to one spelling.
+  const offenders: string[] = [];
+  for (const file of sourceFiles('src')) {
+    if (file.endsWith('input.tsx')) continue;
+    const source = readFileSync(file, 'utf8');
+    for (const match of source.matchAll(/<Input\b[\s\S]*?\/>/g)) {
+      if (/\bisRequired\b/.test(match[0])) offenders.push(file);
+    }
+  }
+  assert.deepEqual(offenders, [], `use plain \`required\`: ${offenders.join(', ')}`);
+});
+
 console.log(`\nAll good — ${checks} checks.\n`);

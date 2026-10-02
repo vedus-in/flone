@@ -127,7 +127,15 @@ export const InputBase = ({
             <AriaInput
                 {...(inputProps as AriaInputProps)}
                 ref={ref}
-                required={isRequired}
+                // `?? inputProps.required` is load-bearing: this prop sits AFTER the
+                // spread, so a bare `required={isRequired}` overwrote the plain
+                // `required` every caller in this app passes with `undefined` --
+                // silently dropping the constraint on sign-in, registration, reset,
+                // the invite form and both type-to-confirm delete gates. It also
+                // defeated `ActionForm`'s autosave guard, which asks
+                // `form.checkValidity()` before sending and so happily submitted a
+                // field the user had just cleared.
+                required={isRequired ?? inputProps.required}
                 type={type === "password" && isPasswordVisible ? "text" : type}
                 placeholder={placeholder}
                 className={cx(
