@@ -34,9 +34,9 @@ jobs:
     # than the gap.
     #
     # Off CI that skip exits 0, so a laptop without Postgres still runs the other
-    # 22. Here it exits 1 -- `check-email.ts` treats `CI` as "a skipped check is
-    # a failed one", so if this service, the URL below or the migrate step breaks,
-    # the job goes red instead of quietly proving six fewer things.
+    # 22. Here the same skip exits 1 -- `check-email.ts` treats `CI` as "a skipped
+    # check is a failed one" -- so if this service, the URL below or the migrate
+    # step breaks, the job goes red instead of quietly proving six fewer things.
     services:
       postgres:
         image: postgres:16-alpine
