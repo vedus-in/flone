@@ -536,5 +536,20 @@ const ranTokenChecks = await tokenChecks();
 
 console.log(`check-email: ${passed} assertions passed`);
 if (!ranTokenChecks) {
+  /**
+   * Skipping is for a laptop with no Postgres running. On CI it is the failure
+   * this exit code exists to report: the workflow stands up a database FOR
+   * these six, so reaching here means the service, the URL or the migration
+   * step is broken -- and exiting 0 would report 22 assertions as success and
+   * leave "a one-time token cannot be spent twice" permanently unproven.
+   *
+   * `CI` is set by GitHub Actions, and by every other runner worth naming.
+   */
   console.log('check-email: token single-use checks SKIPPED (no reachable database)');
+  if (process.env.CI) {
+    console.error(
+      'check-email: CI is set, so a skipped check is a failed one. Is the database up and migrated?',
+    );
+    process.exit(1);
+  }
 }

@@ -26,7 +26,7 @@
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   // `cli/` is a SEPARATE npm package -- its own package.json, its own
-  // dependencies (ink, ink-text-import, react), its own tsconfig with
+  // dependencies (ink, ink-text-input, react), its own tsconfig with
   // `moduleResolution: nodenext` and `jsx: react-jsx`. The include above swept
   // it in anyway, so a clean checkout could not run `typecheck` OR `build`:
   // both died on "Cannot find module 'ink'", because `bun install` at the root

@@ -5,10 +5,10 @@
 # caught AFTER merge, and the eight check scripts (which encode the invariants
 # that "rot silently", in their own words) ran only when somebody remembered.
 #
-# Everything here runs with no secrets and no database. The two scripts that
-# need neither are deliberately absent: `mcp:smoke` and `smoke:attachments` are
-# end-to-end checks against a RUNNING server with a real token, so they stay
-# manual rather than turning CI red on a missing secret.
+# No secrets. The `web` job does stand up a throwaway Postgres, for the reason
+# given on the service below. `mcp:smoke` and `smoke:attachments` are absent:
+# both are end-to-end checks against a RUNNING server with a real token, so they
+# stay manual rather than turning CI red on a missing secret.
 name: CI
 
 on:
