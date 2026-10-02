@@ -25,5 +25,22 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  // `cli/` is a SEPARATE npm package -- its own package.json, its own
+  // dependencies (ink, ink-text-input, react), its own tsconfig with
+  // `moduleResolution: nodenext` and `jsx: react-jsx`. The include above swept
+  // it in anyway, so a clean checkout could not run `typecheck` OR `build`:
+  // both died on "Cannot find module 'ink'", because `bun install` at the root
+  // never installs cli/'s dependencies. It passed on machines that had once run
+  // `npm install` inside cli/, and production never noticed because
+  // `.railwayignore` drops /cli/ from the upload entirely.
+  //
+  // Checking it here was also wrong on its own terms: it applied the Next.js
+  // app's compiler options to a Node CLI. `cli/` builds and tests itself with
+  // `npm run build` and `npm test` under its own config; CI runs both.
+  //
+  // Rooted at this directory, so `src/app/api/cli/` -- the CLI sign-in route --
+  // is still typechecked. That distinction is not theoretical: see
+  // `.railwayignore`, where a bare `cli/` pattern silently swallowed that same
+  // route and shipped a build with no sign-in endpoint.
+  "exclude": ["node_modules", "cli"]
 }

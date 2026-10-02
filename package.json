@@ -22,7 +22,8 @@
     "check:markdown": "bun scripts/check-markdown.ts",
     "check:docs": "bun scripts/check-docs.ts",
     "check:mentions": "bun scripts/check-mentions.ts",
-    "check:voice": "bun services/voice/check.ts"
+    "check:voice": "bun services/voice/check.ts",
+    "check:all": "bun run check:boundary && bun run check:model && bun run check:email && bun run check:bucket && bun run check:markdown && bun run check:docs && bun run check:mentions && bun run check:voice"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
