@@ -27,11 +27,16 @@ jobs:
     runs-on: ubuntu-latest
 
     # Everything here passes without a database EXCEPT six assertions:
-    # `check:email` prints "token single-use checks SKIPPED (no reachable
-    # database)" and exits 0, so it reports 22 instead of 28. Those six are the
-    # ones proving a one-time email token cannot be spent twice, which is not a
-    # check worth having only on the machines that happen to have Postgres
-    # running. A throwaway service container is cheaper than the gap.
+    # `check:email` skips its token single-use checks when none is reachable and
+    # reports 22 instead of 28. Those six prove a one-time email token cannot be
+    # spent twice, which is not a check worth having only on the machines that
+    # happen to have Postgres running. A throwaway service container is cheaper
+    # than the gap.
+    #
+    # Off CI that skip exits 0, so a laptop without Postgres still runs the other
+    # 22. Here it exits 1 -- `check-email.ts` treats `CI` as "a skipped check is
+    # a failed one", so if this service, the URL below or the migrate step breaks,
+    # the job goes red instead of quietly proving six fewer things.
     services:
       postgres:
         image: postgres:16-alpine
