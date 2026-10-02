@@ -544,9 +544,13 @@ if (!ranTokenChecks) {
    * leave "a one-time token cannot be spent twice" permanently unproven.
    *
    * `CI` is set by GitHub Actions, and by every other runner worth naming.
+   * Compared against its VALUE, not just its presence: `CI=false` and `CI=0`
+   * are how people turn CI-only behaviour off locally, and reading those as
+   * "this is CI" would fail the check on the one machine asking it not to.
    */
   console.log('check-email: token single-use checks SKIPPED (no reachable database)');
-  if (process.env.CI) {
+  const onCI = process.env.CI && process.env.CI !== 'false' && process.env.CI !== '0';
+  if (onCI) {
     console.error(
       'check-email: CI is set, so a skipped check is a failed one. Is the database up and migrated?',
     );

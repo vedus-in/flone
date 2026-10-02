@@ -16,10 +16,16 @@ on:
     branches: [main]
   pull_request:
 
-# A second push to a PR makes the first run irrelevant.
+# Read-only is all any step here needs.
+permissions:
+  contents: read
+
+# A second push to a PR makes the first run irrelevant. A second push to main
+# does not: cancelling there would leave a merged commit with no completed CI
+# result, which is the one place the answer actually has to be recorded.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   web:
@@ -27,8 +33,8 @@ jobs:
     runs-on: ubuntu-latest
 
     # Everything here passes without a database EXCEPT six assertions:
-    # `check:email` skips its token single-use checks when none is reachable and
-    # reports 22 instead of 28. Those six prove a one-time email token cannot be
+    # `check:email` skips its token single-use checks when no database is
+    # reachable and reports 22 instead of 28. Those six prove a one-time email token cannot be
     # spent twice, which is not a check worth having only on the machines that
     # happen to have Postgres running. A throwaway service container is cheaper
     # than the gap.
