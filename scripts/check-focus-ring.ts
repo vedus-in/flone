@@ -37,12 +37,13 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('../src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const ROOT = fileURLToPath(new URL('../src', import.meta.url));
 
 /** The killers, and the thing they kill. Both v4 spellings of "no outline". */
 const SUPPRESS = /\boutline-(?:none|hidden)\b/;
-const REQUEST = /\bfocus(?:-visible)?:outline-(?:\d|\[)/;
+const REQUEST = /(?:\bfocus(?:-visible|-within)?|data-\[focus(?:-visible)?\]):outline(?:-(?:\d|\[)|(?=[\s'"`]))/;
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
