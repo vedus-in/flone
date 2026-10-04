@@ -110,6 +110,11 @@ export default async function AccountPage() {
                     name={preference.name}
                     type="checkbox"
                     defaultChecked={current[preference.name]}
+                    // The hint says which messages the box actually governs, so
+                    // it is part of the choice rather than decoration beside it.
+                    // Hand-wired because this row is not a `Field`: the label
+                    // and hint sit in a column next to the box, not under it.
+                    aria-describedby={`${preference.name}-hint`}
                     className="mt-0.5 size-4 shrink-0 rounded border-primary text-brand-solid outline-focus-ring focus-visible:outline-2 focus-visible:outline-offset-2"
                   />
                   <div className="flex flex-col gap-0.5">
@@ -119,7 +124,9 @@ export default async function AccountPage() {
                     >
                       {preference.label}
                     </label>
-                    <p className="text-sm text-tertiary">{preference.hint}</p>
+                    <p id={`${preference.name}-hint`} className="text-sm text-tertiary">
+                      {preference.hint}
+                    </p>
                   </div>
                 </div>
               ))}

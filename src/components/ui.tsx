@@ -1,6 +1,8 @@
 import {
   Children,
   Fragment,
+  cloneElement,
+  isValidElement,
   type ComponentProps,
   type HTMLAttributes,
   type ReactNode,
@@ -217,14 +219,44 @@ type FieldProps = {
  * label and hint, which is the right choice for a plain text field. This wrapper
  * takes an arbitrary control as `children` and associates it explicitly, so it
  * also works for selects, checkboxes and native controls.
+ *
+ * ASSOCIATING THE HINT AND THE ERROR IS PART OF THAT, and used not to be: both
+ * were rendered under ids shaped to be referenced (`-hint`, `-error`) that
+ * nothing ever referenced, so a screen reader announced the label and stopped.
+ * The error carries `role="alert"`, so it was at least read once when it
+ * appeared -- but tabbing back to the field afterwards gave no hint of why it
+ * was rejected, and `aria-invalid` was never set at all.
+ *
+ * A caller that sets either attribute itself keeps it untouched. `register-form`
+ * and `login-form` both do: the first hand-wires these exact ids, and the second
+ * marks BOTH fields invalid or neither on purpose, because which one was wrong
+ * is the thing its server refuses to say.
  */
 export function Field({ htmlFor, label, hint, error, children, className }: FieldProps) {
+  const describedBy =
+    [hint ? `${htmlFor}-hint` : null, error ? `${htmlFor}-error` : null]
+      .filter(Boolean)
+      .join(' ') || undefined;
+
+  // Any single element: every control used here spreads its props onto the real
+  // form control, and one that does not simply ignores these. A `children` that
+  // is not one element (a fragment, an array, a string) is passed through.
+  const control = isValidElement<{
+    'aria-describedby'?: string;
+    'aria-invalid'?: boolean;
+  }>(children)
+    ? cloneElement(children, {
+        'aria-describedby': children.props['aria-describedby'] ?? describedBy,
+        'aria-invalid': children.props['aria-invalid'] ?? (error ? true : undefined),
+      })
+    : children;
+
   return (
     <div className={cx('flex flex-col gap-1.5', className)}>
       <Label htmlFor={htmlFor} isInvalid={Boolean(error)}>
         {label}
       </Label>
-      {children}
+      {control}
       {hint ? (
         <span id={`${htmlFor}-hint`} className="text-xs text-pretty text-tertiary">
           {hint}
