@@ -131,17 +131,17 @@ const DIVIDER = 'mx-1 h-4 w-px shrink-0 bg-border-secondary';
  * past dates would have looked identical to the selectable ones.
  */
 const CELL =
-  'flex size-9 cursor-default items-center justify-center rounded-md text-sm text-secondary outline-none transition-colors data-[hovered]:bg-secondary data-[selected]:bg-brand-solid data-[selected]:font-medium data-[selected]:text-white data-[unavailable]:text-quaternary data-[disabled]:text-quaternary data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-1 data-[focus-visible]:outline-focus-ring';
+  'flex size-9 cursor-default items-center justify-center rounded-md text-sm text-secondary transition-colors data-[hovered]:bg-secondary data-[selected]:bg-brand-solid data-[selected]:font-medium data-[selected]:text-white data-[unavailable]:text-quaternary data-[disabled]:text-quaternary data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-1 data-[focus-visible]:outline-focus-ring';
 
 const NAV_BUTTON =
-  'grid size-8 place-items-center rounded-md text-tertiary outline-none transition-colors hover:bg-secondary hover:text-primary pressed:bg-secondary data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-1 data-[focus-visible]:outline-focus-ring';
+  'grid size-8 place-items-center rounded-md text-tertiary transition-colors hover:bg-secondary hover:text-primary pressed:bg-secondary data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-1 data-[focus-visible]:outline-focus-ring';
 
 /** Shared by the calendar and the clock, so the two menus cannot drift apart. */
 const POPOVER =
   'rounded-xl bg-primary p-3 shadow-lg ring-1 ring-secondary entering:animate-in entering:fade-in exiting:animate-out exiting:fade-out';
 
 const OPTION =
-  'cursor-default rounded-md px-3 py-1.5 text-center text-sm tabular-nums text-secondary outline-none transition-colors data-[hovered]:bg-secondary data-[selected]:bg-brand-solid data-[selected]:font-medium data-[selected]:text-white data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-1 data-[focus-visible]:outline-focus-ring';
+  'cursor-default rounded-md px-3 py-1.5 text-center text-sm tabular-nums text-secondary transition-colors data-[hovered]:bg-secondary data-[selected]:bg-brand-solid data-[selected]:font-medium data-[selected]:text-white data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-1 data-[focus-visible]:outline-focus-ring';
 
 /* -------------------------------------------------------------------------- */
 /* One two-digit box                                                           */
