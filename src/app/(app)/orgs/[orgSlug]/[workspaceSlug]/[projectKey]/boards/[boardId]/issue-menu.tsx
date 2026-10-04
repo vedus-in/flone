@@ -23,7 +23,12 @@
  * never what is permitted.
  */
 
-import { useState, useTransition, type ReactNode } from 'react';
+import {
+  useState,
+  useTransition,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
@@ -472,26 +477,34 @@ async function deleteFromMenu(ticketId: string): Promise<{ ok: boolean; error?: 
 /* Right-click (pointer devices)                                               */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The one shortcut actually bound, as a handler both popups can take.
+ *
+ * It belongs with the items, not with one of the two menus that render them:
+ * `IssueMenuItems` prints a `Ctrl Del` hint beside Delete, and that hint shipped
+ * in BOTH menus while only the right-click popup listened for the key -- so in
+ * the `...` menu it advertised a shortcut that did nothing.
+ *
+ * Ctrl/Cmd guards against a stray Delete press while merely browsing the menu.
+ */
+function deleteShortcut(data: MenuData) {
+  return (event: ReactKeyboardEvent) => {
+    if (event.key !== 'Delete' || !(event.ctrlKey || event.metaKey)) return;
+    event.preventDefault();
+    if (!data.issue.canDelete) return;
+    void deleteFromMenu(data.issue.id).then((result) => {
+      data.onError(result.ok ? null : (result.error ?? 'Something went wrong.'));
+    });
+  };
+}
+
 export function IssueContextMenu({ children, ...data }: MenuData & { children: ReactNode }) {
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger className="outline-none">{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="z-50 outline-none" side="bottom" align="start">
-          <ContextMenu.Popup
-            className={POPUP}
-            onKeyDown={(event) => {
-              // The one shortcut actually bound. Ctrl/Cmd guards against a stray
-              // Delete press while merely browsing the menu.
-              if (event.key === 'Delete' && (event.ctrlKey || event.metaKey)) {
-                event.preventDefault();
-                if (!data.issue.canDelete) return;
-                void deleteFromMenu(data.issue.id).then((result) => {
-                  data.onError(result.ok ? null : (result.error ?? 'Something went wrong.'));
-                });
-              }
-            }}
-          >
+          <ContextMenu.Popup className={POPUP} onKeyDown={deleteShortcut(data)}>
             <IssueMenuItems {...data} />
           </ContextMenu.Popup>
         </ContextMenu.Positioner>
@@ -520,7 +533,7 @@ export function IssueMenuButton(data: MenuData) {
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner side="bottom" align="end" sideOffset={4} className="z-50 outline-none">
-          <Menu.Popup className={POPUP}>
+          <Menu.Popup className={POPUP} onKeyDown={deleteShortcut(data)}>
             <IssueMenuItems {...data} />
           </Menu.Popup>
         </Menu.Positioner>
