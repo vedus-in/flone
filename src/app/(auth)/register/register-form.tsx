@@ -35,7 +35,7 @@ import { register } from './actions';
  * the messages rendered under each field are the server's own closed literals.
  */
 const LINK =
-  'rounded-sm font-medium text-brand-secondary underline-offset-4 outline-none hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+  'rounded-sm font-medium text-brand-secondary underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
 /** Joins the ids that actually rendered; `undefined` when none did. */
 function describedBy(...ids: Array<string | false | undefined>): string | undefined {

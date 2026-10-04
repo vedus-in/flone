@@ -208,7 +208,7 @@ function NavRow({
       aria-current={active ? 'page' : undefined}
       className={cx(
         'flex h-7 items-center gap-2 rounded-md pe-2 text-[0.8125rem] no-underline transition-colors',
-        'outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+        'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
         indented ? 'ps-1.5' : 'ps-2',
         active
           ? 'bg-secondary font-medium text-primary'
@@ -576,7 +576,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                           // the row.
                           draggable={false}
                           className={cx(
-                            'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+                            'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
                             wsActive ? 'font-medium text-primary' : 'text-tertiary',
                           )}
                         >
@@ -639,7 +639,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                           // the row.
                           draggable={false}
                           className={cx(
-                            'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+                            'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
                             isActive ? 'font-medium text-primary' : 'text-tertiary',
                           )}
                         >

@@ -36,7 +36,7 @@ import { signIn } from './actions';
  * defeat the workaround above.
  */
 const LINK =
-  'rounded-sm font-medium text-brand-secondary underline-offset-4 outline-none hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+  'rounded-sm font-medium text-brand-secondary underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
 export function LoginForm() {
   const [state, formAction] = useActionState<ActionResult | null, FormData>(signIn, null);

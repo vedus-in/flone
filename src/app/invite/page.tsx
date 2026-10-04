@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 const LINK =
-  'rounded-sm font-medium text-brand-secondary underline-offset-4 outline-none hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+  'rounded-sm font-medium text-brand-secondary underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
 const ROLE_PHRASE = {
   OWNER: 'an owner',
