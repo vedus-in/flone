@@ -43,7 +43,7 @@ const ROOT = fileURLToPath(new URL('../src', import.meta.url));
 
 /** The killers, and the thing they kill. Both v4 spellings of "no outline". */
 const SUPPRESS = /\boutline-(?:none|hidden)\b/;
-const REQUEST = /(?:\bfocus(?:-visible|-within)?|data-\[focus(?:-visible)?\]):outline(?:-(?:\d|\[)|(?=[\s'"`]))/;
+const REQUEST = /(?:\bfocus(?:-visible|-within)?|data-\[focus(?:-visible)?\]):outline(?:-(?:\d|\[)|(?![\w-]))/;
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
