@@ -16,6 +16,7 @@
     "smoke:attachments": "node scripts/attachments-smoke.mjs",
     "email:dev": "email dev --dir src/emails",
     "check:boundary": "node scripts/check-client-boundary.mjs",
+    "check:focus-ring": "bun scripts/check-focus-ring.ts",
     "check:model": "node scripts/check-model.ts",
     "check:email": "bun scripts/check-email.ts",
     "check:bucket": "bun scripts/check-bucket.ts",
@@ -23,7 +24,7 @@
     "check:docs": "bun scripts/check-docs.ts",
     "check:mentions": "bun scripts/check-mentions.ts",
     "check:voice": "bun services/voice/check.ts",
-    "check:all": "bun run check:boundary && bun run check:model && bun run check:email && bun run check:bucket && bun run check:markdown && bun run check:docs && bun run check:mentions && bun run check:voice"
+    "check:all": "bun run check:boundary && bun run check:focus-ring && bun run check:model && bun run check:email && bun run check:bucket && bun run check:markdown && bun run check:docs && bun run check:mentions && bun run check:voice"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

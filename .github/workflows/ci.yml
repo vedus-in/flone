@@ -1,9 +1,11 @@
-# Runs the checks this repository already had and nothing else.
+# Runs this repository's own checks, whatever `check:all` currently chains.
 #
-# There were ten of them -- `typecheck`, `build` and eight `check:*` scripts --
-# and nothing ran any of them. Railway builds on deploy, so a broken build was
-# caught AFTER merge, and the eight check scripts (which encode the invariants
-# that "rot silently", in their own words) ran only when somebody remembered.
+# When this workflow was added there were ten of them -- `typecheck`, `build`
+# and eight `check:*` scripts -- and nothing ran any of them. Railway builds on
+# deploy, so a broken build was caught AFTER merge, and the check scripts (which
+# encode the invariants that "rot silently", in their own words) ran only when
+# somebody remembered. The `checks` step below is `check:all`, so a script added
+# to that chain is picked up here without touching this file.
 #
 # No secrets. The `web` job does stand up a throwaway Postgres, for the reason
 # given on the service below. `mcp:smoke` and `smoke:attachments` are absent:
