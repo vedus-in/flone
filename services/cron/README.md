@@ -27,5 +27,10 @@ APP_URL=${{flone.APP_URL}}
 Rotating `CRON_SECRET` on the web service updates this one too, because it is a
 reference rather than a copy.
 
+`APP_URL` must be `https://`: the script refuses plain HTTP rather than send
+the secret in the clear. Only a `200` counts as a successful run, so a redirect
+(say, to a `www.` host) fails visibly instead of silently skipping both
+schedulers.
+
 A missing variable fails the run with a message naming it. A `401` means the
 two secrets differ; a `503` means the web service has no `CRON_SECRET` at all.
