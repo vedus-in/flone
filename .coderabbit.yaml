@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+
+reviews:
+  profile: chill
+  poem: false
+  in_progress_fortune: false
+  auto_review:
+    enabled: true
+    drafts: false
+    # Every PR, not only those into the default branch -- stacked PRs included.
+    base_branches: ['.*']
+  path_filters:
+    - '!bun.lock'
+    - '!cli/package-lock.json'
+    - '!LICENSE'
+  path_instructions:
+    - path: 'src/**'
+      instructions: |
+        Tenancy is the invariant that matters most. Every read and write must reach
+        its organization inside the Prisma `where` clause, through the `require*`
+        helpers in `src/lib/authz.ts`, using the user id from the session. Flag any
+        query that loads a resource and checks access afterwards, or that trusts a
+        client-supplied user, organization or role.
+    - path: 'src/**/actions.ts'
+      instructions: |
+        Every Server Action must re-parse its FormData with zod before touching the
+        database, and must return one of the fixed result literals from
+        `src/lib/result.ts`, never a raw error message, Prisma code or stack trace.
+    - path: 'src/lib/email.ts'
+      instructions: |
+        Nothing here may throw, and no log line may contain a recipient, token,
+        link or provider response body. Emailed links must be built from APP_URL,
+        never from request headers.
+    - path: 'prisma/migrations/**'
+      instructions: |
+        Migrations run automatically on deploy and on every Docker start. Flag
+        anything destructive or that would lock a large table.
+    - path: 'Dockerfile'
+      instructions: |
+        The image must never contain secrets. S3_ENDPOINT is a build arg on purpose
+        (it is compiled into the CSP).
