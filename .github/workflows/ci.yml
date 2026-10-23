@@ -119,3 +119,12 @@ jobs:
       - name: test
         run: npm test
         working-directory: cli
+
+  # The image self-hosters build with `docker compose up`. Built, not pushed:
+  # this only proves the Dockerfile still produces an image.
+  docker:
+    name: docker (build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target runtime -t flone:ci .

@@ -1,0 +1,93 @@
+# Self-hosting: the app, its database and the reminder scheduler.
+#
+#   cp .env.docker.example .env      # then fill it in
+#   docker compose up -d
+#
+# Trying it out with no mail server? Add the `mailpit` profile and every email
+# lands in a local inbox at http://localhost:8025 instead:
+#
+#   docker compose --profile mailpit up -d
+#
+# Values come from `.env` next to this file. See "Self-hosting with Docker" in
+# the README for what each one does.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flone
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: flone
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U flone -d flone']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      args:
+        # Compiled into the CSP at build time; see the Dockerfile.
+        S3_ENDPOINT: ${S3_ENDPOINT:-}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - '${PORT:-3000}:3000'
+    environment:
+      DATABASE_URL: postgresql://flone:${POSTGRES_PASSWORD}@db:5432/flone?schema=public
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      EMAIL_FROM: ${EMAIL_FROM:-Flone <no-reply@localhost>}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      CRON_SECRET: ${CRON_SECRET:-}
+      VOICE_URL: ${VOICE_URL:-}
+      VOICE_SECRET: ${VOICE_SECRET:-}
+
+  # Reminders and recurring tickets are driven by POST /api/cron/reminders. This
+  # calls it once a minute; extra or overlapping calls are safe. With
+  # CRON_SECRET unset the endpoint is closed and this logs a 401 every minute.
+  cron:
+    image: curlimages/curl:8.11.1
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      CRON_SECRET: ${CRON_SECRET:-}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        while true; do
+          curl -fsS --max-time 60 -X POST \
+            -H "authorization: Bearer $$CRON_SECRET" \
+            http://app:3000/api/cron/reminders || true
+          echo
+          sleep 60
+        done
+
+  # Optional local inbox for trying Flone out. Not for production: anyone who
+  # can reach port 8025 can read every confirmation and reset link.
+  mailpit:
+    image: axllent/mailpit:v1.21
+    profiles: [mailpit]
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:8025:8025'
+
+volumes:
+  db-data:

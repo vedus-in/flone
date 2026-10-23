@@ -1,0 +1,21 @@
+# Same reasoning as `.railwayignore`: the image is the web app and nothing else.
+# Leading slashes keep each pattern at the root -- a bare `cli/` would also match
+# `src/app/api/cli/` and ship a build with no CLI sign-in route.
+/.git
+/.github
+/.codegraph
+/node_modules
+/.next
+/cli/
+/services/
+/docs/
+/skills/
+/.claude
+/.claude-plugin
+
+# Never bake a secret into an image layer.
+.env
+.env.*
+!.env.example
+!.env.docker.example
+*.pem
