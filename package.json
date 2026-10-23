@@ -37,6 +37,7 @@
     "@untitledui/file-icons": "^0.0.9",
     "@untitledui/icons": "^0.0.22",
     "next": "^15.5.22",
+    "nodemailer": "^10.2.1",
     "prisma": "^6.19.3",
     "react": "^19.2.0",
     "react-aria-components": "^1.20.0",

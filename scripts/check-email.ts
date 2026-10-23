@@ -23,6 +23,10 @@
  *      exists inside an HTML button is unreachable for anyone whose client
  *      shows the text/plain part. This is the check that would have caught it.
  *
+ *   4b. SMTP DELIVERS BOTH PARTS, AND NEVER SENDS A PASSWORD IN THE CLEAR.
+ *      Exercised against a fake SMTP server in this process, so a self-hosted
+ *      instance's transport is proven without a mail account.
+ *
  *   5. THE TOKEN IS SINGLE USE. Two clicks, a double submit, or a mail scanner
  *      racing the human must not both succeed. Needs a database, so it is
  *      SKIPPED rather than failed when one is not reachable.
@@ -34,6 +38,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createServer, type AddressInfo } from 'node:net';
 
 /* -------------------------------------------------------------------------- */
 /* Module setup                                                                */
@@ -84,6 +89,9 @@ Bun.plugin({
 // being explicit here keeps a developer's own `.env` from deciding the result.
 delete process.env.RESEND_API_KEY;
 delete process.env.EMAIL_FROM;
+for (const name of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_SECURE']) {
+  delete process.env[name];
+}
 process.env.APP_URL = 'https://flone.test';
 
 const { appUrl, sendMail, tokenUrl } = await import('../src/lib/email.ts');
@@ -271,6 +279,168 @@ await check('a network error does not throw', async () => {
     spy.restore();
     delete process.env.RESEND_API_KEY;
     delete process.env.EMAIL_FROM;
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* 3b. SMTP                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The least SMTP server that nodemailer will talk to: no STARTTLS, optionally
+ * AUTH, and a RCPT that can be told to refuse. Records every command it sees.
+ */
+async function fakeSmtp(options: { offerAuth?: boolean; rejectRcpt?: boolean } = {}) {
+  const commands: string[] = [];
+  let data = '';
+
+  const server = createServer((socket) => {
+    let buffer = '';
+    let inData = false;
+    socket.write('220 fake ESMTP\r\n');
+
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+
+      while (true) {
+        if (inData) {
+          const end = buffer.indexOf('\r\n.\r\n');
+          if (end === -1) return;
+          data += buffer.slice(0, end);
+          buffer = buffer.slice(end + 5);
+          inData = false;
+          socket.write('250 queued\r\n');
+          continue;
+        }
+
+        const newline = buffer.indexOf('\r\n');
+        if (newline === -1) return;
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 2);
+        commands.push(line);
+
+        const verb = line.split(' ')[0].toUpperCase();
+        if (verb === 'EHLO') {
+          socket.write(options.offerAuth ? '250-fake\r\n250 AUTH PLAIN LOGIN\r\n' : '250 fake\r\n');
+        } else if (verb === 'RCPT') {
+          socket.write(options.rejectRcpt ? '550 no such user\r\n' : '250 ok\r\n');
+        } else if (verb === 'DATA') {
+          inData = true;
+          socket.write('354 go ahead\r\n');
+        } else if (verb === 'QUIT') {
+          socket.end('221 bye\r\n');
+        } else {
+          socket.write('250 ok\r\n');
+        }
+      }
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  process.env.SMTP_HOST = '127.0.0.1';
+  process.env.SMTP_PORT = String((server.address() as AddressInfo).port);
+
+  return {
+    commands,
+    data: () => data,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+function clearSmtp() {
+  for (const name of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_SECURE']) {
+    delete process.env[name];
+  }
+  delete process.env.EMAIL_FROM;
+}
+
+await check('SMTP delivers one message with both parts and no Resend call', async () => {
+  process.env.EMAIL_FROM = 'Flone <no-reply@flone.test>';
+  const smtp = await fakeSmtp();
+  const spy = captureFetch(async () => new Response('{}', { status: 200 }));
+  try {
+    await sendMail({ ...MAIL, text: 'Plain body', html: '<p>Html body</p>' });
+    assert.equal(spy.calls.length, 0, 'SMTP send also called Resend');
+    assert.ok(smtp.commands.includes(`RCPT TO:<${MAIL.to}>`), 'wrong or missing recipient');
+    assert.match(smtp.data(), /^Subject: Subject$/m);
+    assert.match(smtp.data(), /text\/plain/);
+    assert.match(smtp.data(), /text\/html/);
+    assert.match(smtp.data(), /Plain body/);
+  } finally {
+    spy.restore();
+    await smtp.close();
+    clearSmtp();
+  }
+});
+
+await check('Resend wins when both transports are configured', async () => {
+  process.env.EMAIL_FROM = 'Flone <no-reply@flone.test>';
+  process.env.RESEND_API_KEY = 'test-key';
+  const smtp = await fakeSmtp();
+  const spy = captureFetch(async () => new Response('{}', { status: 200 }));
+  try {
+    await sendMail(MAIL);
+    assert.equal(spy.calls.length, 1);
+    assert.equal(smtp.commands.length, 0, 'SMTP was contacted although Resend is configured');
+  } finally {
+    spy.restore();
+    await smtp.close();
+    clearSmtp();
+    delete process.env.RESEND_API_KEY;
+  }
+});
+
+await check('credentials are never sent to a server without STARTTLS', async () => {
+  process.env.EMAIL_FROM = 'Flone <no-reply@flone.test>';
+  const smtp = await fakeSmtp({ offerAuth: true });
+  process.env.SMTP_USER = 'user';
+  process.env.SMTP_PASSWORD = 'SHOULD-NEVER-BE-SENT';
+  try {
+    await sendMail(MAIL);
+    assert.ok(
+      !smtp.commands.some((line) => line.toUpperCase().startsWith('AUTH')),
+      'AUTH was sent over a plaintext connection',
+    );
+    assert.equal(smtp.data(), '', 'a message was delivered over a plaintext authenticated session');
+  } finally {
+    await smtp.close();
+    clearSmtp();
+  }
+});
+
+await check('an SMTP rejection does not throw', async () => {
+  process.env.EMAIL_FROM = 'Flone <no-reply@flone.test>';
+  const smtp = await fakeSmtp({ rejectRcpt: true });
+  try {
+    await sendMail(MAIL);
+    assert.equal(smtp.data(), '');
+  } finally {
+    await smtp.close();
+    clearSmtp();
+  }
+});
+
+await check('an unreachable SMTP server does not throw', async () => {
+  process.env.EMAIL_FROM = 'Flone <no-reply@flone.test>';
+  const smtp = await fakeSmtp();
+  await smtp.close();
+  try {
+    await sendMail(MAIL);
+  } finally {
+    clearSmtp();
+  }
+});
+
+await check('an invalid SMTP_PORT sends nothing and does not throw', async () => {
+  process.env.EMAIL_FROM = 'Flone <no-reply@flone.test>';
+  const smtp = await fakeSmtp();
+  process.env.SMTP_PORT = 'not-a-port';
+  try {
+    await sendMail(MAIL);
+    assert.equal(smtp.commands.length, 0);
+  } finally {
+    await smtp.close();
+    clearSmtp();
   }
 });
 
