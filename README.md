@@ -1,6 +1,31 @@
 # Flone
 
-A small, multi-tenant Kanban application. People sign up with an email address and a password, create or join an organization, and work inside it: an organization holds projects, a project holds boards, a board holds three fixed columns (To Do, In Progress, Done), and tickets move between those columns and carry a comment thread. The organization is the tenant boundary, and it is enforced on every single read and write by walking up from the resource to its organization inside the database query itself — there is no place where one tenant can observe another. It is deliberately small: a handful of pages, exactly one third-party service (Resend, for email), and one API endpoint — an MCP server that speaks to the same authorization layer as everything else.
+**A small, self-hostable Kanban board for teams — with an MCP server built in, so your AI assistant can work the board too.**
+
+[![CI](https://github.com/thevedus/flone/actions/workflows/ci.yml/badge.svg)](https://github.com/thevedus/flone/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+
+Organizations, projects, boards, tickets, comments, @mentions, Markdown documents, reminders, recurring tickets and image attachments. One Next.js app and one Postgres database: no Redis, no queue, no websockets, nothing else to run.
+
+- **Your data, your server.** `docker compose up` and it is running. Email goes out through any SMTP server or Resend.
+- **AI-native.** `/api/mcp` exposes the whole app to Claude, Cursor or any MCP client, through the same authorization layer as the web UI. There is a [CLI](cli/) too.
+- **Built to be safe multi-tenant.** The organization is the tenant boundary, enforced inside every database query. See [Security notes](#security-notes).
+
+## Quick start (Docker)
+
+```bash
+git clone https://github.com/thevedus/flone.git && cd flone
+cp .env.docker.example .env
+# set POSTGRES_PASSWORD and CRON_SECRET (openssl rand -hex 24),
+# and SMTP_HOST=mailpit, SMTP_PORT=1025 to try it with a local inbox
+docker compose --profile mailpit up -d
+```
+
+Open [http://localhost:3000](http://localhost:3000) and register. The confirmation email lands in Mailpit at [http://localhost:8025](http://localhost:8025). **The first account to register becomes the site administrator.** For a real deployment, see [Self-hosting with Docker](#self-hosting-with-docker) or [Deploying to Railway](#deploying-to-railway).
+
+## About
+
+A multi-tenant Kanban application. People sign up with an email address and a password, create or join an organization, and work inside it. An organization holds projects, a project holds boards, and tickets move between columns and carry a comment thread. The organization is the tenant boundary. It is enforced on every read and write by walking up from the resource to its organization inside the database query itself, so there is no place where one tenant can observe another. It is deliberately small: a handful of pages, one email provider, and one API endpoint, an MCP server that speaks to the same authorization layer as everything else.
 
 `SPEC.md` in this repository is the canonical specification. If the code and this README disagree, read the spec.
 
@@ -39,7 +64,7 @@ Digests are absent because they need a scheduler on a timer for something nobody
 | **Bun** | Package manager and runtime, for install and boot speed; there is no Node-specific dependency in the tree. |
 | **zod** | Every Server Action re-parses its own `FormData`, without exception, before anything reaches the database. |
 | **node:crypto** | Password hashing (scrypt), session tokens and emailed one-time tokens use the runtime's own crypto — no native build steps, so deploys cannot break on a compiler toolchain. |
-| **Resend + react-email** | The only third-party service. `react-email` renders the templates; sending is a single `fetch` to Resend's API, so the `resend` SDK is not a dependency. With no API key configured the app prints messages to the console instead, and local development needs no account. |
+| **Resend or SMTP + react-email** | Email, the only third-party service. `react-email` renders the templates. Resend is a single `fetch`, so the `resend` SDK is not a dependency; any other mail server is reached over SMTP through `nodemailer`. With neither configured the app prints messages to the console instead, and local development needs no account. |
 | **Tailwind CSS v4** | `globals.css` is the entrypoint and the whole configuration — no `tailwind.config`, tokens declared in `src/styles/theme.css`, layout written as utilities at the call site. |
 | **Untitled UI** | The design system. Components are source in `src/components/`, not an imported package, so one is edited in place rather than overridden; `@untitledui/icons` and `tailwind-merge` come along with it. |
 | **React Aria Components + Base UI** | The unstyled primitives under those components — focus management, keyboard behaviour and ARIA wiring that is not worth hand-rolling twice. |
@@ -65,7 +90,7 @@ Create your environment file from the template:
 cp .env.example .env
 ```
 
-Then edit `.env` and point `DATABASE_URL` at your database. It is the only variable the app requires locally — leave `RESEND_API_KEY` empty and every email is printed to the console instead of sent, links included, so you can click through registration, reset and invitations without a Resend account.
+Then edit `.env` and point `DATABASE_URL` at your database. It is the only variable the app requires locally — leave `RESEND_API_KEY` and `SMTP_HOST` empty and every email is printed to the console instead of sent, links included, so you can click through registration, reset and invitations without a Resend account.
 
 Create the database schema. On a fresh checkout this generates the initial migration under `prisma/migrations/` and applies it:
 
@@ -167,6 +192,46 @@ FLONE_MCP_TOKEN=<token> bun run mcp:smoke
 
 It checks the handshake, that an unauthenticated call is a 401, and that a bad argument comes back as a tool error rather than a transport error. Then it builds a **throwaway organization of its own** — project, two boards, a ticket, a comment — exercises every tool against it, and deletes the organization in a `finally`. Your real boards are never touched, so it is safe to point at production. The three `admin_*` tools are skipped, not failed, when the token does not belong to a site administrator.
 
+## Self-hosting with Docker
+
+`docker-compose.yml` runs four things: the app, Postgres 16, a tiny scheduler that triggers reminders and recurring tickets once a minute, and (behind the `mailpit` profile) a local inbox for trying it out. Migrations are applied every time the app container starts, so upgrading is a pull and a rebuild.
+
+1. Copy the template and fill it in. Every variable is explained inline.
+
+   ```bash
+   cp .env.docker.example .env
+   ```
+
+   The ones that matter:
+
+   | Variable | What to set |
+   | --- | --- |
+   | `POSTGRES_PASSWORD` | A long random string. Read only when the database volume is first created. |
+   | `APP_URL` | The public URL, e.g. `https://flone.example.com`. Every emailed link is built from it. |
+   | `EMAIL_FROM` + `SMTP_*` *or* `RESEND_API_KEY` | Email is required: an account cannot sign in until its address is confirmed. |
+   | `CRON_SECRET` | Any random string. Without it reminders and recurring tickets never run. |
+   | `S3_*` | Optional, for image attachments. Any private S3-compatible bucket. |
+
+2. Start it:
+
+   ```bash
+   docker compose up -d
+   ```
+
+3. Put it behind HTTPS. The app listens on `PORT` (default `3000`) over plain HTTP, and in production its session cookie is `Secure`, so browsers only keep it over HTTPS or on `localhost`. Any reverse proxy works. With [Caddy](https://caddyserver.com), the whole config is:
+
+   ```
+   flone.example.com {
+     reverse_proxy localhost:3000
+   }
+   ```
+
+4. Register. The first account becomes the site administrator, and can close public registration from `/admin`.
+
+**Upgrading:** `git pull && docker compose up -d --build`. **Backups:** everything lives in Postgres (plus the bucket, if you use attachments): `docker compose exec db pg_dump -U flone flone > flone.sql`.
+
+**Attachments behind Docker:** images are served by redirecting the browser to a short-lived signed URL on the bucket, so `S3_ENDPOINT` must be reachable from people's browsers as well as from the container. Its origin is also compiled into the Content-Security-Policy, so rebuild (`--build`) after changing it.
+
 ## Deploying to Railway
 
 One service running the Next.js app, plus one Postgres database in the same project. `railway.json` in the repo root already pins the builder, build command, start command, restart policy, and health check, so the dashboard needs no build configuration.
@@ -234,8 +299,8 @@ What is deliberately **not** implemented, and what that means for you:
 - **No password change while signed in.** Changing a password means resetting it through the emailed link.
 - **No SSO, OAuth, or MFA.** Email and password is the only way in.
 - **Rate limiting is in-process only.** Login, registration, reset and resend throttles live in the memory of a single Node process, so a redeploy or crash resets every counter, and running more than one replica multiplies every limit by the replica count. scrypt's cost is the real floor here. Move the counters into Postgres before scaling out.
-- **Email delivery is best-effort and unretried.** Sending happens after the response via `after()`, and a failure is logged rather than raised — an issue that was assigned stays assigned whether or not Resend was reachable. There is no queue and no retry, on the grounds that every message is re-requestable by the user. A confirmation or reset link lost to a provider outage is recovered by asking for another.
-- **Deliverability is a domain problem, not a code problem.** If `EMAIL_FROM` is on a domain without SPF/DKIM set up in Resend, mail is rejected or lands in spam, and the app cannot tell the difference — the log line says the send failed and nothing more.
+- **Email delivery is best-effort and unretried.** Sending happens after the response via `after()`, and a failure is logged rather than raised — an issue that was assigned stays assigned whether or not the mail provider was reachable. There is no queue and no retry, on the grounds that every message is re-requestable by the user. A confirmation or reset link lost to a provider outage is recovered by asking for another.
+- **Deliverability is a domain problem, not a code problem.** If `EMAIL_FROM` is on a domain without SPF/DKIM set up for your provider, mail is rejected or lands in spam, and the app cannot tell the difference — the log line says the send failed and nothing more.
 - **The CSP is not nonce-based**, so `script-src` allows inline scripts and is not XSS protection. The app is defended by React's escaping instead: it never constructs HTML from user input, and `dangerouslySetInnerHTML` is banned. Descriptions and comments are Markdown, rendered by `react-markdown` into React elements — raw HTML in a body is escaped rather than parsed, because `rehype-raw` is deliberately absent. `bun run check:markdown` is what holds that line.
 - **An attachment's declared type is taken on trust.** The upload route checks the MIME type the browser reported and the file's real length; it does not sniff magic bytes. A renamed `.exe` is refused because the browser reports `application/octet-stream` for it, but a hand-crafted request can lie. The bytes are never executed, never re-encoded, and never served from this origin — the serve route redirects to the bucket — so what a liar wins is a file in a private bucket. Sniffing is the upgrade if that ever stops being true.
 - **Some attachments are orphaned in the bucket, by design.** Two cases. Deleting a project or an organization cascades hundreds of issue and attachment rows away in one statement, and the objects are only cleaned up on the *issue* delete path where there is a single issue to walk — doing it on a cascade means thousands of HTTP calls to reclaim pennies. And an image pasted into the new-issue dialog or a template form is uploaded before the row it will belong to exists, so abandoning that form leaves the object behind: nothing adopts it later, because adoption would mean parsing a description to decide which files are still in use, and that same parser is what would eventually delete somebody's screenshot for editing a sentence. At $0.015/GB-month, a bucket lifecycle rule is the answer if either ever matters.
@@ -258,3 +323,11 @@ What is deliberately **not** implemented, and what that means for you:
     - **Document** — title, Markdown body, optional parent document, author. A long-form page owned by the **project**, nested by `parentId` to any depth; siblings read alphabetically, because nothing drags them into an order. The parent chain is kept acyclic by the application (`src/lib/documents.ts`) — a cycle would be a page render that never terminates, not merely wrong data. Deleting one cascades to the whole subtree, and there is no trash. `shareToken` is null until the document is published on a public link and is the entire access rule for one; it is stored raw, because the row it guards holds the body in the next column.
 
 Creators of tickets, authors of comments, authors of documents and uploaders of attachments are `Restrict` references, so a user row cannot be deleted while their work exists. An assignee is `SetNull`. Everything else in the tree cascades from the organization down.
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the checks CI runs, and [SECURITY.md](SECURITY.md) for reporting a vulnerability privately.
+
+## License
+
+[GNU AGPL v3](LICENSE). You can use, modify and self-host Flone freely. If you run a modified version as a service for other people, you must make your modified source available to them.
