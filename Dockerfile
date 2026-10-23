@@ -1,5 +1,5 @@
-# The web app. `docker compose up` uses this; see "Self-hosting with Docker" in
-# the README. Railway does not: it builds with Railpack from `railway.json`.
+# The web app. `docker compose up` builds it, and so does Railway for any service
+# created since it stopped reading `railway.json`. See docs/self-hosting.md.
 #
 # Debian rather than Alpine because Prisma's schema pins `debian-openssl-3.0.x`
 # as its deploy engine, and that is what this image provides.

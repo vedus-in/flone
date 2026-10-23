@@ -8,8 +8,8 @@
 #
 #   docker compose --profile mailpit up -d
 #
-# Values come from `.env` next to this file. See "Self-hosting with Docker" in
-# the README for what each one does.
+# Values come from `.env` next to this file. See docs/self-hosting.md for what
+# each one does.
 
 services:
   db:

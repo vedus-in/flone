@@ -9,4 +9,4 @@
 - [ ] `bun run typecheck`
 - [ ] `bun run check:all`
 - [ ] `bun run build`
-- [ ] `SPEC.md` / `README.md` updated, if behaviour changed
+- [ ] `SPEC.md`, `README.md` or `docs/` updated, if behaviour changed

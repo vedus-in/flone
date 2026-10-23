@@ -18,7 +18,7 @@ Things that matter most here:
 - Access to attachments without access to their project
 - Anything that lets a request reach `/api/mcp`, `/api/attachments` or `/api/cron/reminders` without valid credentials
 
-The [Security notes](README.md#security-notes) in the README describe what is implemented and what is deliberately not, such as in-process rate limiting and a CSP that is not nonce-based. Those known limitations are not vulnerabilities by themselves, but a way to exploit them is worth reporting.
+The [Security notes](docs/security.md) describe what is implemented and what is deliberately not, such as in-process rate limiting and a CSP that is not nonce-based. Those known limitations are not vulnerabilities by themselves, but a way to exploit them is worth reporting.
 
 ## Supported versions
 

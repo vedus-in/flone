@@ -277,7 +277,7 @@ const deleteIssueSchema = z.object({ ticketId: cuid });
  * DELIBERATELY NOT WIRED TO PROJECT, BOARD OR ORGANIZATION DELETE. Those cascade
  * hundreds of issues away in one statement, and walking every object in a
  * best-effort loop would turn one query into thousands of HTTP calls for pennies
- * of storage. Objects orphaned that way stay orphaned, and the README says so.
+ * of storage. Objects orphaned that way stay orphaned, and docs/security.md says so.
  */
 async function purgeTicketAttachments(ticketId: string): Promise<void> {
   const rows = await prisma.attachment.findMany({ where: { ticketId }, select: { key: true } });

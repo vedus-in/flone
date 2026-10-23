@@ -5,7 +5,7 @@ Thanks for helping. Bug reports, fixes and small focused features are all welcom
 ## Before you start
 
 - **Bugs:** open an issue with steps to reproduce. For anything security-related, do not open an issue. See [SECURITY.md](SECURITY.md).
-- **Features:** open an issue first and describe the problem you want solved. Flone is small on purpose (see "Not included, on purpose" in the [README](README.md)), so it is worth agreeing on the shape before writing code.
+- **Features:** open an issue first and describe the problem you want solved. Flone is small on purpose (see ["Not included, on purpose"](docs/features.md#not-included-on-purpose)), so it is worth agreeing on the shape before writing code.
 - `SPEC.md` is the canonical specification. If a change alters behaviour it describes, update it in the same pull request.
 
 ## Development setup
