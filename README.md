@@ -234,11 +234,13 @@ It checks the handshake, that an unauthenticated call is a 401, and that a bad a
 
 ## Deploying to Railway
 
-One service running the Next.js app, plus one Postgres database in the same project. `railway.json` in the repo root already pins the builder, build command, start command, restart policy, and health check, so the dashboard needs no build configuration.
+One service running the Next.js app, one Postgres database, and an optional cron service for reminders, all in the same project. Railway builds the app from the root `Dockerfile`, which it always prefers when one exists, and that image applies migrations before it starts, so the dashboard needs no build or start command — only the health check path, `/login`.
 
-**Commit your migrations first.** The pre-deploy command runs `prisma migrate deploy`, which only *applies* migrations that already exist in `prisma/migrations/` — it never creates them. Run `bun run db:migrate` locally and commit the generated folder before your first deploy, or the container will start against an empty database and every request will fail.
+`railway.json` is Railway's older Config as Code format. Railway now reads it only for services created before IaC replaced it, and stops reading it on 2026-12-01; a new service ignores it.
 
-`prisma` is a runtime dependency rather than a dev dependency on purpose: dev dependencies are pruned before the release step runs, and `prisma migrate deploy` needs the CLI to be present at that point.
+**Commit your migrations first.** The container runs `prisma migrate deploy` on start, which only *applies* migrations that already exist in `prisma/migrations/` — it never creates them. Run `bun run db:migrate` locally and commit the generated folder before your first deploy, or the container will start against an empty database and every request will fail.
+
+`prisma` is a runtime dependency rather than a dev dependency on purpose: the runtime image installs production dependencies only, and `prisma migrate deploy` runs from it on every start.
 
 1. Create a Railway project and point it at this repository (or run `railway init` and `railway up` from the repo root).
 2. In that project, add a database: **New → Database → Add PostgreSQL**.
@@ -269,10 +271,18 @@ One service running the Next.js app, plus one Postgres database in the same proj
    ```
 
    Keep the bucket **private** — the app never publishes an object URL, and a public bucket would make every screenshot in every organization readable by link. `S3_ENDPOINT` is read at *build* time as well as at runtime, because the endpoint's origin has to be in the page's `img-src`: a CSP fetch directive is re-checked on every redirect hop, and the serve route is a redirect. Adding these variables triggers a redeploy, which is what puts the origin in the header — if images ever come back blocked with a console CSP violation and no server error, that build did not have the variable. Any S3-compatible bucket works (R2, B2, MinIO, S3); there is no SDK to configure.
-6. Deploy. Railpack detects `bun.lock` and installs with Bun, then runs `bun run build`. Before the new version takes traffic, the pre-deploy command runs `bunx prisma migrate deploy`; the container then starts with `bun run start`.
+6. Under **Settings → Deploy**, set the health check path to `/login`, then deploy. Railway builds the root `Dockerfile`; the container runs `prisma migrate deploy` and then `bun run start`, so a new version never serves against an old schema.
 7. Under **Settings → Networking**, generate a public domain. Railway injects `PORT` — `next start` listens on it, so the domain's **target port must match that injected value (8080), not 3000**. A mismatch here surfaces as a 502 from the Railway edge even though the container is healthy.
+8. For reminders and recurring tickets, add a `CRON_SECRET` variable on the app service (`openssl rand -base64 32`), then a second service from this repository with root directory `services/cron`, cron schedule `*/5 * * * *`, no start command and no public domain. Give it two reference variables:
 
-The health check hits `/login`, which renders without a session and without a database round-trip, so a slow or unavailable database does not cause a restart loop while the app itself is healthy. The restart policy is `ON_FAILURE` with 10 retries.
+   ```bash
+   CRON_SECRET=${{flone.CRON_SECRET}}
+   APP_URL=${{flone.APP_URL}}
+   ```
+
+   Replace `flone` with your app service's name. See [`services/cron`](services/cron/README.md).
+
+The health check hits `/login`, which renders without a session and without a database round-trip, so a slow or unavailable database does not cause a restart loop while the app itself is healthy.
 
 `NODE_ENV` is set to `production` by the build, and that is what switches the session cookie to the `__Host-` prefix and turns on the `Secure` flag. Do not override it.
 
