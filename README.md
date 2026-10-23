@@ -5,6 +5,8 @@
 [![CI](https://github.com/vedus-in/flone/actions/workflows/ci.yml/badge.svg)](https://github.com/vedus-in/flone/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/flone)
+
 Organizations, projects, boards, tickets, comments, @mentions, Markdown documents, reminders, recurring tickets and image attachments. One Next.js app and one Postgres database: no Redis, no queue, no websockets, nothing else to run.
 
 - **Your data, your server.** `docker compose up` and it is running. Email goes out through any SMTP server or Resend.
@@ -21,7 +23,7 @@ cp .env.docker.example .env
 docker compose --profile mailpit up -d
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and register. The confirmation email lands in Mailpit at [http://localhost:8025](http://localhost:8025). **The first account to register becomes the site administrator.** For a real deployment, see [Self-hosting with Docker](#self-hosting-with-docker) or [Deploying to Railway](#deploying-to-railway).
+Open [http://localhost:3000](http://localhost:3000) and register. The confirmation email lands in Mailpit at [http://localhost:8025](http://localhost:8025). **The first account to register becomes the site administrator.** For a real deployment, see [Self-hosting with Docker](#self-hosting-with-docker), or deploy to Railway in one click with the button above.
 
 ## About
 
@@ -233,6 +235,8 @@ It checks the handshake, that an unauthenticated call is a 401, and that a bad a
 **Attachments behind Docker:** images are served by redirecting the browser to a short-lived signed URL on the bucket, so `S3_ENDPOINT` must be reachable from people's browsers as well as from the container. Its origin is also compiled into the Content-Security-Policy, so rebuild (`--build`) after changing it.
 
 ## Deploying to Railway
+
+**One click:** [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/flone) creates the app, Postgres and the reminders cron service, wired together. You fill in the email settings on the deploy screen. The steps below are the same setup by hand.
 
 One service running the Next.js app, one Postgres database, and an optional cron service for reminders, all in the same project. Railway builds the app from the root `Dockerfile`, which it always prefers when one exists, and that image applies migrations before it starts, so the dashboard needs no build or start command — only the health check path, `/login`.
 
