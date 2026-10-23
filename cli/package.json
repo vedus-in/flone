@@ -1,6 +1,7 @@
 {
   "name": "flone",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "description": "Command line client for Flone — boards, issues and comments from your terminal.",
   "type": "module",
   "bin": {

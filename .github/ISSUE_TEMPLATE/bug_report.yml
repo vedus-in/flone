@@ -1,0 +1,47 @@
+name: Bug report
+description: Something does not work the way it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems go through a private report, not an issue. See SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: dropdown
+    id: hosting
+    attributes:
+      label: How are you running Flone?
+      options:
+        - Docker Compose
+        - Railway
+        - Local development (bun run dev)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      description: The output of `git rev-parse --short HEAD`, if you know it.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Server log lines around the problem. Remove anything private first.
+      render: text
