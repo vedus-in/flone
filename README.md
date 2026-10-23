@@ -2,7 +2,7 @@
 
 **A small, self-hostable Kanban board for teams — with an MCP server built in, so your AI assistant can work the board too.**
 
-[![CI](https://github.com/thevedus/flone/actions/workflows/ci.yml/badge.svg)](https://github.com/thevedus/flone/actions/workflows/ci.yml)
+[![CI](https://github.com/vedus-in/flone/actions/workflows/ci.yml/badge.svg)](https://github.com/vedus-in/flone/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 Organizations, projects, boards, tickets, comments, @mentions, Markdown documents, reminders, recurring tickets and image attachments. One Next.js app and one Postgres database: no Redis, no queue, no websockets, nothing else to run.
@@ -14,7 +14,7 @@ Organizations, projects, boards, tickets, comments, @mentions, Markdown document
 ## Quick start (Docker)
 
 ```bash
-git clone https://github.com/thevedus/flone.git && cd flone
+git clone https://github.com/vedus-in/flone.git && cd flone
 cp .env.docker.example .env
 # set POSTGRES_PASSWORD and CRON_SECRET (openssl rand -hex 24),
 # and SMTP_HOST=mailpit, SMTP_PORT=1025 to try it with a local inbox
