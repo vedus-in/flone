@@ -4,7 +4,7 @@
 
 Please **do not open a public issue** for a security problem.
 
-Report it privately through GitHub: [Report a vulnerability](https://github.com/thevedus/flone/security/advisories/new). Include what you found, how to reproduce it, and what an attacker could do with it.
+Report it privately through GitHub: [Report a vulnerability](https://github.com/vedus-in/flone/security/advisories/new). Include what you found, how to reproduce it, and what an attacker could do with it.
 
 You should get a reply within a few days. Once a fix is released, you will be credited in the advisory unless you would rather not be.
 
