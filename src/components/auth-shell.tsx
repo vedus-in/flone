@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
 
 /**
- * The calm, centered, single-column shell the signed-out pages use: a small
- * wordmark and one card, because nothing else is actionable before you are
- * signed in.
+ * The calm, centred, single-column shell the signed-out pages use: the mark
+ * and one form, card-less, as Linear's sign-in screen is -- nothing else is
+ * actionable before you are signed in.
  *
  * Extracted from `(auth)/layout.tsx` when `/invite` arrived. That route CANNOT
  * live in the `(auth)` group -- its layout bounces anyone with a session
@@ -14,27 +14,23 @@ import type { ReactNode } from 'react';
  */
 export function AuthShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-8 px-4 py-12 sm:py-16">
-      <header className="flex flex-col items-center gap-3 text-center">
-        {/*
-         * A letter mark, not an icon font and not an emoji: one element, no
-         * network request, and it inherits the theme's accent tokens in both
-         * light and dark. `aria-hidden` because the wordmark beneath it already
-         * says the name.
-         */}
-        <span
-          aria-hidden="true"
-          className="grid size-10 place-items-center rounded-xl bg-brand-solid text-base font-semibold text-white"
-        >
-          K
-        </span>
-        <div className="flex flex-col gap-1">
-          <span className="text-base font-semibold tracking-tight text-primary">Flone</span>
-          <p className="text-sm text-tertiary">A simple, secure board for small teams.</p>
-        </div>
-      </header>
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-8 bg-primary px-4 py-12 sm:py-16">
+      {/*
+       * The app's own mark -- the three bars from `icon.svg` -- drawn in the
+       * text colour, as Linear shows its logo on the login screen. Inline SVG:
+       * no request, and it follows the theme. `aria-label` because it is the
+       * only place the product is named before the form's heading.
+       */}
+      <svg viewBox="0 0 32 32" role="img" aria-label="Flone" className="size-10 text-primary">
+        <rect x="3" y="5" width="6" height="22" rx="2" fill="currentColor" />
+        <rect x="13" y="5" width="6" height="16" rx="2" fill="currentColor" />
+        <rect x="23" y="5" width="6" height="11" rx="2" fill="currentColor" />
+      </svg>
 
-      <main className="w-full max-w-[26rem]">{children}</main>
+      {/* Linear's sign-in column is taller than the app's 32px controls. */}
+      <main className="w-full max-w-[22rem] [&_button[type=submit]]:h-10 [&_input:not([type=checkbox]):not([type=radio]):not([type=hidden])]:h-10">
+        {children}
+      </main>
     </div>
   );
 }

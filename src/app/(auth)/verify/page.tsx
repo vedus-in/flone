@@ -42,9 +42,9 @@ export default async function VerifyPage({
 
   if (payload && parsed.success) {
     return (
-      <Card className="gap-6 p-6 sm:p-7">
-        <Card.Header className="gap-1.5">
-          <h1 className="text-lg leading-6 font-semibold text-primary">Confirm your email</h1>
+      <Card className="gap-7 border-0 bg-transparent p-0">
+        <Card.Header className="items-center gap-2 text-center">
+          <h1 className="text-xl font-semibold text-primary">Confirm your email</h1>
           <Card.Description>
             Confirm {payload.email} and you will be signed in.
           </Card.Description>
@@ -63,9 +63,9 @@ export default async function VerifyPage({
   }
 
   return (
-    <Card className="gap-6 p-6 sm:p-7">
-      <Card.Header className="gap-1.5">
-        <h1 className="text-lg leading-6 font-semibold text-primary">
+    <Card className="gap-7 border-0 bg-transparent p-0">
+      <Card.Header className="items-center gap-2 text-center">
+        <h1 className="text-xl font-semibold text-primary">
           {token ? 'That link no longer works' : 'Send a confirmation link'}
         </h1>
         <Card.Description>
@@ -95,7 +95,7 @@ export default async function VerifyPage({
         </ActionForm>
       </Card.Content>
 
-      <Card.Footer className="justify-center gap-1.5 border-t border-secondary pt-6 text-sm text-tertiary">
+      <Card.Footer className="justify-center gap-1.5 text-sm text-tertiary">
         <span>Already confirmed?</span>
         <Link href="/login" className={LINK}>
           Sign in

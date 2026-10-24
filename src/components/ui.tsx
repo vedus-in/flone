@@ -11,7 +11,6 @@ import NextLink from 'next/link';
 import Markdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
-import { Badge as UntitledBadge } from '@/components/base/badges/badges';
 import { Label } from '@/components/base/input/label';
 import { IconChevronRight } from '@/components/icons';
 import { remarkMentions } from '@/lib/mentions';
@@ -351,12 +350,12 @@ export function Prose({
 
 export type BadgeTone = 'neutral' | 'accent' | 'danger' | 'success' | 'warning';
 
-const TONE_COLOR = {
-  neutral: 'gray',
-  accent: 'brand',
-  danger: 'error',
-  success: 'success',
-  warning: 'warning',
+const TONE_CLASS = {
+  neutral: 'border-secondary text-tertiary',
+  accent: 'border-brand/40 bg-brand-primary text-brand-secondary',
+  danger: 'border-error_subtle/60 text-error-primary',
+  success: 'border-secondary text-success-primary',
+  warning: 'border-secondary text-warning-primary',
 } as const satisfies Record<BadgeTone, string>;
 
 type BadgeProps = {
@@ -366,17 +365,25 @@ type BadgeProps = {
 };
 
 /**
- * Small inline status pill: a role, a project key, a column name.
+ * Small inline status pill: a role, a project key, a column name. Linear's
+ * quiet version -- a hairline border and a tinted label rather than a filled
+ * blob, so a row full of them still reads as one row.
  *
- * The app's `tone` vocabulary is kept rather than adopting Untitled UI's colour
+ * The app's `tone` vocabulary is kept rather than adopting a palette's colour
  * names, because it says what the badge MEANS -- `danger` survives a rebrand
  * that turns error red into something else.
  */
 export function Badge({ tone = 'neutral', className, children }: BadgeProps) {
   return (
-    <UntitledBadge type="pill-color" color={TONE_COLOR[tone]} size="sm" className={className}>
+    <span
+      className={cx(
+        'inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-xs font-medium whitespace-nowrap',
+        TONE_CLASS[tone],
+        className,
+      )}
+    >
       {children}
-    </UntitledBadge>
+    </span>
   );
 }
 

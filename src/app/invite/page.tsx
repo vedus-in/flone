@@ -53,9 +53,9 @@ export default async function InvitePage({
 
   if (!payload || !parsed.success || !payload.organizationId || !payload.role) {
     return (
-      <Card className="gap-6 p-6 sm:p-7">
-        <Card.Header className="gap-1.5">
-          <h1 className="text-lg leading-6 font-semibold text-primary">
+      <Card className="gap-7 border-0 bg-transparent p-0">
+        <Card.Header className="items-center gap-2 text-center">
+          <h1 className="text-xl font-semibold text-primary">
             That invitation no longer works
           </h1>
           <Card.Description>
@@ -94,9 +94,9 @@ export default async function InvitePage({
 
   if (session && session.user.email !== payload.email) {
     return (
-      <Card className="gap-6 p-6 sm:p-7">
-        <Card.Header className="gap-1.5">
-          <h1 className="text-lg leading-6 font-semibold text-primary">
+      <Card className="gap-7 border-0 bg-transparent p-0">
+        <Card.Header className="items-center gap-2 text-center">
+          <h1 className="text-xl font-semibold text-primary">
             This invitation is for someone else
           </h1>
           <Card.Description>
@@ -126,9 +126,9 @@ export default async function InvitePage({
 
   if (session) {
     return (
-      <Card className="gap-6 p-6 sm:p-7">
-        <Card.Header className="gap-1.5">
-          <h1 className="text-lg leading-6 font-semibold text-primary">Join {orgName}</h1>
+      <Card className="gap-7 border-0 bg-transparent p-0">
+        <Card.Header className="items-center gap-2 text-center">
+          <h1 className="text-xl font-semibold text-primary">Join {orgName}</h1>
           <Card.Description>
             {invitedBy} invited you to join {orgName} as {role}.
           </Card.Description>
@@ -151,9 +151,9 @@ export default async function InvitePage({
   /* ---------------------------------------------------------------------- */
 
   return (
-    <Card className="gap-6 p-6 sm:p-7">
-      <Card.Header className="gap-1.5">
-        <h1 className="text-lg leading-6 font-semibold text-primary">Join {orgName}</h1>
+    <Card className="gap-7 border-0 bg-transparent p-0">
+      <Card.Header className="items-center gap-2 text-center">
+        <h1 className="text-xl font-semibold text-primary">Join {orgName}</h1>
         <Card.Description>
           {invitedBy} invited {payload.email} to join {orgName} as {role}. Choose a password and
           you are in.
@@ -198,7 +198,7 @@ export default async function InvitePage({
         </ActionForm>
       </Card.Content>
 
-      <Card.Footer className="justify-center gap-1.5 border-t border-secondary pt-6 text-sm text-tertiary">
+      <Card.Footer className="justify-center gap-1.5 text-sm text-tertiary">
         <span>Already have an account?</span>
         <Link href="/login" className={LINK}>
           Sign in first

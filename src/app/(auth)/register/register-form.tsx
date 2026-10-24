@@ -63,9 +63,9 @@ export function RegisterForm() {
    */
   if (state?.ok) {
     return (
-      <Card className="gap-6 p-6 sm:p-7">
-        <Card.Header className="gap-1.5">
-          <h1 className="text-lg leading-6 font-semibold text-primary">Check your inbox</h1>
+      <Card className="gap-7 border-0 bg-transparent p-0">
+        <Card.Header className="items-center gap-2 text-center">
+          <h1 className="text-xl font-semibold text-primary">Check your inbox</h1>
           <Card.Description>{state.message}</Card.Description>
         </Card.Header>
 
@@ -89,9 +89,9 @@ export function RegisterForm() {
   }
 
   return (
-    <Card className="gap-6 p-6 sm:p-7">
-      <Card.Header className="gap-1.5">
-        <h1 className="text-lg leading-6 font-semibold text-primary">Create your account</h1>
+    <Card className="gap-7 border-0 bg-transparent p-0">
+      <Card.Header className="items-center gap-2 text-center">
+        <h1 className="text-xl font-semibold text-primary">Create your account</h1>
         <Card.Description>Three fields and you are in.</Card.Description>
       </Card.Header>
 
@@ -159,7 +159,7 @@ export function RegisterForm() {
         </form>
       </Card.Content>
 
-      <Card.Footer className="justify-center gap-1.5 border-t border-secondary pt-6 text-sm text-tertiary">
+      <Card.Footer className="justify-center gap-1.5 text-sm text-tertiary">
         <span>Already have an account?</span>
         <Link href="/login" className={LINK}>
           Sign in

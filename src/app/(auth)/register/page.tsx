@@ -36,9 +36,9 @@ export default async function RegisterPage() {
   if (await isRegistrationOpen()) return <RegisterForm />;
 
   return (
-    <Card className="gap-6 p-6 sm:p-7">
-      <Card.Header className="gap-1.5">
-        <h1 className="text-lg leading-6 font-semibold text-primary">Registration is closed</h1>
+    <Card className="gap-7 border-0 bg-transparent p-0">
+      <Card.Header className="items-center gap-2 text-center">
+        <h1 className="text-xl font-semibold text-primary">Registration is closed</h1>
         <Card.Description>
           This Flone instance is not accepting new accounts right now.
         </Card.Description>

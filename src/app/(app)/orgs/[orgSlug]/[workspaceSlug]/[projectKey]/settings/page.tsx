@@ -5,8 +5,8 @@ import { Trash01 } from '@untitledui/icons';
 
 import { projectCrumb } from '@/components/crumbs';
 import { PageBar, PageBody } from '@/components/page-bar';
-import { StateIcon } from '@/components/issue-row';
-import { Avatar, Badge, Card, Field, Input, SubmitButton, Textarea } from '@/components/ui';
+import { Assignee, StateIcon } from '@/components/issue-row';
+import { Badge, Card, Field, Input, SubmitButton, Textarea } from '@/components/ui';
 import { SettingsNav, type SettingsNavItem } from '@/components/settings-nav';
 import {
   ColorSwatches,
@@ -354,7 +354,7 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
                   {named.map((member) => (
                     <SettingsRow key={member.user.id} className="justify-between">
                       <div className="flex min-w-0 items-center gap-3">
-                        <Avatar size="sm" initials={initials(member.user.name)} />
+                        <Assignee name={member.user.name} size="md" />
                         <div className="flex min-w-0 flex-col">
                           <span className="truncate text-sm text-primary">{member.user.name}</span>
                           <span className="truncate text-xs text-tertiary">{member.user.email}</span>

@@ -220,7 +220,7 @@ export function ChallengePicker({
           ))}
         </select>
 
-        <label className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-secondary px-2.5 text-sm text-primary transition-colors hover:border-tertiary has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-focus-ring">
+        <label className="flex h-7 cursor-pointer items-center gap-2 rounded-md border border-secondary px-2 text-xs text-primary transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-focus-ring">
           <input
             type="checkbox"
             checked={value.mine}
