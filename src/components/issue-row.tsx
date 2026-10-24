@@ -373,7 +373,9 @@ export function IssueRowView({ row, action }: { row: IssueRow; action?: React.Re
       </span>
 
       {action ? (
-        <span className="relative z-10 -me-2 flex shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100">
+        // Hidden until hover only where there IS hover; on touch it is the
+        // only way into the menu, so it stays.
+        <span className="relative z-10 -me-2 flex shrink-0 transition-opacity focus-within:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:has-[[data-popup-open]]:opacity-100">
           {action}
         </span>
       ) : null}

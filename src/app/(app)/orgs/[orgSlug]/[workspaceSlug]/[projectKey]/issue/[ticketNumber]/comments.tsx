@@ -79,18 +79,6 @@ function resultError(state: ActionResult | null): string | null {
   return state && !state.ok ? state.error : null;
 }
 
-/**
- * `Array.from` rather than indexing: a name may begin with an astral character,
- * and `name[0]` would slice a surrogate pair in half.
- */
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  const first = Array.from(parts[0])[0] ?? '';
-  const last = parts.length > 1 ? (Array.from(parts[parts.length - 1])[0] ?? '') : '';
-  return (first + last).toLocaleUpperCase();
-}
-
 /** One `FormData` shape for both comment actions; body is omitted for delete. */
 function commentPayload(commentId: string, body?: string): FormData {
   const data = new FormData();

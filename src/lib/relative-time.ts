@@ -16,5 +16,6 @@ export function relativeTime(value: Date, now: Date): string {
   if (days < 30) return `${Math.floor(days / 7)}w ago`;
   const months = Math.floor(days / 30);
   if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(days / 365)}y ago`;
+  // Twelve 30-day months is 360 days, five short of a year: never print 0y.
+  return `${Math.max(1, Math.floor(days / 365))}y ago`;
 }

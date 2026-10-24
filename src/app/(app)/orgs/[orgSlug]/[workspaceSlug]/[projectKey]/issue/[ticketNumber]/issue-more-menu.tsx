@@ -29,10 +29,14 @@ export function IssueMoreMenu({
   const [pending, startTransition] = useTransition();
 
   function copy(text: string) {
-    navigator.clipboard.writeText(text).then(
-      () => setError(null),
-      () => setError('Could not copy to the clipboard.'),
-    );
+    const fail = () => {
+      setError('Could not copy to the clipboard.');
+      window.setTimeout(() => setError(null), 4000);
+    };
+    // `navigator.clipboard` does not exist on an insecure origin, and then the
+    // call throws rather than rejecting.
+    if (!navigator.clipboard) return fail();
+    navigator.clipboard.writeText(text).then(() => setError(null), fail);
   }
 
   function remove() {

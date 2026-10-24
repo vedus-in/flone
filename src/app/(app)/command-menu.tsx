@@ -43,6 +43,7 @@ import {
   IconWorkspaces,
 } from '@/components/icons';
 import { ProjectGlyph } from '@/components/page-bar';
+import { isTypingTarget, overlayHasFocus } from '@/lib/hotkey';
 import { setThemePreference } from '@/lib/theme';
 import { OPEN_COMMAND_MENU_EVENT, requestCompose } from '@/lib/shell-events';
 import { cx } from '@/lib/utils/cx';
@@ -71,19 +72,6 @@ type CommandMenuProps = {
   composeHash: string;
 };
 
-/** True when a keystroke belongs to whatever has focus, not to the app. */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  const tag = target.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-}
-
-/** Another dialog or menu owns the keyboard right now. */
-function overlayOpen(): boolean {
-  return Boolean(document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]'));
-}
-
 function matches(command: Command, query: string): boolean {
   if (!query) return true;
   const haystack = `${command.label} ${command.keywords ?? ''} ${command.group}`.toLowerCase();
@@ -110,14 +98,28 @@ export function CommandMenu({ orgs, activeOrg, activeProject, isAdmin, composeHa
 
   const go = useCallback((href: string) => router.push(href), [router]);
 
-  /** Start an issue: the page's own composer if it has one, else the project's. */
+  const openMenu = useCallback((mode?: 'compose') => {
+    setQuery('');
+    setComposeOnly(mode === 'compose');
+    setOpen(true);
+  }, []);
+
+  /**
+   * Start an issue. The composer already on the page takes it when it belongs
+   * to the right project -- a hash-only navigation to the page you are on would
+   * not remount it, so it would never see `#new-issue`. Otherwise go to the
+   * project's issues page and let its composer open on arrival; with no project
+   * in hand and several to choose from, ask which.
+   */
   const compose = useCallback(
     (project: ShellProject | null) => {
-      if (!project && requestCompose()) return;
-      const target = project ?? activeProject ?? projects[0];
+      const onPage = !project || project.id === activeProject?.id;
+      if (onPage && requestCompose()) return;
+      const target = project ?? activeProject ?? (projects.length === 1 ? projects[0] : null);
       if (target) go(`${target.issuesHref}${composeHash}`);
+      else if (projects.length > 1) openMenu('compose');
     },
-    [activeProject, composeHash, go, projects],
+    [activeProject, composeHash, go, openMenu, projects],
   );
 
   const commands = useMemo<Command[]>(() => {
@@ -220,11 +222,12 @@ export function CommandMenu({ orgs, activeOrg, activeProject, isAdmin, composeHa
   const visible = useMemo(() => {
     const pool = composeOnly ? commands.filter((command) => command.id.startsWith('compose')) : commands;
     const filtered = pool.filter((command) => matches(command, query.trim()));
-    // A free-text search of the issues, offered first whenever there is text.
+    // A free-text search of the issues, offered whenever there is text -- after
+    // the commands that match, so Enter still runs the command being typed.
     if (query.trim() && activeProject) {
       const q = query.trim();
       const target = activeProject;
-      filtered.unshift({
+      filtered.push({
         id: 'search-issues',
         group: 'Search',
         label: `Search issues for “${q}”`,
@@ -236,12 +239,6 @@ export function CommandMenu({ orgs, activeOrg, activeProject, isAdmin, composeHa
   }, [activeProject, commands, composeOnly, go, query]);
 
   useEffect(() => setActiveIndex(0), [query, composeOnly, open]);
-
-  const openMenu = useCallback((mode?: 'compose') => {
-    setQuery('');
-    setComposeOnly(mode === 'compose');
-    setOpen(true);
-  }, []);
 
   function runCommand(command: Command) {
     setOpen(false);
@@ -279,14 +276,18 @@ export function CommandMenu({ orgs, activeOrg, activeProject, isAdmin, composeHa
       if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         if (open) setOpen(false);
-        else if (!overlayOpen()) openMenu();
+        else if (!overlayHasFocus()) openMenu();
         return;
       }
 
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (open || helpOpen || isTypingTarget(event.target) || overlayOpen()) return;
+      if (open || helpOpen || isTypingTarget(event.target) || overlayHasFocus()) return;
 
       const key = event.key.toLowerCase();
+
+      // A bare modifier keydown (reaching for Shift) neither ends a pending
+      // `G` sequence nor is anything on its own.
+      if (event.key === 'Shift' || event.key === 'Control' || event.key === 'Alt' || event.key === 'Meta') return;
 
       if (pendingG !== null) {
         window.clearTimeout(pendingG);
@@ -524,7 +525,7 @@ function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
       isOpen={open}
       onOpenChange={onOpenChange}
       isDismissable
-      className="fixed inset-0 z-50 flex justify-end bg-overlay/0"
+      className="fixed inset-0 z-50 flex justify-end bg-transparent"
     >
       <Modal className="m-2 h-[calc(100dvh-16px)] w-full max-w-[360px] overflow-hidden rounded-lg border border-secondary_alt bg-elevated shadow-2xl outline-hidden duration-150 ease-out animate-in slide-in-from-right-4 fade-in">
         <Dialog aria-label="Keyboard shortcuts" className="flex h-full flex-col outline-hidden">

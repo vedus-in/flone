@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, type ReactNode } from 'react';
 
+import { keyBelongsElsewhere } from '@/lib/hotkey';
+
 /**
  * Keyboard movement through an issue list: `J` / `↓` to the next row, `K` / `↑`
  * to the previous one, `Enter` to open it (the row's link handles that itself).
@@ -16,13 +18,7 @@ export function IssueListKeys({ children, className }: { children: ReactNode; cl
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target;
-      if (target instanceof HTMLElement) {
-        const tag = target.tagName;
-        if (target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      }
-      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return;
+      if (event.shiftKey || keyBelongsElsewhere(event)) return;
 
       const step =
         event.key === 'j' || event.key === 'ArrowDown' ? 1 : event.key === 'k' || event.key === 'ArrowUp' ? -1 : 0;
