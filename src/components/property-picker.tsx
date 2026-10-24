@@ -15,12 +15,13 @@
  * delivers the new value back down as props.
  */
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { Combobox } from '@base-ui/react/combobox';
 import { Priority } from '@prisma/client';
 import type { WorkflowStateType } from '@prisma/client';
 
 import { PriorityIcon, StateIcon } from '@/components/issue-row';
+import { useHotkey } from '@/lib/hotkey';
 import { PRIORITY_LABEL } from '@/lib/model';
 import { cx } from '@/lib/utils/cx';
 
@@ -46,6 +47,11 @@ type PropertyPickerProps = {
   placeholder: string;
   /** Display-only kbd chip beside the input, e.g. "S". */
   shortcutHint?: string;
+  /**
+   * Bind `shortcutHint` as a page-wide key that opens this picker. Only for a
+   * page with one picker per property -- the issue page, not a board of cards.
+   */
+  hotkey?: boolean;
   onSelect: (id: string) => void;
   /** Trigger content. The trigger itself is a plain button. */
   children: ReactNode;
@@ -70,6 +76,7 @@ export function PropertyPicker({
   currentId,
   placeholder,
   shortcutHint,
+  hotkey = false,
   onSelect,
   children,
   triggerClassName,
@@ -82,6 +89,7 @@ export function PropertyPicker({
   // Controlled solely so the digit shortcut below can dismiss the popup;
   // item clicks and Escape already close it on their own.
   const [open, setOpen] = useState(false);
+  useHotkey(hotkey ? shortcutHint : null, useCallback(() => setOpen(true), []));
 
   return (
     <Combobox.Root
@@ -111,8 +119,8 @@ export function PropertyPicker({
 
       <Combobox.Portal>
         <Combobox.Positioner side="bottom" align="start" sideOffset={4} className="z-50 outline-none">
-          <Combobox.Popup className="w-64 origin-[var(--transform-origin)] rounded-xl border border-secondary bg-primary shadow-2xl outline-none">
-            <div className="flex items-center gap-2 border-b border-secondary px-3 py-2">
+          <Combobox.Popup className="w-64 origin-[var(--transform-origin)] rounded-lg border border-secondary_alt bg-elevated shadow-lg outline-none">
+            <div className="flex h-10 items-center gap-2 border-b border-secondary_alt px-3">
               <Combobox.Input
                 placeholder={placeholder}
                 className="min-w-0 flex-1 bg-transparent text-sm text-primary outline-none placeholder:text-tertiary"
@@ -129,13 +137,13 @@ export function PropertyPicker({
                 }}
               />
               {shortcutHint ? (
-                <kbd className="grid size-5 shrink-0 place-items-center rounded border border-secondary font-mono text-[0.625rem] text-tertiary">
+                <kbd className="grid size-5 shrink-0 place-items-center rounded border border-secondary_alt bg-tertiary text-[0.6875rem] font-medium text-tertiary">
                   {shortcutHint}
                 </kbd>
               ) : null}
             </div>
 
-            <Combobox.Empty className="px-3 py-2 text-sm text-tertiary">
+            <Combobox.Empty className="px-3 py-2 text-sm text-tertiary empty:hidden">
               No matches.
             </Combobox.Empty>
 
@@ -144,7 +152,7 @@ export function PropertyPicker({
                 <Combobox.Item
                   key={option.id}
                   value={option}
-                  className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-primary outline-none data-[highlighted]:bg-secondary md:py-1.5"
+                  className="flex cursor-default select-none items-center gap-2.5 rounded-md px-2 py-2 text-sm text-secondary outline-none data-[highlighted]:bg-elevated_hover data-[highlighted]:text-primary md:py-1.5"
                 >
                   {option.icon}
                   <span className={cx('min-w-0 flex-1 truncate', option.labelClassName)}>

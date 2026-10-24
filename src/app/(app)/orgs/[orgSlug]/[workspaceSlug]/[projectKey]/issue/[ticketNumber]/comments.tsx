@@ -46,14 +46,12 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { Avatar } from '@/components/base/avatar/avatar';
+import { Assignee } from '@/components/issue-row';
 
 import { AttachImageButton, useImageAttach } from '@/components/image-attach';
-import { Button, FormError, Prose, Separator, SubmitButton, Textarea } from '@/components/ui';
+import { Button, FormError, Prose, SubmitButton, Textarea } from '@/components/ui';
 import type { ActionResult } from '@/lib/result';
 import { cx } from '@/lib/utils/cx';
-// Issue writes live at PROJECT scope now; only the comment actions are local.
-import { deleteIssue } from '../../issue-actions';
 import { createComment, deleteComment, updateComment } from './actions';
 
 /* -------------------------------------------------------------------------- */
@@ -66,6 +64,8 @@ export type CommentItem = {
   authorName: string;
   /** Pre-formatted on the server so the client never re-derives a locale. */
   createdAtLabel: string;
+  /** "5mo ago", also pre-formatted on the server against one `now`. */
+  createdAtRelative: string;
   createdAtIso: string;
   edited: boolean;
   /** Author, or ADMIN/OWNER. Re-checked server-side on every action. */
@@ -79,18 +79,6 @@ function resultError(state: ActionResult | null): string | null {
   return state && !state.ok ? state.error : null;
 }
 
-/**
- * `Array.from` rather than indexing: a name may begin with an astral character,
- * and `name[0]` would slice a surrogate pair in half.
- */
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  const first = Array.from(parts[0])[0] ?? '';
-  const last = parts.length > 1 ? (Array.from(parts[parts.length - 1])[0] ?? '') : '';
-  return (first + last).toLocaleUpperCase();
-}
-
 /** One `FormData` shape for both comment actions; body is omitted for delete. */
 function commentPayload(commentId: string, body?: string): FormData {
   const data = new FormData();
@@ -100,51 +88,8 @@ function commentPayload(commentId: string, body?: string): FormData {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Disclosure                                                                  */
+/* Avatar                                                                      */
 /* -------------------------------------------------------------------------- */
-
-type CollapsibleProps = {
-  summary: ReactNode;
-  children: ReactNode;
-  tone?: 'default' | 'danger';
-  className?: string;
-};
-
-/**
- * A `<details>`, not a scripted disclosure: it is the accessible default, it
- * works before hydration, and the form inside stays mounted when it closes.
- */
-function Collapsible({ summary, children, tone = 'default', className }: CollapsibleProps) {
-  return (
-    <details className={cx('group', className)}>
-      <summary
-        className={cx(
-          'flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md text-xs font-medium transition-colors',
-          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
-          '[&::-webkit-details-marker]:hidden',
-          tone === 'danger' ? 'text-error-primary' : 'text-tertiary hover:text-primary',
-        )}
-      >
-        <svg
-          viewBox="0 0 16 16"
-          fill="none"
-          aria-hidden="true"
-          className="size-3 shrink-0 transition-transform group-open:rotate-90"
-        >
-          <path
-            d="M6 3.5 10.5 8 6 12.5"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        {summary}
-      </summary>
-      <div className="pt-3">{children}</div>
-    </details>
-  );
-}
 
 /**
  * Purely decorative: the author's full name is rendered as real text right
@@ -153,37 +98,9 @@ function Collapsible({ summary, children, tone = 'default', className }: Collaps
  */
 function Initials({ name, className }: { name: string; className?: string }) {
   return (
-    // Untitled UI's `Avatar` takes a fixed prop list and does not spread the
-    // rest, so `aria-hidden` goes on a wrapper rather than the component.
-    <span aria-hidden="true" className={cx('mt-0.5 shrink-0', className)}>
-      <Avatar size="xs" initials={initials(name)} contentClassName="text-xs" />
+    <span aria-hidden="true" className={cx('flex shrink-0', className)}>
+      <Assignee name={name} />
     </span>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Delete ticket                                                               */
-/* -------------------------------------------------------------------------- */
-
-export function TicketDeleteForm({ ticketId }: { ticketId: string }) {
-  const [state, action] = useActionState(deleteIssue, null);
-
-  return (
-    <Collapsible summary="Delete this issue" tone="danger">
-      <form action={action} className="flex flex-col gap-3">
-        <input type="hidden" name="ticketId" value={ticketId} />
-        <p className="text-sm text-tertiary">
-          This permanently deletes the issue and all of its comments. Any sub-issues survive and
-          simply lose their parent. This cannot be undone.
-        </p>
-        <div className="flex">
-          <SubmitButton color="primary-destructive" size="sm" pendingLabel="Deleting...">
-            Yes, delete this issue
-          </SubmitButton>
-        </div>
-        <FormError>{resultError(state)}</FormError>
-      </form>
-    </Collapsible>
   );
 }
 
@@ -331,7 +248,7 @@ function MentionTextarea({
           id={listId}
           role="listbox"
           aria-label="Mention a member"
-          className="absolute bottom-full left-0 z-30 mb-1 max-h-56 w-64 overflow-y-auto rounded-xl border border-secondary bg-primary p-1 shadow-lg"
+          className="absolute bottom-full left-0 z-30 mb-1 max-h-56 w-64 overflow-y-auto rounded-lg border border-secondary_alt bg-elevated p-1 shadow-lg"
         >
           {matches.map((member, index) => (
             <div
@@ -345,8 +262,8 @@ function MentionTextarea({
               onClick={() => insert(member)}
               onMouseEnter={() => setActive(index)}
               className={cx(
-                'flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm',
-                index === active ? 'bg-secondary text-primary' : 'text-secondary',
+                'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm',
+                index === active ? 'bg-elevated_hover text-primary' : 'text-secondary',
               )}
             >
               <Initials name={member.name} className="mt-0" />
@@ -468,14 +385,17 @@ function CommentRow({
   }
 
   return (
-    <li className="group flex gap-3">
-      <Initials name={comment.authorName} />
-
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+    <li className="group rounded-lg border border-secondary_alt bg-secondary px-4 py-3">
+      <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <Initials name={comment.authorName} />
           <span className="text-sm font-medium text-primary">{comment.authorName}</span>
-          <time className="text-xs text-tertiary" dateTime={comment.createdAtIso}>
-            {comment.createdAtLabel}
+          <time
+            className="text-xs text-tertiary"
+            dateTime={comment.createdAtIso}
+            title={comment.createdAtLabel}
+          >
+            {comment.createdAtRelative}
           </time>
           {comment.edited ? <span className="text-xs text-tertiary">edited</span> : null}
 
@@ -528,7 +448,7 @@ function CommentRow({
             </div>
           </div>
         ) : (
-          <Prose mentions={names} className={cx(pending && 'opacity-60')}>
+          <Prose mentions={names} className={cx('ps-[26px] leading-6 text-secondary', pending && 'opacity-60')}>
             {value}
           </Prose>
         )}
@@ -539,22 +459,38 @@ function CommentRow({
   );
 }
 
+/** A system entry in the activity timeline: "Ada created the issue". */
+export type ActivityEvent = {
+  id: string;
+  atIso: string;
+  icon: ReactNode;
+  content: ReactNode;
+};
+
 type CommentThreadProps = {
   ticketId: string;
   comments: CommentItem[];
+  /** Interleaved with the comments by time. */
+  events?: ActivityEvent[];
   members: Member[];
   /** The signed-in member's name, for the composer's avatar. Display only. */
   currentUserName: string;
 };
 
+/**
+ * Linear's activity column: system events as one quiet line each, comments as
+ * cards, all in time order, and the comment box at the foot.
+ */
 export function CommentThread({
   ticketId,
   comments,
+  events = [],
   members,
   currentUserName,
 }: CommentThreadProps) {
   const [state, action] = useActionState(createComment, null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   // Controlled, deliberately. React 19 resets a `<form action={fn}>` after the
   // action settles regardless of what it resolved to, so an uncontrolled
@@ -576,55 +512,90 @@ export function CommentThread({
     }
   }, [state]);
 
+  const timeline = useMemo(
+    () =>
+      [
+        ...events.map((event) => ({ kind: 'event' as const, at: event.atIso, event })),
+        ...comments.map((comment) => ({ kind: 'comment' as const, at: comment.createdAtIso, comment })),
+      ]
+        // Creation opens the story whatever the clocks say; the rest by time.
+        .sort((a, b) =>
+          a.kind === 'event' && a.event.id === 'created'
+            ? -1
+            : b.kind === 'event' && b.event.id === 'created'
+              ? 1
+              : a.at < b.at
+                ? -1
+                : a.at > b.at
+                  ? 1
+                  : 0,
+        ),
+    [comments, events],
+  );
+
   return (
-    <div className="flex flex-col gap-6">
-      {comments.length > 0 ? (
-        <ol className="flex flex-col gap-6">
-          {comments.map((comment) => (
-            <CommentRow
-              key={comment.id}
-              comment={comment}
-              members={members}
-              ticketId={ticketId}
-            />
-          ))}
+    <div className="flex flex-col gap-4">
+      {timeline.length > 0 ? (
+        <ol className="flex flex-col gap-3">
+          {timeline.map((entry) =>
+            entry.kind === 'event' ? (
+              <li key={entry.event.id} className="flex min-h-6 items-center gap-2.5 ps-1 text-xs text-tertiary">
+                <span className="grid size-[18px] shrink-0 place-items-center">{entry.event.icon}</span>
+                <span className="min-w-0">{entry.event.content}</span>
+              </li>
+            ) : (
+              <CommentRow
+                key={entry.comment.id}
+                comment={entry.comment}
+                members={members}
+                ticketId={ticketId}
+              />
+            ),
+          )}
         </ol>
-      ) : (
-        <p className="text-sm text-tertiary">No comments yet. Start the conversation below.</p>
-      )}
+      ) : null}
 
-      <Separator />
-
-      <form action={action} className="flex gap-3">
-        <Initials name={currentUserName} className="max-sm:hidden" />
-
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <input type="hidden" name="ticketId" value={ticketId} />
-          <label className="visually-hidden" htmlFor="new-comment">
-            Add a comment
-          </label>
-          <MentionTextarea
-            id="new-comment"
-            textareaRef={bodyRef}
-            members={members}
-            name="body"
-            maxLength={5000}
-            rows={3}
-            required
-            placeholder="Write a comment... type @ to mention someone, paste an image to attach it"
-            value={body}
-            onValueChange={setBody}
-            {...attach.textareaProps}
-          />
-          <div className="flex items-center justify-end gap-2">
-            <AttachImageButton attach={attach} />
-            {/* Posting mid-upload would store the `![uploading ...]` placeholder. */}
-            <SubmitButton size="sm" pendingLabel="Posting..." isDisabled={attach.uploading}>
-              Comment
-            </SubmitButton>
-          </div>
-          <FormError>{resultError(state) ?? attach.error}</FormError>
+      <form
+        ref={formRef}
+        action={action}
+        className="rounded-lg border border-secondary_alt bg-secondary transition-colors focus-within:border-primary"
+      >
+        <input type="hidden" name="ticketId" value={ticketId} />
+        <label className="visually-hidden" htmlFor="new-comment">
+          Add a comment as {currentUserName}
+        </label>
+        <MentionTextarea
+          id="new-comment"
+          textareaRef={bodyRef}
+          members={members}
+          name="body"
+          maxLength={5000}
+          rows={1}
+          required
+          placeholder="Leave a comment..."
+          value={body}
+          onValueChange={setBody}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault();
+              if (!attach.uploading) formRef.current?.requestSubmit();
+            }
+          }}
+          {...attach.textareaProps}
+          className="min-h-12 resize-none bg-transparent px-4 pt-3 pb-1 text-sm ring-0 field-sizing-content"
+        />
+        <div className="flex items-center justify-end gap-1 px-2 pb-2">
+          <AttachImageButton attach={attach} />
+          {/* Posting mid-upload would store the `![uploading ...]` placeholder. */}
+          <SubmitButton size="sm" pendingLabel="Posting..." isDisabled={attach.uploading || body.trim().length === 0}>
+            Comment
+          </SubmitButton>
         </div>
+        {resultError(state) ?? attach.error ? (
+          <div className="px-3 pb-3">
+            <FormError>{resultError(state) ?? attach.error}</FormError>
+          </div>
+        ) : null}
       </form>
     </div>
   );

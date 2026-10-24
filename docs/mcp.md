@@ -4,7 +4,7 @@ The app is also an [MCP](https://modelcontextprotocol.io) server, so an AI assis
 
 ## Get a token
 
-Sign in, open the account menu at the foot of the sidebar, choose **MCP access**, and create a token. It is shown once.
+Sign in, open the organization menu at the top of the sidebar (or press `⌘K`), choose **MCP access**, and create a token. It is shown once.
 
 A token *is* a session — the same `Session` row a browser sign-in creates, with the same SHA-256 storage, the same 30-day rolling expiry, and the same revocation. Two consequences worth being clear about: it carries your full access to every organization you belong to, and it stays valid as long as it keeps being used. Revoke it on the same page.
 

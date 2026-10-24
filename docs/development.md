@@ -12,8 +12,8 @@
 | **zod** | Every Server Action re-parses its own `FormData`, without exception, before anything reaches the database. |
 | **node:crypto** | Password hashing (scrypt), session tokens and emailed one-time tokens use the runtime's own crypto — no native build steps, so deploys cannot break on a compiler toolchain. |
 | **Resend or SMTP + react-email** | Email, the only third-party service. `react-email` renders the templates. Resend is a single `fetch`, so the `resend` SDK is not a dependency; any other mail server is reached over SMTP through `nodemailer`. With neither configured the app prints messages to the console instead, and local development needs no account. |
-| **Tailwind CSS v4** | `globals.css` is the entrypoint and the whole configuration — no `tailwind.config`, tokens declared in `src/styles/theme.css`, layout written as utilities at the call site. |
-| **Untitled UI** | The design system. Components are source in `src/components/`, not an imported package, so one is edited in place rather than overridden; `@untitledui/icons` and `tailwind-merge` come along with it. |
+| **Tailwind CSS v4** | `globals.css` is the entrypoint and the whole configuration — no `tailwind.config`, tokens declared in `src/styles/theme.css` and re-pointed at the Linear-style palette and 13px type scale in `src/styles/linear.css`, layout written as utilities at the call site. |
+| **Untitled UI** | The component base, restyled to a Linear-like look (the shell, `PageBar`, list rows and boards live in `src/components/` and `src/app/(app)/`). Components are source in `src/components/`, not an imported package, so one is edited in place rather than overridden; `@untitledui/icons` and `tailwind-merge` come along with it. |
 | **React Aria Components + Base UI** | The unstyled primitives under those components — focus management, keyboard behaviour and ARIA wiring that is not worth hand-rolling twice. |
 
 ## Local development

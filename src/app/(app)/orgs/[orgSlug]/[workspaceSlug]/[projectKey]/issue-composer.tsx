@@ -24,11 +24,11 @@ import { Button as AriaButton } from 'react-aria-components';
 import { Dialog, Modal, ModalOverlay } from '@/components/application/modals/modal';
 import { AttachImageButton, useImageAttach } from '@/components/image-attach';
 import { PriorityIcon, StateIcon } from '@/components/issue-row';
-import { IconPlus } from '@/components/icons';
-import { PAGE_BAR_ACTION } from '@/components/page-bar';
+import { IconChevronRight, IconPlus } from '@/components/icons';
+import { PAGE_BAR_ACTION, ProjectGlyph } from '@/components/page-bar';
 import { FormError } from '@/components/ui';
 import { colorClass, PRIORITY_LABEL, PRIORITY_ORDER } from '@/lib/model';
-import { COMPOSE_EVENT, COMPOSE_HASH } from '@/lib/shell-events';
+import { COMPOSE_EVENT, COMPOSE_HASH, type ComposeDetail } from '@/lib/shell-events';
 import { cx } from '@/lib/utils/cx';
 
 import { createIssue } from './issue-actions';
@@ -68,13 +68,13 @@ function Pill({
   glyph?: ReactNode;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-secondary px-2.5 py-1 text-xs text-primary transition-colors hover:bg-secondary has-[select:focus-visible]:outline-2 has-[select:focus-visible]:outline-offset-1 has-[select:focus-visible]:outline-focus-ring">
+    <span className="inline-flex h-7 items-center gap-1.5 rounded-md border border-primary px-2 text-xs font-medium text-secondary transition-colors hover:bg-tertiary has-[select:focus-visible]:outline-2 has-[select:focus-visible]:outline-offset-1 has-[select:focus-visible]:outline-focus-ring">
       {glyph}
       <select
         aria-label={label}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="cursor-pointer appearance-none bg-transparent text-xs text-primary outline-none"
+        className="cursor-pointer appearance-none bg-transparent text-xs font-medium text-secondary outline-none"
       >
         {children}
       </select>
@@ -140,13 +140,13 @@ export function IssueComposer({
     setError(null);
   }
 
-  const openComposer = useCallback(() => {
-    setStateId(defaultStateId);
+  const openComposer = useCallback((presetStateId?: string) => {
+    setStateId(presetStateId && states.some((s) => s.id === presetStateId) ? presetStateId : defaultStateId);
     setBoardId(defaultBoardId);
     setCycleId(defaultCycleId);
     setError(null);
     setOpen(true);
-  }, [defaultBoardId, defaultCycleId, defaultStateId]);
+  }, [defaultBoardId, defaultCycleId, defaultStateId, states]);
 
   // `C` anywhere in the app, and the sidebar's compose button, ask whichever
   // composer is on the page to open; arriving with `#new-issue` asks the same.
@@ -154,7 +154,7 @@ export function IssueComposer({
     function onCompose(event: Event) {
       if (event.defaultPrevented) return;
       event.preventDefault();
-      openComposer();
+      openComposer((event as CustomEvent<ComposeDetail | null>).detail?.stateId);
     }
     window.addEventListener(COMPOSE_EVENT, onCompose);
     if (window.location.hash === COMPOSE_HASH) {
@@ -195,7 +195,7 @@ export function IssueComposer({
     <>
       <button
         type="button"
-        onClick={openComposer}
+        onClick={() => openComposer()}
         title="New issue (C)"
         className={cx(PAGE_BAR_ACTION, className)}
       >
@@ -208,28 +208,27 @@ export function IssueComposer({
       </button>
 
       <ModalOverlay isOpen={open} onOpenChange={setOpen}>
-        <Modal className="w-full sm:max-w-[40rem]">
+        <Modal className="w-full sm:max-w-[45rem]">
           <Dialog aria-labelledby={headingId} className="gap-0 p-0">
-            <div className="flex items-center gap-1.5 px-4 pt-4 pb-2">
-              <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[0.6875rem] text-tertiary">
+            <div className="flex items-center gap-1.5 px-4 pt-3.5 pb-1">
+              <span className="flex h-6 items-center gap-1.5 rounded-md border border-primary px-2 text-xs font-medium text-secondary">
+                <ProjectGlyph projectKey={projectKey} className="size-3" />
                 {projectKey}
               </span>
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3 text-tertiary">
-                <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-              <span id={headingId} className="text-sm font-medium text-primary">
+              <IconChevronRight className="size-3 text-quaternary" />
+              <span id={headingId} className="text-sm text-secondary">
                 New issue
               </span>
             </div>
             <AriaButton
               aria-label="Close"
               onPress={() => setOpen(false)}
-              className="absolute top-3 right-3 grid size-8 cursor-pointer place-items-center rounded-md text-fg-quaternary outline-focus-ring transition-colors hover:bg-secondary focus-visible:outline-2 focus-visible:outline-offset-2"
+              className="absolute top-3 right-3 grid size-7 cursor-pointer place-items-center rounded-md text-tertiary outline-focus-ring transition-colors hover:bg-tertiary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
             >
               <CloseIcon className="size-4" />
             </AriaButton>
 
-            <div className="flex flex-col gap-1 px-4 pt-2">
+            <div className="flex flex-col gap-2 px-4 pt-3">
               {/* `field-sizing-content` grows both fields with their text, so a
                   long title never hides behind a scrollbar. */}
               <textarea
@@ -247,11 +246,11 @@ export function IssueComposer({
                 }}
                 aria-label="Issue title"
                 placeholder="Issue title"
-                className="w-full resize-none border-0 bg-transparent p-0 text-lg font-medium text-primary field-sizing-content placeholder:text-tertiary focus:outline-none"
+                className="w-full resize-none border-0 bg-transparent p-0 text-lg font-semibold text-primary field-sizing-content placeholder:text-quaternary focus:outline-none"
               />
               <textarea
                 ref={descriptionRef}
-                rows={2}
+                rows={3}
                 maxLength={2000}
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
@@ -263,8 +262,8 @@ export function IssueComposer({
                 }}
                 {...attach.textareaProps}
                 aria-label="Description"
-                placeholder="Add description… paste an image to attach it"
-                className="w-full resize-none border-0 bg-transparent p-0 text-sm text-primary field-sizing-content placeholder:text-tertiary focus:outline-none"
+                placeholder="Add description…"
+                className="min-h-16 w-full resize-none border-0 bg-transparent p-0 text-md text-secondary field-sizing-content placeholder:text-quaternary focus:outline-none"
               />
             </div>
 
@@ -372,15 +371,15 @@ export function IssueComposer({
                         )
                       }
                       className={cx(
-                        'flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[0.6875rem] transition-colors',
+                        'flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors',
                         on
-                          ? 'border-brand bg-brand-primary text-brand-secondary'
-                          : 'border-secondary text-tertiary hover:bg-secondary',
+                          ? 'border-primary bg-tertiary text-primary'
+                          : 'border-primary text-tertiary hover:bg-tertiary hover:text-secondary',
                       )}
                     >
                       <span
                         aria-hidden="true"
-                        className={cx('size-1.5 rounded-full', colorClass(label.color ?? 'gray').dot)}
+                        className={cx('size-2 rounded-full', colorClass(label.color ?? 'gray').dot)}
                       />
                       {label.name}
                     </button>
@@ -395,32 +394,25 @@ export function IssueComposer({
               </div>
             ) : null}
 
-            <div className="flex items-center justify-between gap-3 border-t border-secondary px-4 py-3">
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-tertiary">
-                <input
-                  type="checkbox"
-                  checked={createMore}
-                  onChange={(event) => setCreateMore(event.target.checked)}
-                  className="size-3.5 accent-brand-600"
-                />
-                Create more
-              </label>
-              <div className="flex items-center gap-2">
-                <AttachImageButton attach={attach} />
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="rounded-lg px-2.5 py-1.5 text-sm text-tertiary transition-colors hover:text-primary"
-                >
-                  Cancel
-                </button>
+            <div className="flex items-center justify-between gap-3 border-t border-secondary_alt px-4 py-3">
+              <AttachImageButton attach={attach} />
+              <div className="flex items-center gap-3">
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-tertiary">
+                  <input
+                    type="checkbox"
+                    checked={createMore}
+                    onChange={(event) => setCreateMore(event.target.checked)}
+                    className="size-3.5 accent-brand-600"
+                  />
+                  Create more
+                </label>
                 <button
                   type="button"
                   onClick={submit}
                   // Creating mid-upload would store the `![uploading ...]`
                   // placeholder as the description.
                   disabled={pending || attach.uploading || title.trim().length === 0}
-                  className="rounded-lg bg-brand-solid px-3 py-1.5 text-sm font-medium text-white transition-opacity disabled:opacity-50"
+                  className="h-8 rounded-md bg-brand-solid px-3 text-sm font-medium text-white shadow-xs ring-1 ring-white/10 ring-inset transition-colors hover:bg-brand-solid_hover disabled:opacity-50"
                 >
                   {pending ? 'Creating…' : 'Create issue'}
                 </button>

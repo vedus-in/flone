@@ -38,13 +38,13 @@ export function SettingsSelect({
     <span className={cx('relative inline-block shrink-0', className)}>
       <select
         {...rest}
-        className="h-9 w-full appearance-none truncate rounded-lg border border-secondary bg-primary ps-3 pe-8 text-sm text-primary shadow-xs outline-focus-ring transition-colors hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-offset-1"
+        className="h-8 w-full appearance-none truncate rounded-md border border-primary bg-secondary_subtle ps-2.5 pe-8 text-sm text-primary outline-focus-ring transition-colors focus-visible:outline-2 focus-visible:outline-offset-1"
       >
         {children}
       </select>
       <ChevronDown
         aria-hidden="true"
-        className="pointer-events-none absolute end-2.5 top-1/2 size-4 -translate-y-1/2 text-quaternary"
+        className="pointer-events-none absolute end-2.5 top-1/2 size-3.5 -translate-y-1/2 text-tertiary"
       />
     </span>
   );
@@ -147,7 +147,7 @@ export function Switch({
       />
       <span
         aria-hidden="true"
-        className="h-6 w-11 rounded-full bg-tertiary ring-1 ring-secondary transition-colors duration-100 peer-checked:bg-brand-solid peer-checked:ring-transparent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus-ring"
+        className="h-6 w-11 rounded-full bg-quaternary ring-1 ring-secondary transition-colors duration-100 peer-checked:bg-brand-solid peer-checked:ring-transparent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus-ring"
       />
       <span
         aria-hidden="true"
@@ -222,13 +222,13 @@ export function DangerZone({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl bg-primary p-5 shadow-xs ring-1 ring-error_subtle">
-      <h2 id={id} className="text-md font-semibold text-error-primary">
+    <div className="flex flex-col gap-3 rounded-lg border border-error_subtle/60 bg-secondary_subtle p-5">
+      <h2 id={id} className="text-sm font-medium text-error-primary">
         {title}
       </h2>
       <p className="max-w-prose text-sm text-tertiary">{description}</p>
       <details className="group flex flex-col gap-4">
-        <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded-lg border border-error px-3 py-2 text-sm font-semibold text-error-primary transition-colors outline-focus-ring hover:bg-error-primary focus-visible:outline-2 focus-visible:outline-offset-2">
+        <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded-md border border-error_subtle px-3 py-1.5 text-sm font-medium text-error-primary transition-colors outline-focus-ring hover:bg-error-primary focus-visible:outline-2 focus-visible:outline-offset-2">
           {buttonLabel}
           <ChevronDown
             aria-hidden="true"
@@ -277,11 +277,11 @@ export function RowMenu({ label, children }: { label: string; children: ReactNod
     <details name="settings-row-menu" className="relative shrink-0">
       <summary
         aria-label={label}
-        className="grid size-8 cursor-pointer list-none place-items-center rounded-lg text-tertiary transition-colors outline-focus-ring hover:bg-primary_hover hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-1"
+        className="grid size-7 cursor-pointer list-none place-items-center rounded-md text-tertiary transition-colors outline-focus-ring hover:bg-tertiary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-1"
       >
         <DotsVertical aria-hidden="true" className="size-4" />
       </summary>
-      <div className="absolute end-0 z-10 mt-1 flex w-64 flex-col gap-3 rounded-xl border border-secondary bg-primary p-3 text-start shadow-lg">
+      <div className="absolute end-0 z-10 mt-1 flex w-64 flex-col gap-3 rounded-lg border border-secondary_alt bg-elevated p-3 text-start shadow-lg">
         {children}
       </div>
     </details>

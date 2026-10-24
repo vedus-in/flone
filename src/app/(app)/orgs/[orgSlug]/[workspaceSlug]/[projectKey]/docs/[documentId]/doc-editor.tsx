@@ -291,10 +291,10 @@ const TRIGGER =
 // The Base UI popup surface, as the issue page's pickers draw it -- widened and
 // padded for forms rather than menu rows.
 const POPUP =
-  'z-50 flex w-80 max-w-[calc(100vw-2rem)] origin-[var(--transform-origin)] flex-col gap-4 rounded-xl border border-secondary bg-primary p-4 shadow-2xl outline-none';
+  'z-50 flex w-80 max-w-[calc(100vw-2rem)] origin-[var(--transform-origin)] flex-col gap-4 rounded-lg border border-secondary_alt bg-elevated p-4 shadow-lg outline-none';
 
 const SELECT_CLASS =
-  'min-h-9 rounded-lg border border-primary bg-primary px-3 py-2 text-sm text-primary shadow-xs outline-focus-ring transition-colors hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-offset-2';
+  'h-8 rounded-md border border-primary bg-secondary_subtle px-2.5 text-sm text-primary outline-focus-ring transition-colors focus-visible:outline-2 focus-visible:outline-offset-1';
 
 type DocActionsProps = {
   documentId: string;

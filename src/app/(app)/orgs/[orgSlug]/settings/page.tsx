@@ -29,6 +29,7 @@ import {
   initials,
 } from '@/components/settings-ui';
 import { IconSettings } from '@/components/icons';
+import { Assignee } from '@/components/issue-row';
 import { PageBar, PageBody } from '@/components/page-bar';
 import { pendingInvites } from '@/lib/email-token';
 import { ActionForm } from '../../../action-form';
@@ -199,7 +200,7 @@ export default async function OrganizationSettingsPage({
               return (
                 <SettingsRow key={member.id} className="justify-between">
                   <div className="flex min-w-0 items-center gap-3">
-                    <Avatar size="sm" initials={initials(member.user.name)} />
+                    <Assignee name={member.user.name} size="md" />
                     <div className="flex min-w-0 flex-col">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-sm font-medium text-primary">

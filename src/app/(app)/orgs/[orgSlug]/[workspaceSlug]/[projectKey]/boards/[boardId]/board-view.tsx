@@ -45,7 +45,8 @@ import {
   KanbanItemHandle,
   KanbanOverlay,
 } from '@/components/reui/kanban';
-import { PriorityIcon, StateIcon } from '@/components/issue-row';
+import { IconCalendar, IconChevronRight, IconComment, IconPlus } from '@/components/icons';
+import { Assignee, CHIP, Chip, PriorityIcon, StateIcon } from '@/components/issue-row';
 import {
   PropertyPicker,
   assigneeOptions,
@@ -53,7 +54,7 @@ import {
   stateOptions,
 } from '@/components/property-picker';
 import { FormError } from '@/components/ui';
-import { colorClass } from '@/lib/model';
+import { requestCompose } from '@/lib/shell-events';
 import { cx } from '@/lib/utils/cx';
 
 import { placeIssue, setIssueAssignee, setIssuePriority } from '../../issue-actions';
@@ -112,19 +113,7 @@ type BoardViewProps = {
   labels: MenuLabel[];
   cycles: MenuCycle[];
   boardId: string;
-  /** Rendered above the board; the compose dialog is passed in from the page. */
-  compose?: ReactNode;
 };
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  // Array.from, not indexing: a name may begin with an astral character and
-  // name[0] would slice a surrogate pair in half.
-  const first = Array.from(parts[0])[0] ?? '';
-  const last = parts.length > 1 ? (Array.from(parts[parts.length - 1])[0] ?? '') : '';
-  return (first + last).toLocaleUpperCase();
-}
 
 function toRecords(columns: BoardStateColumn[]): Record<string, BoardIssue[]> {
   return Object.fromEntries(columns.map((column) => [column.id, column.issues]));
@@ -140,24 +129,9 @@ type CardColumn = Pick<BoardStateColumn, 'id' | 'name' | 'type' | 'color'>;
 /** Runs one Server Action; failures land in the board's error slot. */
 type RunAction = (action: () => Promise<{ ok: boolean; error?: string }>) => void;
 
-/** The bordered chip the priority/due/comment row is made of. */
-const PILL =
-  'flex h-[22px] items-center gap-1 rounded border border-secondary px-1.5 text-[0.6875rem] text-tertiary';
-
-function AssigneeAvatar({ name }: { name: string | null }) {
-  return name ? (
-    <span
-      title={name}
-      className="grid size-5 place-items-center rounded-full bg-secondary text-[0.625rem] font-medium text-tertiary"
-    >
-      {initials(name)}
-    </span>
-  ) : (
-    <span className="grid size-5 place-items-center rounded-full border border-dashed border-secondary text-[0.625rem] text-tertiary">
-      &ndash;
-    </span>
-  );
-}
+/** The square chip priority sits in, next to the round property chips. */
+const PRIORITY_CHIP =
+  'flex h-[22px] w-[26px] shrink-0 items-center justify-center rounded-md border border-secondary text-tertiary';
 
 function IssueCard({
   issue,
@@ -178,7 +152,7 @@ function IssueCard({
   members?: BoardMember[];
   run?: RunAction;
   overlay?: boolean;
-  /** The `⋮` trigger. Omitted on the drag overlay, where it is inert. */
+  /** The `...` trigger. Omitted on the drag overlay, where it is inert. */
   action?: ReactNode;
 }) {
   const issueKey = `${projectKey}-${issue.number}`;
@@ -189,50 +163,50 @@ function IssueCard({
   return (
     <div
       className={cx(
-        'no-native-drag flex flex-col gap-2 rounded-lg border bg-primary p-3 transition-colors',
+        'group/card no-native-drag flex flex-col gap-2 rounded-lg border bg-raised px-3 pt-2.5 pb-3 transition-colors',
         overlay
-          ? 'rotate-2 border-brand shadow-lg'
-          : 'border-secondary shadow-xs hover:border-tertiary',
+          ? 'rotate-[1.5deg] border-primary shadow-xl'
+          : 'border-secondary shadow-xs hover:border-primary',
       )}
     >
-      <div className="flex items-center gap-1">
-        <span className="shrink-0 font-mono text-[0.6875rem] text-tertiary">{issueKey}</span>
+      <div className="flex h-5 items-center gap-1">
+        <span className="shrink-0 text-xs text-tertiary tabular-nums">{issueKey}</span>
 
         {issue.parentTitle ? (
           <>
-            <span aria-hidden="true" className="shrink-0 text-[0.6875rem] text-tertiary opacity-60">
-              &rsaquo;
-            </span>
-            <span className="min-w-0 truncate text-[0.6875rem] text-tertiary">
-              {issue.parentTitle}
-            </span>
+            <IconChevronRight className="size-3 shrink-0 text-quaternary" />
+            <span className="min-w-0 truncate text-xs text-tertiary">{issue.parentTitle}</span>
           </>
         ) : null}
 
-        {pickers ? (
-          <PropertyPicker
-            options={assigneeOptions(pickers.members)}
-            currentId={issue.assigneeId ?? ''}
-            placeholder="Assign to..."
-            shortcutHint="A"
-            onSelect={(id) =>
-              pickers.run(() => setIssueAssignee({ ticketId: issue.id, assigneeId: id }))
-            }
-            ariaLabel={`Set assignee for ${issueKey}`}
-            triggerClassName="ms-auto shrink-0 rounded-full"
-          >
-            <AssigneeAvatar name={issue.assigneeName} />
-          </PropertyPicker>
-        ) : (
-          <span
-            className="ms-auto shrink-0"
-            aria-label={issue.assigneeName ? `Assigned to ${issue.assigneeName}` : 'Unassigned'}
-          >
-            <AssigneeAvatar name={issue.assigneeName} />
-          </span>
-        )}
-
-        {action}
+        <span className="ms-auto flex shrink-0 items-center gap-0.5">
+          {action ? (
+            // Hidden until hover where there IS hover; always there on touch,
+            // where it is the only way into the menu.
+            <span className="flex [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/card:opacity-100 [@media(hover:hover)]:has-[[data-popup-open]]:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">
+              {action}
+            </span>
+          ) : null}
+          {pickers ? (
+            <PropertyPicker
+              options={assigneeOptions(pickers.members)}
+              currentId={issue.assigneeId ?? ''}
+              placeholder="Assign to..."
+              shortcutHint="A"
+              onSelect={(id) =>
+                pickers.run(() => setIssueAssignee({ ticketId: issue.id, assigneeId: id }))
+              }
+              ariaLabel={`Set assignee for ${issueKey}`}
+              triggerClassName="shrink-0 rounded-full"
+            >
+              <Assignee name={issue.assigneeName} />
+            </PropertyPicker>
+          ) : (
+            <span className="shrink-0">
+              <Assignee name={issue.assigneeName} />
+            </span>
+          )}
+        </span>
       </div>
 
       <div className="flex items-start gap-2">
@@ -256,12 +230,12 @@ function IssueCard({
               );
             }}
             ariaLabel={`Set status for ${issueKey}`}
-            triggerClassName="mt-0.5 shrink-0 rounded"
+            triggerClassName="mt-[3px] shrink-0 rounded-full"
           >
             <StateIcon type={column.type} color={column.color} />
           </PropertyPicker>
         ) : (
-          <span className="mt-0.5 shrink-0">
+          <span className="mt-[3px] shrink-0">
             <StateIcon type={column.type} color={column.color} />
           </span>
         )}
@@ -274,7 +248,7 @@ function IssueCard({
           onPointerDown={(event) => event.stopPropagation()}
           draggable={false}
           onDragStart={(event) => event.preventDefault()}
-          className="line-clamp-3 min-w-0 flex-1 text-sm leading-snug font-medium text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          className="line-clamp-2 min-w-0 flex-1 text-sm font-medium text-primary no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           {issue.title}
         </Link>
@@ -291,59 +265,62 @@ function IssueCard({
               pickers.run(() => setIssuePriority({ ticketId: issue.id, priority: id as Priority }))
             }
             ariaLabel={`Set priority for ${issueKey}`}
-            triggerClassName={cx(PILL, 'transition-colors hover:bg-secondary')}
+            triggerClassName={cx(PRIORITY_CHIP, 'transition-colors hover:bg-quaternary')}
           >
-            <PriorityIcon priority={issue.priority} />
+            <PriorityIcon priority={issue.priority} className="size-3.5" />
           </PropertyPicker>
         ) : (
-          <span className={PILL}>
-            <PriorityIcon priority={issue.priority} />
+          <span className={PRIORITY_CHIP}>
+            <PriorityIcon priority={issue.priority} className="size-3.5" />
           </span>
         )}
 
         {issue.labels.slice(0, 3).map((label) => (
-          <span
-            key={label.id}
-            className="flex items-center gap-1 rounded-full border border-secondary px-1.5 py-px text-[0.625rem] text-tertiary"
-          >
-            <span
-              aria-hidden="true"
-              className={cx('size-1.5 rounded-full', colorClass(label.color).dot)}
-            />
+          <Chip key={label.id} color={label.color}>
             {label.name}
-          </span>
+          </Chip>
         ))}
 
         {issue.dueDateLabel ? (
           <span
             title={issue.overdue ? 'Overdue' : 'Due date'}
-            className={cx(
-              PILL,
-              'whitespace-nowrap',
-              issue.overdue && 'font-medium text-error-primary',
-            )}
+            className={cx(CHIP, 'whitespace-nowrap tabular-nums', issue.overdue && 'border-error_subtle text-error-primary')}
           >
+            <IconCalendar className="size-3.5" />
             {issue.dueDateLabel}
           </span>
         ) : null}
 
         {issue.commentCount > 0 ? (
-          <span className={cx(PILL, 'tabular-nums')}>
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3">
-              <path
-                d="M14 9.5a2 2 0 0 1-2 2H5.5L2 14V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinejoin="round"
-              />
-            </svg>
+          <span className={cx(CHIP, 'tabular-nums')}>
+            <IconComment className="size-3.5" />
             {issue.commentCount}
           </span>
         ) : null}
       </div>
 
-      <p className="text-[0.6875rem] text-tertiary">Created {issue.createdAtLabel}</p>
+      <p className="text-xs text-tertiary">Created {issue.createdAtLabel}</p>
     </div>
+  );
+}
+
+/** A `+` that starts an issue already in a column's state. */
+function ComposeHere({ column, block = false }: { column: CardColumn; block?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={() => requestCompose({ stateId: column.id })}
+      aria-label={`New issue in ${column.name}`}
+      title={`New issue in ${column.name}`}
+      className={cx(
+        'place-items-center text-tertiary transition-colors hover:text-primary',
+        block
+          ? 'grid h-7 w-full rounded-md bg-tertiary/60 hover:bg-tertiary'
+          : 'grid size-6 rounded-md hover:bg-tertiary',
+      )}
+    >
+      <IconPlus className="size-3.5" />
+    </button>
   );
 }
 
@@ -359,7 +336,6 @@ export function BoardView({
   labels,
   cycles,
   boardId,
-  compose,
 }: BoardViewProps) {
   const [records, setRecords] = useState<Record<string, BoardIssue[]>>(() => toRecords(columns));
   const [error, setError] = useState<string | null>(null);
@@ -408,9 +384,8 @@ export function BoardView({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <FormError>{error}</FormError>
-      {compose}
+    <div className="flex flex-col">
+      {error ? <FormError className="mx-2.5 mb-2">{error}</FormError> : null}
 
       <Kanban
         value={records}
@@ -447,22 +422,21 @@ export function BoardView({
           });
         }}
       >
-        <KanbanBoard className="flex flex-col gap-3 pb-4 md:-mx-6 md:flex-row md:overflow-x-auto md:px-6">
+        <KanbanBoard className="flex flex-col gap-2 px-2 pb-2 md:min-h-[calc(100dvh-106px)] md:flex-row md:overflow-x-auto">
           {columns.map((column) => {
             const issues = records[column.id] ?? [];
             return (
               <KanbanColumn
                 key={column.id}
                 value={column.id}
-                className="flex w-full flex-col rounded-xl border border-secondary bg-secondary/40 md:w-72 md:shrink-0"
+                className="flex w-full flex-col rounded-lg bg-sunken md:w-[336px] md:shrink-0"
               >
-                <header className="flex items-center gap-2 px-3 py-2.5">
+                <header className="flex h-11 shrink-0 items-center gap-2 ps-3.5 pe-2">
                   <StateIcon type={column.type} color={column.color} />
-                  <h2 className="text-xs font-semibold tracking-wide text-tertiary uppercase">
-                    {column.name}
-                  </h2>
-                  <span className="rounded-full bg-secondary px-1.5 text-xs text-tertiary tabular-nums">
-                    {issues.length}
+                  <h2 className="text-sm font-medium text-primary">{column.name}</h2>
+                  <span className="text-sm text-tertiary tabular-nums">{issues.length}</span>
+                  <span className="ms-auto flex">
+                    <ComposeHere column={column} />
                   </span>
                 </header>
 
@@ -504,11 +478,7 @@ export function BoardView({
                     );
                   })}
 
-                  {issues.length === 0 ? (
-                    <p className="grid flex-1 place-items-center px-2 py-6 text-center text-xs text-tertiary">
-                      Drop a card here
-                    </p>
-                  ) : null}
+                  {issues.length === 0 ? <ComposeHere column={column} block /> : null}
                 </KanbanColumnContent>
               </KanbanColumn>
             );
@@ -524,7 +494,7 @@ export function BoardView({
             const column = liveColumns.find((c) => c.issues.some((i) => i.id === issue.id));
             if (!column) return null;
             return (
-              <div className="w-72">
+              <div className="w-[320px]">
                 <IssueCard issue={issue} projectKey={projectKey} column={column} overlay />
               </div>
             );
@@ -533,7 +503,7 @@ export function BoardView({
       </Kanban>
 
       {total === 0 ? (
-        <p className="text-sm text-tertiary">
+        <p className="px-4.5 py-3 text-sm text-tertiary">
           Nothing filed under this board yet. Create an issue, or set the board on an existing one
           from its menu.
         </p>

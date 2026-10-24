@@ -40,9 +40,9 @@ export default async function ResetPage({
 
   if (payload && parsed.success) {
     return (
-      <Card className="gap-6 p-6 sm:p-7">
-        <Card.Header className="gap-1.5">
-          <h1 className="text-lg leading-6 font-semibold text-primary">Choose a new password</h1>
+      <Card className="gap-7 border-0 bg-transparent p-0">
+        <Card.Header className="items-center gap-2 text-center">
+          <h1 className="text-xl font-semibold text-primary">Choose a new password</h1>
           <Card.Description>
             Setting a new password for {payload.email} signs out every other session, including
             any MCP tokens.
@@ -80,9 +80,9 @@ export default async function ResetPage({
   }
 
   return (
-    <Card className="gap-6 p-6 sm:p-7">
-      <Card.Header className="gap-1.5">
-        <h1 className="text-lg leading-6 font-semibold text-primary">
+    <Card className="gap-7 border-0 bg-transparent p-0">
+      <Card.Header className="items-center gap-2 text-center">
+        <h1 className="text-xl font-semibold text-primary">
           {token ? 'That link no longer works' : 'Reset your password'}
         </h1>
         <Card.Description>
@@ -113,7 +113,7 @@ export default async function ResetPage({
         </ActionForm>
       </Card.Content>
 
-      <Card.Footer className="justify-center gap-1.5 border-t border-secondary pt-6 text-sm text-tertiary">
+      <Card.Footer className="justify-center gap-1.5 text-sm text-tertiary">
         <span>Remembered it?</span>
         <Link href="/login" className={LINK}>
           Sign in

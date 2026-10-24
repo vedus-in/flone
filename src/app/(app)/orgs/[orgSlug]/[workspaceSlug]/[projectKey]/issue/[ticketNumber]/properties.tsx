@@ -30,7 +30,7 @@
  * value while revalidation is still in flight.
  */
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Priority } from '@prisma/client';
 import type { WorkflowStateType } from '@prisma/client';
@@ -45,6 +45,7 @@ import {
 import { Assignee, PriorityIcon, StateIcon } from '@/components/issue-row';
 import { AttachImageButton, useImageAttach } from '@/components/image-attach';
 import { Button, FormError, Prose, Textarea } from '@/components/ui';
+import { useHotkey } from '@/lib/hotkey';
 import { PRIORITY_LABEL, colorClass } from '@/lib/model';
 import type { ActionResult } from '@/lib/result';
 import { cx } from '@/lib/utils/cx';
@@ -135,7 +136,7 @@ export function InlineTitle({ ticketId, title, description }: InlineEditorProps)
     <div className="flex flex-col gap-2">
       {/* Preflight gives the button and textarea `font: inherit`, so the
           typography lives once, on the heading. */}
-      <h1 className="text-2xl font-semibold text-primary">
+      <h1 className="text-display-xs font-semibold text-primary">
         {editing ? (
           <textarea
             ref={ref}
@@ -245,7 +246,11 @@ export function InlineDescription({ ticketId, title, description }: InlineEditor
         }}
         className="w-full cursor-text rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
       >
-        {value ? <Prose>{value}</Prose> : <span className="text-sm text-tertiary">Add description...</span>}
+        {value ? (
+          <Prose className="text-md leading-6 text-secondary">{value}</Prose>
+        ) : (
+          <span className="text-md text-quaternary">Add description...</span>
+        )}
       </div>
     );
   }
@@ -291,14 +296,17 @@ export function InlineDescription({ ticketId, title, description }: InlineEditor
 /* -------------------------------------------------------------------------- */
 
 const TRIGGER =
-  'flex h-7 w-full items-center gap-2 rounded-md px-1.5 text-sm transition-colors hover:bg-secondary';
+  'flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-sm font-medium transition-colors hover:bg-secondary';
+
+/** The quiet label over each group in the sidebar. */
+const HEADING = 'mb-1 px-2 text-xs font-medium text-tertiary';
 
 // The Base UI popup surface and row, as the board's issue menu draws them.
 const POPUP =
-  'z-50 max-h-[min(24rem,70dvh)] min-w-56 origin-[var(--transform-origin)] overflow-y-auto overscroll-contain rounded-xl border border-secondary bg-primary p-1 shadow-2xl outline-none';
+  'z-50 max-h-[min(24rem,70dvh)] min-w-56 origin-[var(--transform-origin)] overflow-y-auto overscroll-contain rounded-lg border border-secondary_alt bg-elevated p-1 shadow-lg outline-none';
 
 const ITEM =
-  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-primary outline-none data-[highlighted]:bg-secondary data-[disabled]:opacity-50 md:py-1.5';
+  'flex cursor-default select-none items-center gap-2.5 rounded-md px-2 py-2 text-sm text-secondary outline-none data-[highlighted]:bg-elevated_hover data-[highlighted]:text-primary data-[disabled]:opacity-50 md:py-1.5';
 
 const I_CHECK = 'M3 8.5 6.5 12 13 4.5';
 const I_CYCLE = 'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 4.5v3.7l2.2 1.6';
@@ -362,6 +370,8 @@ export function PropertiesPanel({
 }: PropertiesPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [labelsOpen, setLabelsOpen] = useState(false);
+  useHotkey(labels.length > 0 ? 'l' : null, useCallback(() => setLabelsOpen(true), []));
 
   function run(action: () => Promise<ActionResult>) {
     startTransition(async () => {
@@ -387,22 +397,23 @@ export function PropertiesPanel({
   ];
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className={cx('flex flex-col gap-5 transition-opacity', pending && 'opacity-60')}>
-        <section className="flex flex-col gap-0.5">
-          <h2 className="mb-1 text-sm font-medium text-tertiary">Properties</h2>
+    <div className="flex flex-col gap-6">
+      <div className={cx('flex flex-col gap-7 transition-opacity', pending && 'opacity-60')}>
+        <section className="flex flex-col">
+          <h2 className={HEADING}>Properties</h2>
 
           <PropertyPicker
             options={stateOptions(states)}
             currentId={stateId}
             placeholder="Change status..."
             shortcutHint="S"
+            hotkey
             ariaLabel="Change status"
             triggerClassName={TRIGGER}
             onSelect={(id) => run(() => setIssueState({ ticketId, stateId: id }))}
           >
             {state ? <StateIcon type={state.type} color={state.color} /> : null}
-            <span className="truncate text-primary">{state?.name ?? 'No status'}</span>
+            <span className="truncate text-secondary">{state?.name ?? 'No status'}</span>
           </PropertyPicker>
 
           <PropertyPicker
@@ -410,13 +421,14 @@ export function PropertiesPanel({
             currentId={priority}
             placeholder="Change priority to..."
             shortcutHint="P"
+            hotkey
             ariaLabel="Change priority"
             triggerClassName={TRIGGER}
             onSelect={(id) => run(() => setIssuePriority({ ticketId, priority: id as Priority }))}
           >
             <PriorityIcon priority={priority} />
             <span
-              className={cx('truncate', priority === Priority.NONE ? 'text-tertiary' : 'text-primary')}
+              className={cx('truncate', priority === Priority.NONE ? 'text-tertiary' : 'text-secondary')}
             >
               {PRIORITY_LABEL[priority]}
             </span>
@@ -427,6 +439,7 @@ export function PropertiesPanel({
             currentId={assigneeId ?? ''}
             placeholder="Assign to..."
             shortcutHint="A"
+            hotkey
             ariaLabel="Change assignee"
             triggerClassName={TRIGGER}
             onSelect={(id) => run(() => setIssueAssignee({ ticketId, assigneeId: id }))}
@@ -436,7 +449,7 @@ export function PropertiesPanel({
             <span aria-hidden="true">
               <Assignee name={assignee?.name ?? null} />
             </span>
-            <span className={cx('truncate', assignee ? 'text-primary' : 'text-tertiary')}>
+            <span className={cx('truncate', assignee ? 'text-secondary' : 'text-tertiary')}>
               {assignee?.name ?? (assigneeId ? 'Unknown member' : 'Assign')}
             </span>
           </PropertyPicker>
@@ -450,26 +463,26 @@ export function PropertiesPanel({
             onSelect={(id) => run(() => setIssueCycle({ ticketId, cycleId: id }))}
           >
             <Icon d={I_CYCLE} className="text-tertiary" />
-            <span className={cx('truncate', cycle ? 'text-primary' : 'text-tertiary')}>
+            <span className={cx('truncate', cycle ? 'text-secondary' : 'text-tertiary')}>
               {cycle ? (cycle.name ?? `Cycle ${cycle.number}`) : 'Add to cycle'}
             </span>
           </PropertyPicker>
         </section>
 
         {labels.length > 0 ? (
-          <section className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-tertiary">Labels</h3>
-            <div className="flex flex-wrap items-center gap-1.5">
+          <section className="flex flex-col">
+            <h3 className={HEADING}>Labels</h3>
+            <div className="flex flex-wrap items-center gap-1.5 px-1">
               {currentLabels.map((label) => (
                 <span
                   key={label.id}
-                  className="flex items-center gap-1.5 rounded-full border border-secondary px-2 py-0.5 text-[0.6875rem] text-tertiary"
+                  className="flex h-6 items-center gap-1.5 rounded-full border border-secondary px-2.5 text-xs font-medium text-secondary"
                 >
-                  <Dot color={label.color} className="size-1.5" />
+                  <Dot color={label.color} />
                   {label.name}
                 </span>
               ))}
-              <Menu.Root>
+              <Menu.Root open={labelsOpen} onOpenChange={setLabelsOpen}>
                 <Menu.Trigger
                   aria-label="Add or remove labels"
                   className="grid size-6 shrink-0 place-items-center rounded-md text-tertiary transition-colors hover:bg-secondary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring data-[popup-open]:bg-secondary data-[popup-open]:text-primary"
@@ -511,8 +524,8 @@ export function PropertiesPanel({
           </section>
         ) : null}
 
-        <section className="flex flex-col gap-0.5">
-          <h3 className="mb-1 text-xs font-medium text-tertiary">Board</h3>
+        <section className="flex flex-col">
+          <h3 className={HEADING}>Board</h3>
           <PropertyPicker
             options={boardOpts}
             currentId={boardId ?? ''}
@@ -529,7 +542,7 @@ export function PropertiesPanel({
                 className="size-2 shrink-0 rounded-full border border-dashed border-secondary"
               />
             )}
-            <span className={cx('truncate', board ? 'text-primary' : 'text-tertiary')}>
+            <span className={cx('truncate', board ? 'text-secondary' : 'text-tertiary')}>
               {board?.name ?? 'Add to board'}
             </span>
           </PropertyPicker>

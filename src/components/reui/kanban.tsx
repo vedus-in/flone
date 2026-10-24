@@ -577,6 +577,10 @@ function Kanban<T>({
     ]
   )
 
+  // A stable id keeps dnd-kit's generated `aria-describedby` ids the same on
+  // the server and the client; its module counter differs between the two.
+  const dndId = React.useId()
+
   const defaultProps = {
     "data-slot": "kanban",
     "data-dragging": activeId !== null,
@@ -587,6 +591,7 @@ function Kanban<T>({
   return (
     <KanbanContext.Provider value={contextValue}>
       <DndContext
+        id={dndId}
         sensors={sensors}
         modifiers={modifiers}
         accessibility={accessibility}

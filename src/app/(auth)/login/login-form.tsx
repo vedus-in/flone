@@ -45,9 +45,9 @@ export function LoginForm() {
   const error = state && !state.ok ? state.error : undefined;
 
   return (
-    <Card className="gap-6 p-6 sm:p-7">
-      <Card.Header className="gap-1.5">
-        <h1 className="text-lg leading-6 font-semibold text-primary">Sign in</h1>
+    <Card className="gap-7 border-0 bg-transparent p-0">
+      <Card.Header className="items-center gap-2 text-center">
+        <h1 className="text-xl font-semibold text-primary">Sign in to Flone</h1>
         <Card.Description>Welcome back. Sign in to get to your boards.</Card.Description>
       </Card.Header>
 
@@ -100,7 +100,7 @@ export function LoginForm() {
         </form>
       </Card.Content>
 
-      <Card.Footer className="justify-center gap-1.5 border-t border-secondary pt-6 text-sm text-tertiary">
+      <Card.Footer className="justify-center gap-1.5 text-sm text-tertiary">
         <span>New here?</span>
         <Link href="/register" className={LINK}>
           Create an account

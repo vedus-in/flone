@@ -16,6 +16,7 @@
 - **Documents**: nested Markdown pages per project, publishable by link
 - **Organizations and workspaces** with Owner, Admin and Member roles and email invitations
 - **MCP server and CLI**: 50 tools that let Claude, Cursor or any MCP client do what you can do in the UI
+- **Keyboard-first interface**: a dense, Linear-style layout with a command menu, shortcuts for every common move, and light, dark or system themes
 - **Easy to host**: one Next.js app and one Postgres database. Email through any SMTP server or Resend.
 
 ![An issue with a Markdown checklist, labels and a comment thread](docs/images/issue.png)
@@ -32,6 +33,18 @@ docker compose --profile mailpit up -d
 
 Open [localhost:3000](http://localhost:3000) and register. The confirmation email lands in Mailpit at [localhost:8025](http://localhost:8025). The first account becomes the site administrator.
 
+## Keyboard shortcuts
+
+| Keys | Action |
+| --- | --- |
+| `⌘K` / `Ctrl+K`, `/` | Command menu: jump anywhere, create an issue, search, switch theme |
+| `C` | New issue |
+| `G` then `A` / `B` / `E` | Active issues, backlog, all issues |
+| `G` then `V` / `C` / `K` / `D` | Current cycle, cycles, boards, documents |
+| `J` / `K` | Move through an issue list, `Enter` to open |
+| `S` / `P` / `A` / `L` | On an issue: status, priority, assignee, labels |
+| `?` | Every shortcut |
+
 ## Deploy
 
 - **Railway:** one click with the button above. It sets up the app, Postgres and the reminders scheduler.
@@ -39,7 +52,7 @@ Open [localhost:3000](http://localhost:3000) and register. The confirmation emai
 
 ## Connect your AI assistant
 
-Create a token under **MCP access** in the account menu, then:
+Create a token under **MCP access** in the organization menu (top left, or `⌘K` → MCP access), then:
 
 ```bash
 claude mcp add --transport http flone https://your-flone.example.com/api/mcp \

@@ -65,7 +65,7 @@ export const metadata: Metadata = {
  * neighbours are its own and this one has no shared module to hang it on.
  */
 const SELECT_CLASS =
-  'min-h-9 rounded-lg border border-primary bg-primary px-3 py-2 text-sm text-primary shadow-xs outline-focus-ring transition-colors hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-offset-2';
+  'h-8 rounded-md border border-primary bg-secondary_subtle px-2.5 text-sm text-primary outline-focus-ring transition-colors focus-visible:outline-2 focus-visible:outline-offset-1';
 
 const CHECKBOX_CLASS =
   'size-4 shrink-0 rounded border-primary text-brand-solid outline-focus-ring focus-visible:outline-2 focus-visible:outline-offset-2';
