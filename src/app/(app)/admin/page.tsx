@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { loadPage, requireAdmin } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { getAppSettings } from '@/lib/settings';
+import { PageBar, PageBody } from '@/components/page-bar';
 import { Card, PageHeader } from '@/components/ui';
 import { RegistrationControl, UserAdminTable, type AdminUserRow } from './admin-controls';
 
@@ -74,44 +75,47 @@ export default async function AdminPage() {
   const truncated = users.length < userCount;
 
   return (
-    <div className="flex flex-col gap-8">
-      <PageHeader
-        title="Site administration"
-        description="Instance-wide controls: who may join this deployment, and who administers it."
-      />
+    <>
+      <PageBar crumbs={[{ label: 'Site administration' }]} />
+      <PageBody width="wide" className="flex flex-col gap-8">
+        <PageHeader
+          title="Site administration"
+          description="Instance-wide controls: who may join this deployment, and who administers it."
+        />
 
-      <Card>
-        <Card.Header>
-          <Card.Title>Registration</Card.Title>
-          <Card.Description>
-            Controls whether new people can create an account on this instance.
-          </Card.Description>
-        </Card.Header>
-        <Card.Content>
-          <RegistrationControl registrationEnabled={settings.registrationEnabled} />
-        </Card.Content>
-      </Card>
+        <Card>
+          <Card.Header>
+            <Card.Title>Registration</Card.Title>
+            <Card.Description>
+              Controls whether new people can create an account on this instance.
+            </Card.Description>
+          </Card.Header>
+          <Card.Content>
+            <RegistrationControl registrationEnabled={settings.registrationEnabled} />
+          </Card.Content>
+        </Card>
 
-      <Card>
-        <Card.Header>
-          <Card.Title>Accounts</Card.Title>
-          <Card.Description>
-            {plural(userCount, 'account', 'accounts')} &middot;{' '}
-            {plural(adminCount, 'administrator', 'administrators')}
-          </Card.Description>
-        </Card.Header>
-        <Card.Content>
-          <UserAdminTable users={users} adminCount={adminCount} />
-        </Card.Content>
-        {truncated ? (
-          <Card.Footer>
-            <p className="text-xs text-tertiary">
-              Showing {users.length} of {userCount} accounts. Administrators are listed
-              first, then the oldest accounts.
-            </p>
-          </Card.Footer>
-        ) : null}
-      </Card>
-    </div>
+        <Card>
+          <Card.Header>
+            <Card.Title>Accounts</Card.Title>
+            <Card.Description>
+              {plural(userCount, 'account', 'accounts')} &middot;{' '}
+              {plural(adminCount, 'administrator', 'administrators')}
+            </Card.Description>
+          </Card.Header>
+          <Card.Content>
+            <UserAdminTable users={users} adminCount={adminCount} />
+          </Card.Content>
+          {truncated ? (
+            <Card.Footer>
+              <p className="text-xs text-tertiary">
+                Showing {users.length} of {userCount} accounts. Administrators are listed
+                first, then the oldest accounts.
+              </p>
+            </Card.Footer>
+          ) : null}
+        </Card>
+      </PageBody>
+    </>
   );
 }

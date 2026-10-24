@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { Inter } from 'next/font/google';
+import Script from 'next/script';
+import { THEME_BOOT_SCRIPT } from '@/lib/theme';
 import { RouteProvider } from './route-provider';
 import './globals.css';
 
@@ -32,13 +34,19 @@ export const metadata: Metadata = {
  * client-side.
  *
  * Dark mode is class-based, not `prefers-color-scheme`. The app ships dark by
- * default; `suppressHydrationWarning` keeps React quiet if the class is ever
- * flipped on the client before hydration.
+ * default; the boot script in the head swaps the class before first paint for
+ * anyone who picked light or system (`src/lib/theme.ts`), and
+ * `suppressHydrationWarning` keeps React quiet about the class it changed.
  */
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`dark-mode ${inter.variable}`} suppressHydrationWarning>
       <body>
+        {/* A constant, not user input; `beforeInteractive` puts it in the head
+            ahead of hydration, and the CSP already allows inline scripts. */}
+        <Script id="theme-boot" strategy="beforeInteractive">
+          {THEME_BOOT_SCRIPT}
+        </Script>
         <RouteProvider>{children}</RouteProvider>
       </body>
     </html>

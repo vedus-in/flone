@@ -16,7 +16,7 @@
  * decides only what to OFFER.
  */
 
-import { useId, useRef, useState, useTransition, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, useTransition, type ReactNode } from 'react';
 import { Priority, type WorkflowStateType } from '@prisma/client';
 import { X as CloseIcon } from '@untitledui/icons';
 import { Button as AriaButton } from 'react-aria-components';
@@ -24,8 +24,11 @@ import { Button as AriaButton } from 'react-aria-components';
 import { Dialog, Modal, ModalOverlay } from '@/components/application/modals/modal';
 import { AttachImageButton, useImageAttach } from '@/components/image-attach';
 import { PriorityIcon, StateIcon } from '@/components/issue-row';
+import { IconPlus } from '@/components/icons';
+import { PAGE_BAR_ACTION } from '@/components/page-bar';
 import { FormError } from '@/components/ui';
 import { colorClass, PRIORITY_LABEL, PRIORITY_ORDER } from '@/lib/model';
+import { COMPOSE_EVENT, COMPOSE_HASH } from '@/lib/shell-events';
 import { cx } from '@/lib/utils/cx';
 
 import { createIssue } from './issue-actions';
@@ -137,6 +140,30 @@ export function IssueComposer({
     setError(null);
   }
 
+  const openComposer = useCallback(() => {
+    setStateId(defaultStateId);
+    setBoardId(defaultBoardId);
+    setCycleId(defaultCycleId);
+    setError(null);
+    setOpen(true);
+  }, [defaultBoardId, defaultCycleId, defaultStateId]);
+
+  // `C` anywhere in the app, and the sidebar's compose button, ask whichever
+  // composer is on the page to open; arriving with `#new-issue` asks the same.
+  useEffect(() => {
+    function onCompose(event: Event) {
+      if (event.defaultPrevented) return;
+      event.preventDefault();
+      openComposer();
+    }
+    window.addEventListener(COMPOSE_EVENT, onCompose);
+    if (window.location.hash === COMPOSE_HASH) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      openComposer();
+    }
+    return () => window.removeEventListener(COMPOSE_EVENT, onCompose);
+  }, [openComposer]);
+
   function submit() {
     const value = title.trim();
     if (!value) return;
@@ -168,23 +195,13 @@ export function IssueComposer({
     <>
       <button
         type="button"
-        onClick={() => {
-          setStateId(defaultStateId);
-          setBoardId(defaultBoardId);
-          setCycleId(defaultCycleId);
-          setError(null);
-          setOpen(true);
-        }}
-        className={cx(
-          'flex items-center gap-1.5 rounded-lg bg-brand-solid px-2.5 py-1.5 text-[0.8125rem] font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
-          className,
-        )}
+        onClick={openComposer}
+        title="New issue (C)"
+        className={cx(PAGE_BAR_ACTION, className)}
       >
         {children ?? (
           <>
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-4">
-              <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
+            <IconPlus className="size-3.5" />
             New issue
           </>
         )}

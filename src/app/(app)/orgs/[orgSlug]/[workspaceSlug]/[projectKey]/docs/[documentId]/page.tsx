@@ -13,7 +13,8 @@ import {
 import { appUrl } from '@/lib/email';
 import { prisma } from '@/lib/db';
 import { ancestorChain, descendantIds, parentOptions } from '@/lib/documents';
-import { Breadcrumbs } from '@/components/ui';
+import { projectCrumb } from '@/components/crumbs';
+import { PageBar } from '@/components/page-bar';
 import { DocIcon } from '../doc-icon';
 import { DocActions, InlineDocBody, InlineDocTitle } from './doc-editor';
 
@@ -82,69 +83,66 @@ export default async function DocumentPage({ params }: { params: Promise<Params>
   const shareUrl = document.shareToken ? appUrl(publicDocumentPath(document.shareToken)) : null;
 
   return (
-    <article className="mx-auto flex w-full max-w-3xl flex-col gap-8 py-4 lg:py-10">
-      {/* The top bar: breadcrumb left, meta and every page action right. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <Breadcrumbs className="min-w-0">
-          <Breadcrumbs.Item href={docsPath(ctx.org, ctx.project)}>Documents</Breadcrumbs.Item>
-          {trail.map((crumb) =>
-            crumb.id === document.id ? (
-              <Breadcrumbs.Item key={crumb.id}>{crumb.title}</Breadcrumbs.Item>
-            ) : (
-              <Breadcrumbs.Item
-                key={crumb.id}
-                href={documentPath(ctx.org, ctx.project, crumb.id)}
-              >
-                {crumb.title}
-              </Breadcrumbs.Item>
-            ),
-          )}
-        </Breadcrumbs>
-
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="text-xs whitespace-nowrap text-tertiary">
-            Edited {DATE.format(document.updatedAt)}
-          </span>
-          <DocActions
-            documentId={document.id}
-            projectId={ctx.project.id}
-            parentId={document.parentId}
-            parents={parentOptions(rows, document.id).map((row) => ({
-              id: row.id,
-              title: row.title,
-            }))}
-            shareUrl={shareUrl}
-            canManage={canManage}
-            descendants={descendantIds(rows, document.id).size}
-          />
-        </div>
-      </div>
-
-      <InlineDocTitle documentId={document.id} title={document.title} body={document.body} />
-
-      <InlineDocBody
-        documentId={document.id}
-        title={document.title}
-        body={document.body}
-        projectId={ctx.project.id}
+    <>
+      <PageBar
+        crumbHeading={false}
+        crumbs={[
+          projectCrumb(ctx.org, ctx.project),
+          { label: 'Documents', href: docsPath(ctx.org, ctx.project) },
+          ...trail.map((crumb) =>
+            crumb.id === document.id
+              ? { label: crumb.title, icon: <DocIcon className="size-3.5 text-tertiary" /> }
+              : { label: crumb.title, href: documentPath(ctx.org, ctx.project, crumb.id) },
+          ),
+        ]}
+        actions={
+          <>
+            <span className="hidden px-1 text-xs whitespace-nowrap text-tertiary sm:block">
+              Edited {DATE.format(document.updatedAt)}
+            </span>
+            <DocActions
+              documentId={document.id}
+              projectId={ctx.project.id}
+              parentId={document.parentId}
+              parents={parentOptions(rows, document.id).map((row) => ({
+                id: row.id,
+                title: row.title,
+              }))}
+              shareUrl={shareUrl}
+              canManage={canManage}
+              descendants={descendantIds(rows, document.id).size}
+            />
+          </>
+        }
       />
 
-      {children.length > 0 ? (
-        <nav aria-label="Documents inside this one" className="flex flex-col gap-px">
-          {children.map((child) => (
-            <Link
-              key={child.id}
-              href={documentPath(ctx.org, ctx.project, child.id)}
-              className="group flex items-center gap-2.5 rounded-md px-2 py-1.5 no-underline transition-colors hover:bg-secondary/60"
-            >
-              <DocIcon className="size-4 shrink-0 text-tertiary" />
-              <span className="min-w-0 truncate text-[0.9375rem] font-medium text-primary">
-                {child.title}
-              </span>
-            </Link>
-          ))}
-        </nav>
-      ) : null}
-    </article>
+      <article className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-10 sm:px-6 lg:py-16">
+        <InlineDocTitle documentId={document.id} title={document.title} body={document.body} />
+
+        <InlineDocBody
+          documentId={document.id}
+          title={document.title}
+          body={document.body}
+          projectId={ctx.project.id}
+        />
+
+        {children.length > 0 ? (
+          <nav aria-label="Documents inside this one" className="flex flex-col gap-px">
+            {children.map((child) => (
+              <Link
+                key={child.id}
+                href={documentPath(ctx.org, ctx.project, child.id)}
+                className="group flex h-9 items-center gap-2.5 rounded-md px-2 no-underline transition-colors hover:bg-secondary"
+              >
+                <DocIcon className="size-4 shrink-0 text-tertiary" />
+                <span className="min-w-0 truncate text-sm font-medium text-primary">
+                  {child.title}
+                </span>
+              </Link>
+            ))}
+          </nav>
+        ) : null}
+      </article>
+    </>
   );
 }

@@ -1,6 +1,9 @@
 import Link from 'next/link';
 
+import { projectCrumb } from '@/components/crumbs';
+import { IconCycle } from '@/components/icons';
 import { IssueListView } from '@/components/issue-row';
+import { PageBar } from '@/components/page-bar';
 import { cyclePath, cyclesPath, loadPage, requireProjectByKey } from '@/lib/authz';
 import { ensureCycles, listCycles } from '@/lib/cycles';
 import { loadIssues, parseIssueFilters } from '@/lib/issues';
@@ -25,14 +28,20 @@ export default async function UpcomingCyclesPage({ params }: { params: Promise<P
   const ctx = await loadPage(() => requireProjectByKey(orgSlug, workspaceSlug, projectKey.toUpperCase()));
 
   const state = await ensureCycles(ctx.project.id);
+  const crumbs = [
+    projectCrumb(ctx.org, ctx.project),
+    { label: 'Cycles', href: cyclesPath(ctx.org, ctx.project) },
+    { label: 'Upcoming' },
+  ];
+
   if (!state) {
     return (
-      <div className="flex flex-col gap-4">
-        <h1 className="text-lg font-semibold text-primary">Upcoming</h1>
-        <div className="rounded-xl border border-secondary px-4 py-10 text-center text-sm text-tertiary">
+      <>
+        <PageBar crumbs={crumbs} />
+        <p className="px-4.5 py-10 text-center text-sm text-tertiary">
           Cycles are switched off for {ctx.project.key}.
-        </div>
-      </div>
+        </p>
+      </>
     );
   }
 
@@ -50,35 +59,26 @@ export default async function UpcomingCyclesPage({ params }: { params: Promise<P
   ]);
 
   return (
-    <div className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold text-primary">Upcoming</h1>
-        <Link
-          href={cyclesPath(ctx.org, ctx.project)}
-          className="text-[0.8125rem] text-tertiary no-underline hover:text-primary"
-        >
-          All cycles
-        </Link>
-      </header>
+    <>
+      <PageBar crumbs={crumbs} />
 
       {sections.length === 0 ? (
-        <div className="rounded-xl border border-secondary px-4 py-10 text-center text-sm text-tertiary">
-          Nothing queued yet.
-        </div>
+        <p className="px-4.5 py-10 text-center text-sm text-tertiary">Nothing queued yet.</p>
       ) : (
         sections.map(({ cycle, loaded }) => (
-          <section key={cycle.id} className="flex flex-col gap-2">
-            <header className="flex items-baseline gap-2">
+          <section key={cycle.id} className="flex flex-col pt-2 pb-4">
+            <header className="flex h-10 items-center gap-2 px-4.5">
+              <IconCycle className="size-4 text-tertiary" />
               <Link
                 href={cyclePath(ctx.org, ctx.project, cycle.number)}
-                className="text-[0.8125rem] font-medium text-primary no-underline hover:underline"
+                className="text-sm font-medium text-primary no-underline hover:underline"
               >
                 {cycle.name ?? `Cycle ${cycle.number}`}
               </Link>
-              <span className="text-[0.6875rem] text-tertiary tabular-nums">
+              <span className="text-xs text-tertiary tabular-nums">
                 {RANGE.format(cycle.startsAt)} – {RANGE.format(cycle.endsAt)}
               </span>
-              <span className="text-[0.6875rem] text-tertiary tabular-nums">
+              <span className="ms-auto text-xs text-tertiary tabular-nums">
                 {loaded.total} {loaded.total === 1 ? 'issue' : 'issues'}
               </span>
             </header>
@@ -97,6 +97,6 @@ export default async function UpcomingCyclesPage({ params }: { params: Promise<P
           </section>
         ))
       )}
-    </div>
+    </>
   );
 }

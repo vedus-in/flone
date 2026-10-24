@@ -5,6 +5,9 @@ import { boardPath, issuesPath, loadPage, requireProjectByKey, visibleProject, a
 import { prisma } from '@/lib/db';
 import { colorClass, isDone } from '@/lib/model';
 import { cx } from '@/lib/utils/cx';
+import { projectCrumb } from '@/components/crumbs';
+import { IconBoard, IconPlus } from '@/components/icons';
+import { PAGE_BAR_ACTION, PageBar } from '@/components/page-bar';
 
 import { ActionForm } from '../../../../../action-form';
 import { createBoard } from '../actions';
@@ -88,70 +91,57 @@ export default async function BoardsPage({ params }: { params: Promise<Params> }
   const canManage = atLeast(ctx.role, Role.ADMIN);
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-primary">Boards</h1>
-          <span className="text-sm text-tertiary tabular-nums">{boards.length}</span>
-        </div>
-        {unfiled > 0 ? (
-          <Link
-            href={`${issuesPath(ctx.org, ctx.project)}?tab=all`}
-            className="text-[0.8125rem] text-tertiary no-underline hover:text-primary"
-          >
-            {unfiled} {unfiled === 1 ? 'issue is' : 'issues are'} on no board
-          </Link>
-        ) : null}
-      </header>
+    <>
+      <PageBar
+        crumbs={[projectCrumb(ctx.org, ctx.project), { label: 'Boards' }]}
+        actions={
+          unfiled > 0 ? (
+            <Link href={`${issuesPath(ctx.org, ctx.project)}?tab=all`} className={PAGE_BAR_ACTION}>
+              {unfiled} {unfiled === 1 ? 'issue is' : 'issues are'} on no board
+            </Link>
+          ) : null
+        }
+      />
 
       {boards.length === 0 ? (
-        <div className="rounded-xl border border-secondary px-4 py-10 text-center text-sm text-tertiary">
+        <p className="px-4.5 py-10 text-center text-sm text-tertiary">
           No boards yet. A board groups related issues — you do not need one to start working.
-        </div>
+        </p>
       ) : (
-        <ul className="overflow-hidden rounded-xl border border-secondary">
+        <ul className="flex flex-col py-2">
           {boards.map((board) => {
             const total = board._count.tickets;
             const done = doneByBoard.get(board.id) ?? 0;
             return (
-              <li key={board.id}>
+              <li key={board.id} className="px-2">
                 <Link
                   href={boardPath(ctx.org, ctx.project, board)}
-                  className="flex items-center gap-3 border-b border-secondary px-3 py-2.5 no-underline last:border-b-0 hover:bg-secondary/60"
+                  className="flex h-11 items-center gap-3 rounded-md px-2.5 text-sm no-underline transition-colors hover:bg-secondary"
                 >
-                  <span
-                    aria-hidden="true"
-                    className={cx('size-2.5 shrink-0 rounded-sm', colorClass(board.color).dot)}
-                  />
+                  <IconBoard className={cx('size-4', colorClass(board.color).text)} />
 
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[0.8125rem] font-medium text-primary">
-                      {board.name}
-                    </span>
+                  <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                    <span className="truncate font-medium text-primary">{board.name}</span>
                     {board.description ? (
-                      <span className="block truncate text-[0.6875rem] text-tertiary">
+                      <span className="hidden truncate text-xs text-tertiary sm:block">
                         {board.description}
                       </span>
                     ) : null}
                   </span>
 
-                  <span className={cx('hidden shrink-0 text-[0.6875rem] sm:block', STATUS_TONE[board.status])}>
+                  <span className={cx('hidden w-24 shrink-0 text-xs sm:block', STATUS_TONE[board.status])}>
                     {STATUS_LABEL[board.status]}
                   </span>
 
-                  {board.lead ? (
-                    <span className="hidden shrink-0 text-[0.6875rem] text-tertiary md:block">
-                      {board.lead.name}
-                    </span>
-                  ) : null}
+                  <span className="hidden w-28 shrink-0 truncate text-xs text-tertiary md:block">
+                    {board.lead?.name ?? ''}
+                  </span>
 
-                  {board.targetDate ? (
-                    <span className="hidden shrink-0 text-[0.6875rem] text-tertiary tabular-nums md:block">
-                      {DATE.format(board.targetDate)}
-                    </span>
-                  ) : null}
+                  <span className="hidden w-20 shrink-0 text-xs text-tertiary tabular-nums md:block">
+                    {board.targetDate ? DATE.format(board.targetDate) : ''}
+                  </span>
 
-                  <span className="shrink-0 text-[0.6875rem] text-tertiary tabular-nums">
+                  <span className="w-12 shrink-0 text-right text-xs text-tertiary tabular-nums">
                     {done}/{total}
                   </span>
                 </Link>
@@ -162,8 +152,9 @@ export default async function BoardsPage({ params }: { params: Promise<Params> }
       )}
 
       {canManage ? (
-        <details className="group w-fit" open={boards.length === 0}>
-          <summary className="w-fit cursor-pointer list-none rounded-lg border border-secondary px-2.5 py-1.5 text-[0.8125rem] text-tertiary transition-colors hover:bg-secondary hover:text-primary">
+        <details className="group w-fit px-4.5 pb-6" open={boards.length === 0}>
+          <summary className={cx(PAGE_BAR_ACTION, 'w-fit cursor-pointer list-none')}>
+            <IconPlus className="size-3.5" />
             New board
           </summary>
           <div className="pt-2">
@@ -181,11 +172,11 @@ export default async function BoardsPage({ params }: { params: Promise<Params> }
                 autoComplete="off"
                 placeholder="Board name"
                 aria-label="Board name"
-                className="h-8 rounded-lg border border-secondary bg-primary px-2.5 text-[0.8125rem] text-primary placeholder:text-tertiary focus:outline-2 focus:outline-offset-1 focus:outline-focus-ring"
+                className="h-8 rounded-md border border-primary bg-secondary_subtle px-2.5 text-sm text-primary placeholder:text-placeholder focus:border-brand focus:outline-none"
               />
               <button
                 type="submit"
-                className="h-8 rounded-lg bg-brand-solid px-2.5 text-[0.8125rem] font-medium text-white transition-opacity hover:opacity-90"
+                className="h-8 rounded-md bg-brand-solid px-3 text-sm font-medium text-white transition-colors hover:bg-brand-solid_hover"
               >
                 Create
               </button>
@@ -193,6 +184,6 @@ export default async function BoardsPage({ params }: { params: Promise<Params> }
           </div>
         </details>
       ) : null}
-    </div>
+    </>
   );
 }

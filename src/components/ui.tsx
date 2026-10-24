@@ -13,6 +13,7 @@ import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { Badge as UntitledBadge } from '@/components/base/badges/badges';
 import { Label } from '@/components/base/input/label';
+import { IconChevronRight } from '@/components/icons';
 import { remarkMentions } from '@/lib/mentions';
 import { cx } from '@/lib/utils/cx';
 
@@ -97,8 +98,8 @@ export function Breadcrumbs({
         {Children.toArray(children).map((child, index) => (
           <Fragment key={index}>
             {index > 0 ? (
-              <li aria-hidden="true" className="text-fg-quaternary">
-                /
+              <li aria-hidden="true" className="flex text-quaternary">
+                <IconChevronRight className="size-3" />
               </li>
             ) : null}
             {child}
@@ -143,9 +144,9 @@ Breadcrumbs.Item = function BreadcrumbsItem({
 /* -------------------------------------------------------------------------- */
 
 /**
- * Untitled UI's open-source set has no card, so this is the app's own: the same
- * surface its `TableCard` and modals use -- `bg-primary`, a hairline ring rather
- * than a border so it does not affect layout, and `shadow-xs`.
+ * Untitled UI's open-source set has no card, so this is the app's own: the
+ * settings-block surface from Linear -- one step lighter than the panel, a
+ * hairline border, no shadow.
  *
  * The subcomponents mirror the shape the app already used, so call sites did not
  * have to change when the design system did.
@@ -155,7 +156,7 @@ export function Card({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
     <div
       {...rest}
       className={cx(
-        'flex flex-col gap-4 rounded-xl bg-primary p-5 shadow-xs ring-1 ring-secondary',
+        'flex flex-col gap-4 rounded-lg border border-secondary bg-secondary_subtle p-5',
         className,
       )}
     />
@@ -167,14 +168,14 @@ Card.Header = function CardHeader({ className, ...rest }: HTMLAttributes<HTMLDiv
 };
 
 Card.Title = function CardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 {...rest} className={cx('text-md font-semibold text-primary', className)} />;
+  return <h2 {...rest} className={cx('text-sm font-medium text-primary', className)} />;
 };
 
 Card.Description = function CardDescription({
   className,
   ...rest
 }: HTMLAttributes<HTMLParagraphElement>) {
-  return <p {...rest} className={cx('text-sm text-tertiary', className)} />;
+  return <p {...rest} className={cx('text-sm text-pretty text-tertiary', className)} />;
 };
 
 Card.Content = function CardContent({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
@@ -403,7 +404,7 @@ export function PageHeader({
   return (
     <header className={cx('flex flex-wrap items-start justify-between gap-4', className)}>
       <div className="flex min-w-0 flex-col gap-1.5">
-        <h1 className="text-xl font-semibold text-balance text-primary">{title}</h1>
+        <h2 className="text-xl font-semibold text-balance text-primary">{title}</h2>
         {description ? <p className="text-sm text-pretty text-tertiary">{description}</p> : null}
         {children ? <div className="flex flex-wrap items-center gap-2">{children}</div> : null}
       </div>

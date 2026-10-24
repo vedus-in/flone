@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+import { projectCrumb } from '@/components/crumbs';
+import { PageBar } from '@/components/page-bar';
 import { documentPath, loadPage, requireProjectByKey } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { flattenTree } from '@/lib/documents';
@@ -17,11 +19,8 @@ import { DocIcon } from './doc-icon';
  * query per level. Bodies are NOT selected here: one of them can be 100k
  * characters, and this page renders none of them.
  *
- * THE LAYOUT IS A READING COLUMN, not the admin table the rest of the app uses:
- * `max-w-3xl mx-auto`, a large title, and rows that are hover targets rather
- * than bordered cells. Documents are prose, and prose earns the page Notion
- * gives it -- the shell's `max-w-7xl` stays for the surfaces that are actually
- * tables.
+ * THE LAYOUT IS A LIST, the same full-width hover rows as every other list in
+ * the panel; the reading column is the document page itself.
  *
  * The tree IS the organisation, as it is in Notion. There are no folders, no
  * tags and no second grouping to keep in sync -- a document is either under
@@ -59,20 +58,12 @@ export default async function DocsPage({ params }: { params: Promise<Params> }) 
   const tree = flattenTree(documents);
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 py-4 lg:py-10">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-3xl font-bold tracking-tight text-balance text-primary">
-          Documents
-        </h1>
-        <p className="text-sm text-pretty text-tertiary">
-          Long-form pages for {ctx.project.name}, written in Markdown and nested however you
-          like.
-        </p>
-      </header>
+    <>
+      <PageBar crumbs={[projectCrumb(ctx.org, ctx.project), { label: 'Documents' }]} />
 
-      <div className="flex flex-col gap-px">
+      <div className="flex flex-col gap-px px-2 py-2">
         {tree.length === 0 ? (
-          <p className="px-2 pb-4 text-sm text-tertiary">
+          <p className="px-2.5 py-3 text-sm text-tertiary">
             Nothing here yet. Name a page below and start writing.
           </p>
         ) : (
@@ -86,10 +77,10 @@ export default async function DocsPage({ params }: { params: Promise<Params> }) 
                   // ladder that runs out. Margin, not padding, so the hover
                   // surface indents with the row.
                   style={{ marginInlineStart: `${document.depth * 1.5}rem` }}
-                  className="group flex items-center gap-2.5 rounded-md px-2 py-1.5 no-underline transition-colors hover:bg-secondary/60"
+                  className="group flex h-9 items-center gap-2.5 rounded-md px-2.5 no-underline transition-colors hover:bg-secondary"
                 >
                   <DocIcon className="size-4 shrink-0 text-tertiary" />
-                  <span className="min-w-0 flex-1 truncate text-[0.9375rem] font-medium text-primary">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
                     {document.title}
                   </span>
                   {/* Quiet until the row is under the pointer: the list reads as
@@ -107,7 +98,7 @@ export default async function DocsPage({ params }: { params: Promise<Params> }) 
           action={createDocument}
           // No `resetOnSuccess`: the action navigates to the document it just
           // created, so there is no form left to clear.
-          className="group flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors focus-within:bg-secondary/40 hover:bg-secondary/40"
+          className="group flex h-9 items-center gap-2.5 rounded-md px-2.5 transition-colors focus-within:bg-secondary hover:bg-secondary"
           aria-label="New document"
         >
           <input type="hidden" name="projectId" value={ctx.project.id} />
@@ -131,7 +122,7 @@ export default async function DocsPage({ params }: { params: Promise<Params> }) 
             autoComplete="off"
             placeholder="New document"
             aria-label="New document title"
-            className="min-w-0 flex-1 bg-transparent text-[0.9375rem] text-primary placeholder:text-tertiary focus:outline-none"
+            className="min-w-0 flex-1 bg-transparent text-sm text-primary placeholder:text-tertiary focus:outline-none"
           />
           <SubmitButton
             size="sm"
@@ -143,6 +134,6 @@ export default async function DocsPage({ params }: { params: Promise<Params> }) 
           </SubmitButton>
         </ActionForm>
       </div>
-    </div>
+    </>
   );
 }

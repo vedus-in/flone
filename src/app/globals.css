@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "../styles/theme.css";
+@import "../styles/linear.css";
 
 @plugin "tailwindcss-animate";
 @plugin "tailwindcss-react-aria-components";
@@ -11,10 +12,11 @@
 /* ==========================================================================
    Flone -- app-specific additions only.
 
-   Untitled UI IS the design system: components live under `src/components/`,
-   and every colour, radius, shadow and font token comes from
-   `../styles/theme.css`. Nothing below re-implements any of that. Layout is
-   done with Tailwind utilities at the call site, never here.
+   Untitled UI supplies the components under `src/components/` and the token
+   layer in `../styles/theme.css`; `../styles/linear.css` re-points that
+   layer's semantic tokens and type scale at the Linear look. Nothing below
+   re-implements any of that. Layout is done with Tailwind utilities at the
+   call site, never here.
    ========================================================================== */
 
 @utility scrollbar-hide {
@@ -317,7 +319,7 @@ body {
 
     body {
         min-height: 100dvh;
-        background-color: var(--color-bg-primary);
+        background-color: var(--color-bg-app);
         color: var(--color-text-primary);
     }
 }

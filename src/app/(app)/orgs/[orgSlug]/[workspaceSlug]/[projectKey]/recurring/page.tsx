@@ -11,7 +11,6 @@ import {
 } from '@/components/table';
 import {
   Badge,
-  Breadcrumbs,
   Card,
   Field,
   Input,
@@ -19,8 +18,10 @@ import {
   PageHeader,
   SubmitButton,
 } from '@/components/ui';
+import { projectCrumb } from '@/components/crumbs';
+import { PageBar, PageBody } from '@/components/page-bar';
 import { ImageAttachTextarea } from '@/components/image-attach';
-import { atLeast, loadPage, orgPath, projectPath, requireProjectByKey } from '@/lib/authz';
+import { atLeast, loadPage, requireProjectByKey } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { PRIORITY_LABEL, PRIORITY_ORDER, colorClass } from '@/lib/model';
 import { TICKET_REPEAT_LABEL, formatWhen } from '@/lib/reminder-math';
@@ -280,444 +281,437 @@ export default async function RecurringPage({ params }: { params: Promise<Params
   );
 
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-5">
-        <Breadcrumbs>
-          <Breadcrumbs.Item href={orgPath(ctx.org)}>{ctx.org.name}</Breadcrumbs.Item>
-          <Breadcrumbs.Item href={projectPath(ctx.org, ctx.project)}>
-            {ctx.project.name}
-          </Breadcrumbs.Item>
-          <Breadcrumbs.Item>Recurring</Breadcrumbs.Item>
-        </Breadcrumbs>
-
+    <>
+      <PageBar crumbs={[projectCrumb(ctx.org, ctx.project), { label: 'Recurring' }]} />
+      <PageBody className="flex flex-col gap-8">
         <PageHeader
           title="Recurring tickets"
           description={`Tickets ${ctx.project.name} creates for you on a schedule, pre-filled and assigned.`}
         />
-      </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* New recurring ticket                                                */}
-      {/* ------------------------------------------------------------------ */}
-      <section aria-labelledby="new-recurring-heading">
-        <Card className="gap-4 p-6">
-          <Card.Header>
-            <Card.Title id="new-recurring-heading" className="text-base">
-              New recurring ticket
-            </Card.Title>
-            {/* "Within a few minutes" is not hedging: the scheduler ticks on an
-                interval, so the tick interval is a ticket's worst-case
-                lateness. Promising the exact minute would be a promise the
-                deployment cannot keep. */}
-            <Card.Description className="text-pretty">
-              A ticket appears in {ctx.project.key} at the time you pick, in your own timezone,
-              within a few minutes &mdash; pre-filled and due that day.
-            </Card.Description>
-          </Card.Header>
+        {/* ------------------------------------------------------------------ */}
+        {/* New recurring ticket                                                */}
+        {/* ------------------------------------------------------------------ */}
+        <section aria-labelledby="new-recurring-heading">
+          <Card className="gap-4 p-6">
+            <Card.Header>
+              <Card.Title id="new-recurring-heading" className="text-base">
+                New recurring ticket
+              </Card.Title>
+              {/* "Within a few minutes" is not hedging: the scheduler ticks on an
+                  interval, so the tick interval is a ticket's worst-case
+                  lateness. Promising the exact minute would be a promise the
+                  deployment cannot keep. */}
+              <Card.Description className="text-pretty">
+                A ticket appears in {ctx.project.key} at the time you pick, in your own timezone,
+                within a few minutes &mdash; pre-filled and due that day.
+              </Card.Description>
+            </Card.Header>
 
-          <ActionForm
-            action={createRecurringTicket}
-            className="flex flex-col gap-5"
-            resetOnSuccess
-            aria-label="Create a recurring ticket"
-          >
-            {scope}
-            <TzOffsetField />
-
-            <Field
-              htmlFor="new-recurring-title"
-              label="Title"
-              hint={
-                <>
-                  Each ticket is created with the date on the end, like &ldquo;Daily review
-                  &mdash; 16 Aug 2026&rdquo;.
-                </>
-              }
+            <ActionForm
+              action={createRecurringTicket}
+              className="flex flex-col gap-5"
+              resetOnSuccess
+              aria-label="Create a recurring ticket"
             >
-              <Input
-                id="new-recurring-title"
-                name="title"
-                required
-                maxLength={160}
-                autoComplete="off"
-                placeholder="XAU breakout daily review"
-              />
-            </Field>
+              {scope}
+              <TzOffsetField />
 
-            <Field
-              htmlFor="new-recurring-description"
-              label="Description (Markdown)"
-              hint={
-                <>
-                  This is the ticket&rsquo;s description, every time. Editing it later changes
-                  every future ticket &mdash; it is the living checklist.
-                </>
-              }
-            >
-              {/* Images paste, drop and attach here too, targeted at the PROJECT:
-                  a template has no issue, and neither do the tickets it has not
-                  spawned yet. Still an uncontrolled control with a `name`, so
-                  `ActionForm`'s rehydration is unaffected. */}
-              <ImageAttachTextarea
-                target={{ projectId: ctx.project.id }}
-                id="new-recurring-description"
-                name="description"
-                rows={6}
-                maxLength={10000}
-                placeholder={'Deployed on: MT5 - account 1120\n\n## How it worked\n## Performance\n## Improvements'}
-              />
-            </Field>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              {/* A native `<input type="datetime-local">`, which is what §3 of
-                  the design specifies and what `localDateTimeSchema` was
-                  written to parse. No default value: "tomorrow at 09:00"
-                  depends on the timezone, and a server rendering in UTC would
-                  disagree with the browser hydrating it. */}
               <Field
-                htmlFor="new-recurring-run-at"
-                label="First ticket"
-                hint="Your local time. Every later occurrence is counted from this one."
+                htmlFor="new-recurring-title"
+                label="Title"
+                hint={
+                  <>
+                    Each ticket is created with the date on the end, like &ldquo;Daily review
+                    &mdash; 16 Aug 2026&rdquo;.
+                  </>
+                }
               >
                 <Input
-                  id="new-recurring-run-at"
-                  name="runAt"
-                  type="datetime-local"
+                  id="new-recurring-title"
+                  name="title"
                   required
+                  maxLength={160}
                   autoComplete="off"
+                  placeholder="XAU breakout daily review"
                 />
               </Field>
 
-              <RepeatSelect idPrefix="new-recurring" value={TicketRepeat.DAILY} />
+              <Field
+                htmlFor="new-recurring-description"
+                label="Description (Markdown)"
+                hint={
+                  <>
+                    This is the ticket&rsquo;s description, every time. Editing it later changes
+                    every future ticket &mdash; it is the living checklist.
+                  </>
+                }
+              >
+                {/* Images paste, drop and attach here too, targeted at the PROJECT:
+                    a template has no issue, and neither do the tickets it has not
+                    spawned yet. Still an uncontrolled control with a `name`, so
+                    `ActionForm`'s rehydration is unaffected. */}
+                <ImageAttachTextarea
+                  target={{ projectId: ctx.project.id }}
+                  id="new-recurring-description"
+                  name="description"
+                  rows={6}
+                  maxLength={10000}
+                  placeholder={'Deployed on: MT5 - account 1120\n\n## How it worked\n## Performance\n## Improvements'}
+                />
+              </Field>
 
-              <AssigneeSelect
-                idPrefix="new-recurring"
-                members={members}
-                viewerId={ctx.user.id}
-                value={ctx.user.id}
-              />
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* A native `<input type="datetime-local">`, which is what §3 of
+                    the design specifies and what `localDateTimeSchema` was
+                    written to parse. No default value: "tomorrow at 09:00"
+                    depends on the timezone, and a server rendering in UTC would
+                    disagree with the browser hydrating it. */}
+                <Field
+                  htmlFor="new-recurring-run-at"
+                  label="First ticket"
+                  hint="Your local time. Every later occurrence is counted from this one."
+                >
+                  <Input
+                    id="new-recurring-run-at"
+                    name="runAt"
+                    type="datetime-local"
+                    required
+                    autoComplete="off"
+                  />
+                </Field>
 
-              <PrioritySelect idPrefix="new-recurring" value={Priority.NONE} />
+                <RepeatSelect idPrefix="new-recurring" value={TicketRepeat.DAILY} />
 
-              <div className="sm:col-span-2">
-                <LabelPicker idPrefix="new-recurring" labels={labels} checked={noLabels} />
+                <AssigneeSelect
+                  idPrefix="new-recurring"
+                  members={members}
+                  viewerId={ctx.user.id}
+                  value={ctx.user.id}
+                />
+
+                <PrioritySelect idPrefix="new-recurring" value={Priority.NONE} />
+
+                <div className="sm:col-span-2">
+                  <LabelPicker idPrefix="new-recurring" labels={labels} checked={noLabels} />
+                </div>
               </div>
-            </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <SubmitButton pendingLabel="Scheduling...">Create recurring ticket</SubmitButton>
-            </div>
-          </ActionForm>
-        </Card>
-      </section>
+              <div className="flex flex-wrap items-center gap-2">
+                <SubmitButton pendingLabel="Scheduling...">Create recurring ticket</SubmitButton>
+              </div>
+            </ActionForm>
+          </Card>
+        </section>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Scheduled                                                           */}
-      {/* ------------------------------------------------------------------ */}
-      <section className="flex flex-col gap-4" aria-labelledby="scheduled-heading">
-        <h2 id="scheduled-heading" className="text-sm font-medium text-primary">
-          Scheduled
-        </h2>
+        {/* ------------------------------------------------------------------ */}
+        {/* Scheduled                                                           */}
+        {/* ------------------------------------------------------------------ */}
+        <section className="flex flex-col gap-4" aria-labelledby="scheduled-heading">
+          <h2 id="scheduled-heading" className="text-sm font-medium text-primary">
+            Scheduled
+          </h2>
 
-        {templates.length === 0 ? (
-          <p className="text-sm text-pretty text-tertiary">
-            Nothing recurring yet. Anything you add above shows up here with the time its next
-            ticket appears.
-          </p>
-        ) : (
-          <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
-            <TableRoot size="sm" aria-label="Scheduled recurring tickets">
-              <TableHeader>
-                <TableHead isRowHeader className="w-full">
-                  Recurring ticket
-                </TableHead>
-                <TableHead className="whitespace-nowrap">Next</TableHead>
-                <TableHead className="whitespace-nowrap">Repeats</TableHead>
-                <TableHead className="whitespace-nowrap">To</TableHead>
-                <TableHead className="whitespace-nowrap text-end">Manage</TableHead>
-              </TableHeader>
+          {templates.length === 0 ? (
+            <p className="text-sm text-pretty text-tertiary">
+              Nothing recurring yet. Anything you add above shows up here with the time its next
+              ticket appears.
+            </p>
+          ) : (
+            <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
+              <TableRoot size="sm" aria-label="Scheduled recurring tickets">
+                <TableHeader>
+                  <TableHead isRowHeader className="w-full">
+                    Recurring ticket
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap">Next</TableHead>
+                  <TableHead className="whitespace-nowrap">Repeats</TableHead>
+                  <TableHead className="whitespace-nowrap">To</TableHead>
+                  <TableHead className="whitespace-nowrap text-end">Manage</TableHead>
+                </TableHeader>
 
-              <TableBody>
-                {templates.map((template) => {
-                  // Presentation only. `deleteRecurringTicket` re-derives all of
-                  // this from the session and the stored row.
-                  const canDelete = canManageAny || template.createdById === ctx.user.id;
-                  const paused = template.nextRunAt === null;
-                  const checkedLabels = new Set(template.labels.map((label) => label.id));
+                <TableBody>
+                  {templates.map((template) => {
+                    // Presentation only. `deleteRecurringTicket` re-derives all of
+                    // this from the session and the stored row.
+                    const canDelete = canManageAny || template.createdById === ctx.user.id;
+                    const paused = template.nextRunAt === null;
+                    const checkedLabels = new Set(template.labels.map((label) => label.id));
 
-                  return (
-                    <TableRow key={template.id} id={template.id}>
-                      <TableCell>
-                        <div className="flex min-w-0 flex-col gap-0.5 py-1">
-                          <span className="font-medium text-primary">{template.title}</span>
-                          <span className="text-xs text-tertiary">
-                            {template.labels.length > 0
-                              ? `${template.labels.map((label) => label.name).join(', ')} · `
-                              : ''}
-                            set by{' '}
-                            {template.createdById === ctx.user.id
-                              ? 'you'
-                              : template.createdBy.name}
-                            {template.lastSpawnedAt ? (
-                              <>
-                                {' '}
-                                &middot; last created{' '}
-                                <span className="tabular-nums">
-                                  {formatWhen(template.lastSpawnedAt, template.tzOffsetMinutes)}
-                                </span>
-                              </>
-                            ) : null}
-                          </span>
+                    return (
+                      <TableRow key={template.id} id={template.id}>
+                        <TableCell>
+                          <div className="flex min-w-0 flex-col gap-0.5 py-1">
+                            <span className="font-medium text-primary">{template.title}</span>
+                            <span className="text-xs text-tertiary">
+                              {template.labels.length > 0
+                                ? `${template.labels.map((label) => label.name).join(', ')} · `
+                                : ''}
+                              set by{' '}
+                              {template.createdById === ctx.user.id
+                                ? 'you'
+                                : template.createdBy.name}
+                              {template.lastSpawnedAt ? (
+                                <>
+                                  {' '}
+                                  &middot; last created{' '}
+                                  <span className="tabular-nums">
+                                    {formatWhen(template.lastSpawnedAt, template.tzOffsetMinutes)}
+                                  </span>
+                                </>
+                              ) : null}
+                            </span>
 
-                          {/*
-                           * Edit lives in this column rather than under Manage
-                           * because it is the only control that needs room: a
-                           * template body is accumulated process, and the
-                           * Manage cell is four words wide. Collapsed by
-                           * default, so the table reads as the wireframe until
-                           * somebody opens one.
-                           *
-                           * TWO FORMS, NOT ONE. Content and schedule are
-                           * separate submits so neither can half-write the
-                           * other's columns -- see the header comment in
-                           * `actions.ts` for the failure mode and for why the
-                           * design's "one form, full replace" cannot work.
-                           */}
-                          {/*
-                           * `min-h-10` is the 40px hit target; `-my-1` gives
-                           * back the vertical space that buys, so the row reads
-                           * as tightly as before while the tap area is real.
-                           * The default marker is removed in favour of a
-                           * chevron that rotates on open -- a bare word gives
-                           * no hint that anything is behind it.
-                           */}
-                          <details className="group mt-1">
-                            <summary className="-my-1 inline-flex min-h-10 w-fit cursor-pointer list-none items-center gap-1.5 text-xs text-tertiary outline-focus-ring transition-colors duration-100 hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 [&::-webkit-details-marker]:hidden">
-                              <svg
-                                aria-hidden="true"
-                                viewBox="0 0 16 16"
-                                className="size-3 transition-transform duration-200 ease-[cubic-bezier(0.2,0,0,1)] group-open:rotate-90 motion-reduce:transition-none"
-                              >
-                                <path
-                                  d="M6 4l4 4-4 4"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                              Edit
-                            </summary>
-
-                            <div className="mt-3 flex flex-col gap-5 rounded-lg border border-secondary p-4">
-                              <ActionForm
-                                action={updateRecurringTicket}
-                                className="flex flex-col gap-4"
-                                aria-label={`Edit the recurring ticket "${template.title}"`}
-                              >
-                                {scope}
-                                <input type="hidden" name="part" value="CONTENT" />
-                                <input
-                                  type="hidden"
-                                  name="recurringTicketId"
-                                  value={template.id}
-                                />
-
-                                <Field htmlFor={`${template.id}-title`} label="Title">
-                                  <Input
-                                    id={`${template.id}-title`}
-                                    name="title"
-                                    required
-                                    maxLength={160}
-                                    autoComplete="off"
-                                    defaultValue={template.title}
-                                  />
-                                </Field>
-
-                                <Field
-                                  htmlFor={`${template.id}-description`}
-                                  label="Description (Markdown)"
-                                  hint="Changes every future ticket. The ones already created keep the text they were made with."
+                            {/*
+                             * Edit lives in this column rather than under Manage
+                             * because it is the only control that needs room: a
+                             * template body is accumulated process, and the
+                             * Manage cell is four words wide. Collapsed by
+                             * default, so the table reads as the wireframe until
+                             * somebody opens one.
+                             *
+                             * TWO FORMS, NOT ONE. Content and schedule are
+                             * separate submits so neither can half-write the
+                             * other's columns -- see the header comment in
+                             * `actions.ts` for the failure mode and for why the
+                             * design's "one form, full replace" cannot work.
+                             */}
+                            {/*
+                             * `min-h-10` is the 40px hit target; `-my-1` gives
+                             * back the vertical space that buys, so the row reads
+                             * as tightly as before while the tap area is real.
+                             * The default marker is removed in favour of a
+                             * chevron that rotates on open -- a bare word gives
+                             * no hint that anything is behind it.
+                             */}
+                            <details className="group mt-1">
+                              <summary className="-my-1 inline-flex min-h-10 w-fit cursor-pointer list-none items-center gap-1.5 text-xs text-tertiary outline-focus-ring transition-colors duration-100 hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 [&::-webkit-details-marker]:hidden">
+                                <svg
+                                  aria-hidden="true"
+                                  viewBox="0 0 16 16"
+                                  className="size-3 transition-transform duration-200 ease-[cubic-bezier(0.2,0,0,1)] group-open:rotate-90 motion-reduce:transition-none"
                                 >
-                                  <ImageAttachTextarea
-                                    target={{ projectId: ctx.project.id }}
-                                    id={`${template.id}-description`}
-                                    name="description"
-                                    rows={8}
-                                    maxLength={10000}
-                                    defaultValue={template.description ?? ''}
+                                  <path
+                                    d="M6 4l4 4-4 4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.5"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
                                   />
-                                </Field>
+                                </svg>
+                                Edit
+                              </summary>
 
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                  <AssigneeSelect
-                                    idPrefix={template.id}
-                                    members={members}
-                                    viewerId={ctx.user.id}
-                                    value={template.assigneeId ?? ''}
+                              <div className="mt-3 flex flex-col gap-5 rounded-lg border border-secondary p-4">
+                                <ActionForm
+                                  action={updateRecurringTicket}
+                                  className="flex flex-col gap-4"
+                                  aria-label={`Edit the recurring ticket "${template.title}"`}
+                                >
+                                  {scope}
+                                  <input type="hidden" name="part" value="CONTENT" />
+                                  <input
+                                    type="hidden"
+                                    name="recurringTicketId"
+                                    value={template.id}
                                   />
-                                  <PrioritySelect
-                                    idPrefix={template.id}
-                                    value={template.priority}
-                                  />
-                                  <div className="sm:col-span-2">
-                                    <LabelPicker
-                                      idPrefix={template.id}
-                                      labels={labels}
-                                      checked={checkedLabels}
-                                    />
-                                  </div>
-                                </div>
 
-                                <div>
-                                  <SubmitButton size="sm" pendingLabel="Saving...">
-                                    Save
-                                  </SubmitButton>
-                                </div>
-                              </ActionForm>
-
-                              <ActionForm
-                                action={updateRecurringTicket}
-                                className="flex flex-col gap-4"
-                                aria-label={`Reschedule the recurring ticket "${template.title}"`}
-                              >
-                                {scope}
-                                <input type="hidden" name="part" value="SCHEDULE" />
-                                <input
-                                  type="hidden"
-                                  name="recurringTicketId"
-                                  value={template.id}
-                                />
-                                <TzOffsetField />
-
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                  {/* Empty rather than pre-filled with the
-                                      stored anchor: that anchor is in the PAST
-                                      for any template that has already spawned,
-                                      and re-submitting it would be rejected by
-                                      the same guard that keeps a first run
-                                      honest. Rescheduling means naming a new
-                                      first run. */}
-                                  <Field
-                                    htmlFor={`${template.id}-run-at`}
-                                    label="New first ticket"
-                                    hint="Replaces the anchor every later occurrence is counted from."
-                                  >
+                                  <Field htmlFor={`${template.id}-title`} label="Title">
                                     <Input
-                                      id={`${template.id}-run-at`}
-                                      name="runAt"
-                                      type="datetime-local"
+                                      id={`${template.id}-title`}
+                                      name="title"
                                       required
+                                      maxLength={160}
                                       autoComplete="off"
+                                      defaultValue={template.title}
                                     />
                                   </Field>
 
-                                  <RepeatSelect
-                                    idPrefix={template.id}
-                                    value={template.repeat}
-                                  />
-                                </div>
-
-                                <div>
-                                  <SubmitButton
-                                    color="secondary"
-                                    size="sm"
-                                    pendingLabel="Saving..."
+                                  <Field
+                                    htmlFor={`${template.id}-description`}
+                                    label="Description (Markdown)"
+                                    hint="Changes every future ticket. The ones already created keep the text they were made with."
                                   >
-                                    {paused
-                                      ? 'Save schedule (stays paused)'
-                                      : 'Save schedule'}
-                                  </SubmitButton>
-                                </div>
-                              </ActionForm>
-                            </div>
-                          </details>
-                        </div>
-                      </TableCell>
+                                    <ImageAttachTextarea
+                                      target={{ projectId: ctx.project.id }}
+                                      id={`${template.id}-description`}
+                                      name="description"
+                                      rows={8}
+                                      maxLength={10000}
+                                      defaultValue={template.description ?? ''}
+                                    />
+                                  </Field>
 
-                      <TableCell className="whitespace-nowrap align-top">
-                        {/* Every row in this column is a clock. Proportional
-                            digits make the times jitter against each other down
-                            the column; tabular ones line them up. */}
-                        <span className="text-sm text-secondary tabular-nums">
-                          {template.nextRunAt
-                            ? formatWhen(template.nextRunAt, template.tzOffsetMinutes)
-                            : 'Paused'}
-                        </span>
-                      </TableCell>
+                                  <div className="grid gap-4 sm:grid-cols-2">
+                                    <AssigneeSelect
+                                      idPrefix={template.id}
+                                      members={members}
+                                      viewerId={ctx.user.id}
+                                      value={template.assigneeId ?? ''}
+                                    />
+                                    <PrioritySelect
+                                      idPrefix={template.id}
+                                      value={template.priority}
+                                    />
+                                    <div className="sm:col-span-2">
+                                      <LabelPicker
+                                        idPrefix={template.id}
+                                        labels={labels}
+                                        checked={checkedLabels}
+                                      />
+                                    </div>
+                                  </div>
 
-                      <TableCell className="whitespace-nowrap align-top">
-                        <Badge tone={paused ? 'neutral' : 'accent'}>
-                          {TICKET_REPEAT_LABEL[template.repeat]}
-                        </Badge>
-                      </TableCell>
+                                  <div>
+                                    <SubmitButton size="sm" pendingLabel="Saving...">
+                                      Save
+                                    </SubmitButton>
+                                  </div>
+                                </ActionForm>
 
-                      <TableCell className="whitespace-nowrap align-top">
-                        <span className="text-sm text-secondary">
-                          {template.assignee
-                            ? template.assignee.id === ctx.user.id
-                              ? 'You'
-                              : template.assignee.name
-                            : '—'}
-                        </span>
-                      </TableCell>
+                                <ActionForm
+                                  action={updateRecurringTicket}
+                                  className="flex flex-col gap-4"
+                                  aria-label={`Reschedule the recurring ticket "${template.title}"`}
+                                >
+                                  {scope}
+                                  <input type="hidden" name="part" value="SCHEDULE" />
+                                  <input
+                                    type="hidden"
+                                    name="recurringTicketId"
+                                    value={template.id}
+                                  />
+                                  <TzOffsetField />
 
-                      <TableCell className="align-top">
-                        <div className="flex flex-col items-end gap-2">
-                          {/* Any member may pause or resume: it is the
-                              assignee's escape hatch when a template is filling
-                              their board, and nothing is lost by it. */}
-                          <ActionForm
-                            action={setRecurringTicketPaused}
-                            className="flex flex-col items-end gap-2"
-                            aria-label={`${paused ? 'Resume' : 'Pause'} the recurring ticket "${template.title}"`}
-                          >
-                            {scope}
-                            <input type="hidden" name="recurringTicketId" value={template.id} />
-                            <input type="hidden" name="paused" value={paused ? 'false' : 'true'} />
-                            <SubmitButton
-                              color="secondary"
-                              size="sm"
-                              pendingLabel={paused ? 'Resuming...' : 'Pausing...'}
-                            >
-                              {paused ? 'Resume' : 'Pause'}
-                            </SubmitButton>
-                          </ActionForm>
+                                  <div className="grid gap-4 sm:grid-cols-2">
+                                    {/* Empty rather than pre-filled with the
+                                        stored anchor: that anchor is in the PAST
+                                        for any template that has already spawned,
+                                        and re-submitting it would be rejected by
+                                        the same guard that keeps a first run
+                                        honest. Rescheduling means naming a new
+                                        first run. */}
+                                    <Field
+                                      htmlFor={`${template.id}-run-at`}
+                                      label="New first ticket"
+                                      hint="Replaces the anchor every later occurrence is counted from."
+                                    >
+                                      <Input
+                                        id={`${template.id}-run-at`}
+                                        name="runAt"
+                                        type="datetime-local"
+                                        required
+                                        autoComplete="off"
+                                      />
+                                    </Field>
 
-                          {/* Never dangled at somebody who cannot do it -- and
-                              the action re-checks regardless. */}
-                          {canDelete ? (
+                                    <RepeatSelect
+                                      idPrefix={template.id}
+                                      value={template.repeat}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <SubmitButton
+                                      color="secondary"
+                                      size="sm"
+                                      pendingLabel="Saving..."
+                                    >
+                                      {paused
+                                        ? 'Save schedule (stays paused)'
+                                        : 'Save schedule'}
+                                    </SubmitButton>
+                                  </div>
+                                </ActionForm>
+                              </div>
+                            </details>
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="whitespace-nowrap align-top">
+                          {/* Every row in this column is a clock. Proportional
+                              digits make the times jitter against each other down
+                              the column; tabular ones line them up. */}
+                          <span className="text-sm text-secondary tabular-nums">
+                            {template.nextRunAt
+                              ? formatWhen(template.nextRunAt, template.tzOffsetMinutes)
+                              : 'Paused'}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="whitespace-nowrap align-top">
+                          <Badge tone={paused ? 'neutral' : 'accent'}>
+                            {TICKET_REPEAT_LABEL[template.repeat]}
+                          </Badge>
+                        </TableCell>
+
+                        <TableCell className="whitespace-nowrap align-top">
+                          <span className="text-sm text-secondary">
+                            {template.assignee
+                              ? template.assignee.id === ctx.user.id
+                                ? 'You'
+                                : template.assignee.name
+                              : '—'}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="align-top">
+                          <div className="flex flex-col items-end gap-2">
+                            {/* Any member may pause or resume: it is the
+                                assignee's escape hatch when a template is filling
+                                their board, and nothing is lost by it. */}
                             <ActionForm
-                              action={deleteRecurringTicket}
+                              action={setRecurringTicketPaused}
                               className="flex flex-col items-end gap-2"
-                              aria-label={`Delete the recurring ticket "${template.title}"`}
+                              aria-label={`${paused ? 'Resume' : 'Pause'} the recurring ticket "${template.title}"`}
                             >
                               {scope}
                               <input type="hidden" name="recurringTicketId" value={template.id} />
+                              <input type="hidden" name="paused" value={paused ? 'false' : 'true'} />
                               <SubmitButton
-                                color="secondary-destructive"
+                                color="secondary"
                                 size="sm"
-                                pendingLabel="Deleting..."
+                                pendingLabel={paused ? 'Resuming...' : 'Pausing...'}
                               >
-                                Delete
+                                {paused ? 'Resume' : 'Pause'}
                               </SubmitButton>
                             </ActionForm>
-                          ) : (
-                            <span className="text-xs whitespace-nowrap text-tertiary">
-                              Pause only
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </TableRoot>
-          </div>
-        )}
-      </section>
-    </div>
+
+                            {/* Never dangled at somebody who cannot do it -- and
+                                the action re-checks regardless. */}
+                            {canDelete ? (
+                              <ActionForm
+                                action={deleteRecurringTicket}
+                                className="flex flex-col items-end gap-2"
+                                aria-label={`Delete the recurring ticket "${template.title}"`}
+                              >
+                                {scope}
+                                <input type="hidden" name="recurringTicketId" value={template.id} />
+                                <SubmitButton
+                                  color="secondary-destructive"
+                                  size="sm"
+                                  pendingLabel="Deleting..."
+                                >
+                                  Delete
+                                </SubmitButton>
+                              </ActionForm>
+                            ) : (
+                              <span className="text-xs whitespace-nowrap text-tertiary">
+                                Pause only
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </TableRoot>
+            </div>
+          )}
+        </section>
+      </PageBody>
+    </>
   );
 }

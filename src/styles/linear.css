@@ -1,0 +1,218 @@
+/**
+ * Linear look and feel, layered over the Untitled UI tokens in `theme.css`.
+ *
+ * `theme.css` stays as shipped; this file re-points its SEMANTIC layer
+ * (`--color-bg-*`, `--color-text-*`, `--color-border-*`, `--color-fg-*`), the
+ * brand ramp and the type scale. Every component keeps writing `bg-primary`,
+ * `text-tertiary` and so on, and picks the new values up from here.
+ *
+ * Imported after `theme.css`, so a later `@theme` declaration wins, and the
+ * `.dark-mode` block sits in `@layer base` after theme.css's own, so it wins
+ * the same way.
+ *
+ * The dark values were sampled from screenshots of the Linear app. The light
+ * values follow the same structure: a tinted window, a white panel, and one
+ * step of wash per level of emphasis.
+ *
+ * Surfaces, from the back:
+ *   app       the window behind everything; the sidebar sits on it.
+ *   primary   the inset panel every page renders into.
+ *   sunken    one step BELOW the panel: board columns.
+ *   secondary row hover, cards, the comment box.
+ *   tertiary  quiet pills and icon buttons.
+ *   quaternary / active  a selected row or tab.
+ *   elevated  menus, popovers, dialogs and the command menu.
+ */
+
+@theme {
+    /* TYPE SCALE -- 13px UI, 15px reading text, 24px issue titles. */
+    --text-xs: 0.75rem;
+    --text-xs--line-height: 1rem;
+
+    --text-sm: 0.8125rem;
+    --text-sm--line-height: 1.25rem;
+
+    --text-md: 0.9375rem;
+    --text-md--line-height: 1.5rem;
+
+    --text-lg: 1.0625rem;
+    --text-lg--line-height: 1.625rem;
+
+    --text-xl: 1.25rem;
+    --text-xl--line-height: 1.75rem;
+
+    --text-display-xs: 1.5rem;
+    --text-display-xs--line-height: 2rem;
+
+    /* Shadows read as depth on a dark panel only when they are heavy. */
+    --shadow-xs: 0px 1px 1px rgba(0, 0, 0, 0.06);
+    --shadow-sm: 0px 1px 2px rgba(0, 0, 0, 0.08);
+    --shadow-md: 0px 4px 12px rgba(0, 0, 0, 0.12);
+    --shadow-lg: 0px 8px 24px rgba(0, 0, 0, 0.14), 0px 2px 6px rgba(0, 0, 0, 0.08);
+    --shadow-xl: 0px 16px 40px rgba(0, 0, 0, 0.18), 0px 4px 12px rgba(0, 0, 0, 0.1);
+    --shadow-2xl: 0px 24px 64px rgba(0, 0, 0, 0.24), 0px 6px 16px rgba(0, 0, 0, 0.12);
+    --shadow-skeuomorphic: 0 0 #0000;
+    --shadow-xs-skeuomorphic: var(--shadow-xs);
+
+    /* BRAND -- indigo, centred on 600. */
+    --color-brand-50: rgb(241 242 253);
+    --color-brand-100: rgb(228 230 251);
+    --color-brand-200: rgb(205 208 246);
+    --color-brand-300: rgb(170 176 239);
+    --color-brand-400: rgb(138 145 230);
+    --color-brand-500: rgb(113 121 222);
+    --color-brand-600: rgb(94 106 210);
+    --color-brand-700: rgb(80 90 189);
+    --color-brand-800: rgb(66 74 154);
+    --color-brand-900: rgb(55 61 122);
+    --color-brand-950: rgb(35 38 71);
+
+    /* LIGHT SURFACES */
+    --color-bg-app: rgb(244 244 245);
+    --color-bg-primary: rgb(255 255 255);
+    --color-bg-primary_alt: rgb(255 255 255);
+    --color-bg-sunken: rgb(247 247 248);
+    --color-bg-secondary: rgb(244 244 245);
+    --color-bg-secondary_alt: rgb(250 250 250);
+    --color-bg-secondary_hover: rgb(237 237 239);
+    --color-bg-secondary_subtle: rgb(250 250 250);
+    --color-bg-primary_hover: rgb(244 244 245);
+    --color-bg-tertiary: rgb(240 240 242);
+    --color-bg-quaternary: rgb(232 232 235);
+    --color-bg-active: rgb(232 232 235);
+    --color-bg-elevated: rgb(255 255 255);
+    --color-bg-elevated_hover: rgb(241 241 243);
+    --color-bg-overlay: rgb(0 0 0 / 0.2);
+    --color-bg-tooltip: rgb(255 255 255);
+    --color-bg-primary-solid: rgb(23 23 26);
+    --color-bg-brand-primary: rgb(94 106 210 / 0.1);
+    --color-bg-brand-secondary: rgb(94 106 210 / 0.16);
+    --color-bg-brand-solid: var(--color-brand-600);
+    --color-bg-brand-solid_hover: var(--color-brand-700);
+
+    /* LIGHT TEXT */
+    --color-text-primary: rgb(27 27 31);
+    --color-text-secondary: rgb(60 61 66);
+    --color-text-secondary_hover: rgb(27 27 31);
+    --color-text-tertiary: rgb(107 109 116);
+    --color-text-tertiary_hover: rgb(27 27 31);
+    --color-text-quaternary: rgb(150 152 158);
+    --color-text-placeholder: rgb(150 152 158);
+    --color-text-brand-secondary: var(--color-brand-700);
+    --color-text-brand-secondary_hover: var(--color-brand-800);
+
+    /* LIGHT FOREGROUND (icons) */
+    --color-fg-primary: rgb(27 27 31);
+    --color-fg-secondary: rgb(60 61 66);
+    --color-fg-secondary_hover: rgb(27 27 31);
+    --color-fg-tertiary: rgb(107 109 116);
+    --color-fg-tertiary_hover: rgb(60 61 66);
+    --color-fg-quaternary: rgb(150 152 158);
+    --color-fg-quaternary_hover: rgb(107 109 116);
+    --color-fg-brand-primary: var(--color-brand-600);
+    --color-fg-brand-secondary: var(--color-brand-500);
+
+    /* LIGHT BORDERS */
+    --color-border-primary: rgb(220 220 224);
+    --color-border-secondary: rgb(233 233 236);
+    --color-border-secondary_alt: rgb(0 0 0 / 0.08);
+    --color-border-tertiary: rgb(240 240 242);
+    --color-border-brand: var(--color-brand-500);
+    --color-border-panel: rgb(229 229 232);
+
+    --color-focus-ring: var(--color-brand-500);
+
+    /* Utilities for the surfaces theme.css has no name for. */
+    --background-color-app: var(--color-bg-app);
+    --background-color-sunken: var(--color-bg-sunken);
+    --background-color-elevated: var(--color-bg-elevated);
+    --background-color-elevated_hover: var(--color-bg-elevated_hover);
+    --background-color-tooltip: var(--color-bg-tooltip);
+    --background-color-secondary_subtle: var(--color-bg-secondary_subtle);
+    --border-color-panel: var(--color-border-panel);
+}
+
+@layer base {
+    .dark-mode {
+        /* DARK SURFACES -- sampled from the Linear app. */
+        --color-bg-app: rgb(9 9 10);
+        --color-bg-primary: rgb(18 18 19);
+        --color-bg-primary_alt: rgb(18 18 19);
+        --color-bg-sunken: rgb(16 16 17);
+        --color-bg-secondary: rgb(26 26 27);
+        --color-bg-secondary_alt: rgb(22 22 23);
+        --color-bg-secondary_hover: rgb(35 35 37);
+        --color-bg-secondary_subtle: rgb(22 22 23);
+        --color-bg-primary_hover: rgb(26 26 27);
+        --color-bg-tertiary: rgb(28 28 29);
+        --color-bg-quaternary: rgb(35 35 37);
+        --color-bg-active: rgb(35 35 37);
+        --color-bg-elevated: rgb(28 28 30);
+        --color-bg-elevated_hover: rgb(41 41 44);
+        --color-bg-overlay: rgb(0 0 0 / 0.55);
+        --color-bg-tooltip: rgb(4 4 4);
+        --color-bg-primary-solid: rgb(247 248 248);
+        --color-bg-brand-primary: rgb(94 106 210 / 0.16);
+        --color-bg-brand-secondary: rgb(94 106 210 / 0.24);
+        --color-bg-brand-solid: var(--color-brand-600);
+        --color-bg-brand-solid_hover: var(--color-brand-500);
+        --color-bg-brand-primary_alt: rgb(94 106 210 / 0.16);
+
+        /* DARK TEXT */
+        --color-text-primary: rgb(247 248 248);
+        --color-text-secondary: rgb(227 228 230);
+        --color-text-secondary_hover: rgb(247 248 248);
+        --color-text-tertiary: rgb(143 143 145);
+        --color-text-tertiary_hover: rgb(227 228 230);
+        --color-text-quaternary: rgb(98 99 102);
+        --color-text-placeholder: rgb(98 99 102);
+        --color-text-brand-secondary: var(--color-brand-400);
+        --color-text-brand-secondary_hover: var(--color-brand-300);
+        --color-text-brand-tertiary: var(--color-brand-400);
+
+        /* DARK FOREGROUND (icons) */
+        --color-fg-primary: rgb(247 248 248);
+        --color-fg-secondary: rgb(227 228 230);
+        --color-fg-secondary_hover: rgb(247 248 248);
+        --color-fg-tertiary: rgb(143 143 145);
+        --color-fg-tertiary_hover: rgb(227 228 230);
+        --color-fg-quaternary: rgb(108 108 111);
+        --color-fg-quaternary_hover: rgb(143 143 145);
+        --color-fg-brand-primary: var(--color-brand-500);
+        --color-fg-brand-secondary: var(--color-brand-400);
+
+        /* DARK BORDERS */
+        --color-border-primary: rgb(44 44 47);
+        --color-border-secondary: rgb(32 33 35);
+        --color-border-secondary_alt: rgb(255 255 255 / 0.07);
+        --color-border-tertiary: rgb(26 26 28);
+        --color-border-brand: var(--color-brand-500);
+        --color-border-panel: rgb(26 27 29);
+
+        --color-focus-ring: var(--color-brand-500);
+    }
+
+    html {
+        color-scheme: light;
+    }
+
+    html.dark-mode {
+        color-scheme: dark;
+    }
+
+    body {
+        background-color: var(--color-bg-app);
+        font-size: var(--text-sm);
+        line-height: var(--text-sm--line-height);
+    }
+
+    ::selection {
+        background-color: rgb(94 106 210 / 0.35);
+    }
+
+    /* Thin, quiet scrollbars, the way the panels in Linear scroll. */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--color-bg-quaternary) transparent;
+    }
+}

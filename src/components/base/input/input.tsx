@@ -72,19 +72,19 @@ export const InputBase = ({
 
     const sizes = sortCx({
         sm: {
-            root: cx("px-3 py-2 text-sm", hasLeadingIcon && "pl-9", hasTrailingIcon && "pr-9"),
+            root: cx("h-7 px-2.5 text-sm", hasLeadingIcon && "pl-8", hasTrailingIcon && "pr-8"),
             iconLeading: "left-3 size-4 stroke-[2.25px]",
             iconTrailing: "right-3",
             shortcut: "pr-1.5",
         },
         md: {
-            root: cx("px-3 py-2 text-md", hasLeadingIcon && "pl-10", hasTrailingIcon && "pr-9"),
+            root: cx("h-8 px-3 text-sm", hasLeadingIcon && "pl-9", hasTrailingIcon && "pr-9"),
             iconLeading: "left-3 size-5",
             iconTrailing: "right-3",
             shortcut: "pr-2",
         },
         lg: {
-            root: cx("px-3.5 py-2.5 text-md", hasLeadingIcon && "pl-10.5", hasTrailingIcon && "pr-9.5"),
+            root: cx("h-9 px-3 text-md", hasLeadingIcon && "pl-10", hasTrailingIcon && "pr-9"),
             iconLeading: "left-3.5 size-5",
             iconTrailing: "right-3.5",
             shortcut: "pr-2.5",
@@ -97,9 +97,9 @@ export const InputBase = ({
             ref={groupRef}
             className={({ isFocusWithin, isDisabled, isInvalid }) =>
                 cx(
-                    "group/input relative flex w-full flex-row place-content-center place-items-center rounded-lg bg-primary shadow-xs ring-1 ring-primary transition-shadow duration-100 ease-linear ring-inset",
+                    "group/input relative flex w-full flex-row place-content-center place-items-center rounded-md bg-secondary_subtle ring-1 ring-primary transition-shadow duration-100 ease-linear ring-inset",
 
-                    isFocusWithin && !isDisabled && "ring-2 ring-brand",
+                    isFocusWithin && !isDisabled && "ring-brand",
 
                     // Disabled state styles
                     isDisabled && "cursor-not-allowed opacity-50",
@@ -192,7 +192,7 @@ export const InputBase = ({
             {shortcut && (
                 <div
                     className={cx(
-                        "pointer-events-none absolute inset-y-0.5 right-0.5 z-10 hidden items-center rounded-r-[inherit] bg-linear-to-r from-transparent to-bg-primary to-40% pl-8 md:flex",
+                        "pointer-events-none absolute inset-y-0.5 right-0.5 z-10 hidden items-center rounded-r-[inherit] bg-linear-to-r from-transparent to-bg-secondary_subtle to-40% pl-8 md:flex",
                         sizes[inputSize].shortcut,
                     )}
                 >
