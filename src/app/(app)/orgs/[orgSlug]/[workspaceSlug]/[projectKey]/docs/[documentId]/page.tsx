@@ -39,7 +39,7 @@ type Params = {
   documentId: string;
 };
 
-const DATE = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' });
+const DATE = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' });
 
 export default async function DocumentPage({ params }: { params: Promise<Params> }) {
   const { orgSlug, workspaceSlug, projectKey, documentId } = await params;

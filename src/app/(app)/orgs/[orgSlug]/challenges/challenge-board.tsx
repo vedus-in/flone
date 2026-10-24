@@ -69,8 +69,8 @@ function Card({ card, overlay = false }: { card: ChallengeCard; overlay?: boolea
   return (
     <div
       className={cx(
-        'no-native-drag flex flex-col gap-2.5 rounded-lg border bg-primary p-3 transition-colors',
-        overlay ? 'rotate-2 border-brand shadow-lg' : 'border-secondary shadow-xs hover:border-tertiary',
+        'no-native-drag flex flex-col gap-2 rounded-lg border bg-raised px-3 pt-2.5 pb-3 transition-colors',
+        overlay ? 'rotate-[1.5deg] border-primary shadow-xl' : 'border-secondary shadow-xs hover:border-primary',
       )}
     >
       <div className="flex items-start gap-1">
@@ -82,15 +82,15 @@ function Card({ card, overlay = false }: { card: ChallengeCard; overlay?: boolea
           onPointerDown={(event) => event.stopPropagation()}
           draggable={false}
           onDragStart={(event) => event.preventDefault()}
-          className="min-w-0 flex-1 text-sm leading-snug font-medium text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          className="line-clamp-2 min-w-0 flex-1 text-sm font-medium text-primary no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           {card.title}
         </Link>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-tertiary">
-        <PriorityIcon priority={card.priority} className="size-3" />
-        <span className="font-mono tabular-nums">{card.key}</span>
+        <PriorityIcon priority={card.priority} className="size-3.5" />
+        <span className="tabular-nums">{card.key}</span>
 
         {/* Which project this came from, and what that project calls the status
             right now. On a board mixing four projects both are load-bearing. */}
@@ -112,7 +112,7 @@ function Card({ card, overlay = false }: { card: ChallengeCard; overlay?: boolea
         ) : null}
       </div>
 
-      <div className="flex items-center gap-2 text-[0.6875rem] text-tertiary">
+      <div className="flex items-center gap-2 text-xs text-tertiary">
         <span className="min-w-0 truncate">{card.projectName}</span>
         {card.assigneeName ? <span className="ms-auto truncate">{card.assigneeName}</span> : null}
       </div>
@@ -197,7 +197,7 @@ export function ChallengeBoard({ data }: { data: ChallengeBoardData }) {
           });
         }}
       >
-        <KanbanBoard className="flex flex-col gap-3 pb-4 md:-mx-6 md:flex-row md:overflow-x-auto md:px-6">
+        <KanbanBoard className="flex flex-col gap-2 pb-2 md:min-h-72 md:flex-row md:overflow-x-auto">
           {CHALLENGE_COLUMNS.map((column) => {
             const cards = records[column.id] ?? [];
             const clearing = column.sets === null;
@@ -206,22 +206,18 @@ export function ChallengeBoard({ data }: { data: ChallengeBoardData }) {
                 key={column.id}
                 value={column.id}
                 className={cx(
-                  'flex w-full flex-col rounded-xl border bg-secondary/40 md:w-72 md:shrink-0',
-                  clearing ? 'border-dashed border-brand/40' : 'border-secondary',
+                  'flex w-full flex-col rounded-lg bg-sunken md:w-[336px] md:shrink-0',
+                  clearing && 'border border-dashed border-brand/40',
                 )}
               >
-                <header className="flex items-center gap-2 px-3 py-2.5">
+                <header className="flex h-11 shrink-0 items-center gap-2 ps-3.5 pe-2">
                   <span
                     aria-hidden="true"
                     className={cx('size-2 rounded-full', colorClass(column.color).dot)}
                   />
-                  <h2 className="text-xs font-semibold tracking-wide text-tertiary uppercase">
-                    {column.name}
-                  </h2>
+                  <h2 className="text-sm font-medium text-primary">{column.name}</h2>
                   {clearing ? null : (
-                    <span className="rounded-full bg-secondary px-1.5 text-xs text-tertiary tabular-nums">
-                      {cards.length}
-                    </span>
+                    <span className="text-sm text-tertiary tabular-nums">{cards.length}</span>
                   )}
                 </header>
 
@@ -273,7 +269,7 @@ export function ChallengeBoard({ data }: { data: ChallengeBoardData }) {
             const card = byId.get(String(value));
             if (!card) return null;
             return (
-              <div className="w-72">
+              <div className="w-[320px]">
                 <Card card={card} overlay />
               </div>
             );

@@ -111,7 +111,7 @@ export function PropertyPicker({
 
       <Combobox.Portal>
         <Combobox.Positioner side="bottom" align="start" sideOffset={4} className="z-50 outline-none">
-          <Combobox.Popup className="w-64 origin-[var(--transform-origin)] rounded-xl border border-secondary bg-primary shadow-2xl outline-none">
+          <Combobox.Popup className="w-64 origin-[var(--transform-origin)] rounded-lg border border-secondary_alt bg-elevated shadow-lg outline-none">
             <div className="flex items-center gap-2 border-b border-secondary px-3 py-2">
               <Combobox.Input
                 placeholder={placeholder}
@@ -144,7 +144,7 @@ export function PropertyPicker({
                 <Combobox.Item
                   key={option.id}
                   value={option}
-                  className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-primary outline-none data-[highlighted]:bg-secondary md:py-1.5"
+                  className="flex cursor-default select-none items-center gap-2.5 rounded-md px-2 py-2 text-sm text-secondary outline-none data-[highlighted]:bg-elevated_hover data-[highlighted]:text-primary md:py-1.5"
                 >
                   {option.icon}
                   <span className={cx('min-w-0 flex-1 truncate', option.labelClassName)}>

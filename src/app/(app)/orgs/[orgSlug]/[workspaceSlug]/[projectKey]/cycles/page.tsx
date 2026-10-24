@@ -22,7 +22,7 @@ import { PageBar } from '@/components/page-bar';
 
 type Params = { orgSlug: string; workspaceSlug: string; projectKey: string };
 
-const RANGE = new Intl.DateTimeFormat('en-GB', {
+const RANGE = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short',
   timeZone: 'UTC',

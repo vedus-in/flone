@@ -35,7 +35,7 @@ import { RowBoardMenu } from './row-board-menu';
 
 type Params = { orgSlug: string; workspaceSlug: string; projectKey: string };
 
-const RANGE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const RANGE = new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
 const GO_TO = [
   { key: 'issues', label: 'Issues', icon: 'M2.5 4h11M2.5 8h11M2.5 12h7' },

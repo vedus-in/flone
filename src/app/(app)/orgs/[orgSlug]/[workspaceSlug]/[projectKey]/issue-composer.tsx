@@ -28,7 +28,7 @@ import { IconPlus } from '@/components/icons';
 import { PAGE_BAR_ACTION } from '@/components/page-bar';
 import { FormError } from '@/components/ui';
 import { colorClass, PRIORITY_LABEL, PRIORITY_ORDER } from '@/lib/model';
-import { COMPOSE_EVENT, COMPOSE_HASH } from '@/lib/shell-events';
+import { COMPOSE_EVENT, COMPOSE_HASH, type ComposeDetail } from '@/lib/shell-events';
 import { cx } from '@/lib/utils/cx';
 
 import { createIssue } from './issue-actions';
@@ -140,13 +140,13 @@ export function IssueComposer({
     setError(null);
   }
 
-  const openComposer = useCallback(() => {
-    setStateId(defaultStateId);
+  const openComposer = useCallback((presetStateId?: string) => {
+    setStateId(presetStateId && states.some((s) => s.id === presetStateId) ? presetStateId : defaultStateId);
     setBoardId(defaultBoardId);
     setCycleId(defaultCycleId);
     setError(null);
     setOpen(true);
-  }, [defaultBoardId, defaultCycleId, defaultStateId]);
+  }, [defaultBoardId, defaultCycleId, defaultStateId, states]);
 
   // `C` anywhere in the app, and the sidebar's compose button, ask whichever
   // composer is on the page to open; arriving with `#new-issue` asks the same.
@@ -154,7 +154,7 @@ export function IssueComposer({
     function onCompose(event: Event) {
       if (event.defaultPrevented) return;
       event.preventDefault();
-      openComposer();
+      openComposer((event as CustomEvent<ComposeDetail | null>).detail?.stateId);
     }
     window.addEventListener(COMPOSE_EVENT, onCompose);
     if (window.location.hash === COMPOSE_HASH) {
@@ -195,7 +195,7 @@ export function IssueComposer({
     <>
       <button
         type="button"
-        onClick={openComposer}
+        onClick={() => openComposer()}
         title="New issue (C)"
         className={cx(PAGE_BAR_ACTION, className)}
       >

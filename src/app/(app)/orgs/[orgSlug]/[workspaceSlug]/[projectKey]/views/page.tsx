@@ -23,7 +23,7 @@ import { deleteSavedView } from '../actions';
 
 type Params = { orgSlug: string; workspaceSlug: string; projectKey: string };
 
-const DATE = new Intl.DateTimeFormat('en-GB', {
+const DATE = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeZone: 'UTC',
 });

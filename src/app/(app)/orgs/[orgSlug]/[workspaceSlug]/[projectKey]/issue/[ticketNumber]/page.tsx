@@ -46,12 +46,12 @@ type TicketParams = { orgSlug: string; workspaceSlug: string; projectKey: string
  * Formatted on the server with an explicit locale and timezone so the rendered
  * string is deterministic instead of depending on the machine that ran it.
  */
-const DATE_TIME = new Intl.DateTimeFormat('en-GB', {
+const DATE_TIME = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
   timeZone: 'UTC',
 });
-const DATE = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' });
+const DATE = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' });
 
 function formatDateTime(value: Date): string {
   return `${DATE_TIME.format(value)} UTC`;

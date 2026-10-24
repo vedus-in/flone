@@ -18,7 +18,8 @@
  *   app       the window behind everything; the sidebar sits on it.
  *   primary   the inset panel every page renders into.
  *   sunken    one step BELOW the panel: board columns.
- *   secondary row hover, cards, the comment box.
+ *   raised    a card sitting on a sunken column.
+ *   secondary row hover, side panels, the comment box.
  *   tertiary  quiet pills and icon buttons.
  *   quaternary / active  a selected row or tab.
  *   elevated  menus, popovers, dialogs and the command menu.
@@ -71,7 +72,8 @@
     --color-bg-app: rgb(244 244 245);
     --color-bg-primary: rgb(255 255 255);
     --color-bg-primary_alt: rgb(255 255 255);
-    --color-bg-sunken: rgb(247 247 248);
+    --color-bg-sunken: rgb(244 244 245);
+    --color-bg-raised: rgb(255 255 255);
     --color-bg-secondary: rgb(244 244 245);
     --color-bg-secondary_alt: rgb(250 250 250);
     --color-bg-secondary_hover: rgb(237 237 239);
@@ -122,9 +124,21 @@
 
     --color-focus-ring: var(--color-brand-500);
 
+    /* STATUS AND LABEL HUES -- the same in both themes except the two greys. */
+    --color-status-gray: rgb(154 156 162);
+    --color-status-todo: rgb(163 165 171);
+    --color-status-brand: rgb(94 106 210);
+    --color-status-success: rgb(39 166 68);
+    --color-status-warning: rgb(240 191 0);
+    --color-status-error: rgb(235 87 87);
+    --color-status-purple: rgb(187 135 252);
+    --color-status-pink: rgb(242 151 196);
+    --color-status-urgent: rgb(252 114 54);
+
     /* Utilities for the surfaces theme.css has no name for. */
     --background-color-app: var(--color-bg-app);
     --background-color-sunken: var(--color-bg-sunken);
+    --background-color-raised: var(--color-bg-raised);
     --background-color-elevated: var(--color-bg-elevated);
     --background-color-elevated_hover: var(--color-bg-elevated_hover);
     --background-color-tooltip: var(--color-bg-tooltip);
@@ -139,6 +153,7 @@
         --color-bg-primary: rgb(18 18 19);
         --color-bg-primary_alt: rgb(18 18 19);
         --color-bg-sunken: rgb(16 16 17);
+        --color-bg-raised: rgb(26 26 27);
         --color-bg-secondary: rgb(26 26 27);
         --color-bg-secondary_alt: rgb(22 22 23);
         --color-bg-secondary_hover: rgb(35 35 37);
@@ -190,6 +205,9 @@
         --color-border-panel: rgb(26 27 29);
 
         --color-focus-ring: var(--color-brand-500);
+
+        --color-status-gray: rgb(143 143 145);
+        --color-status-todo: rgb(226 226 226);
     }
 
     html {

@@ -33,7 +33,7 @@ import { DocIcon } from './doc-icon';
 
 type Params = { orgSlug: string; workspaceSlug: string; projectKey: string };
 
-const DATE = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' });
+const DATE = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' });
 
 export default async function DocsPage({ params }: { params: Promise<Params> }) {
   const { orgSlug, workspaceSlug, projectKey } = await params;

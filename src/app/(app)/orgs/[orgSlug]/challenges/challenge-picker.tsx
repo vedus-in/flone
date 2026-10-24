@@ -37,7 +37,7 @@ export type PickerTab = { id: string; label: string };
 const DEBOUNCE_MS = 250;
 
 const CONTROL =
-  'h-9 rounded-lg border border-secondary bg-primary px-2.5 text-sm text-primary transition-colors hover:border-tertiary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring';
+  'h-7 rounded-md border border-secondary bg-secondary_subtle px-2 text-xs text-primary transition-colors hover:border-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring';
 
 /**
  * The board's own project filter, up in the page header. It writes the same

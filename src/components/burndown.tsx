@@ -114,7 +114,7 @@ export function Burndown({
   );
 }
 
-const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const DAY = new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
 function formatDay(value: Date): string {
   return DAY.format(value);

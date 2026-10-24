@@ -74,12 +74,12 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
    * markup and the client's first render agree. Deriving them in the browser
    * would produce a hydration mismatch on any machine not on this locale.
    */
-  const dayFormat = new Intl.DateTimeFormat('en-GB', {
+  const dayFormat = new Intl.DateTimeFormat('en-US', {
     day: 'numeric',
     month: 'short',
     timeZone: 'UTC',
   });
-  const stampFormat = new Intl.DateTimeFormat('en-GB', {
+  const stampFormat = new Intl.DateTimeFormat('en-US', {
     day: 'numeric',
     month: 'short',
     hour: '2-digit',

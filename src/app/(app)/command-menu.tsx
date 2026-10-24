@@ -291,11 +291,9 @@ export function CommandMenu({ orgs, activeOrg, activeProject, isAdmin, composeHa
       if (pendingG !== null) {
         window.clearTimeout(pendingG);
         pendingG = null;
-        const command = shortcutTable.get(key);
-        if (command) {
-          event.preventDefault();
-          command.run();
-        }
+        // Whatever follows a `G` belongs to the sequence, matched or not.
+        event.preventDefault();
+        shortcutTable.get(key)?.run();
         return;
       }
 
@@ -321,9 +319,11 @@ export function CommandMenu({ orgs, activeOrg, activeProject, isAdmin, composeHa
       }
     }
 
-    window.addEventListener('keydown', onKeyDown);
+    // Capture phase, so a `G then K` reaches this before a list's own `K`
+    // handler does, and the `preventDefault` below tells that handler to skip.
+    window.addEventListener('keydown', onKeyDown, true);
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown, true);
       if (pendingG !== null) window.clearTimeout(pendingG);
     };
   }, [compose, helpOpen, open, openMenu, projects.length, shortcutTable]);
