@@ -14,9 +14,12 @@ export const COMPOSE_EVENT = 'flone:compose';
 /** Put on a project URL to open its composer on arrival. */
 export const COMPOSE_HASH = '#new-issue';
 
+/** What a compose request may preset. */
+export type ComposeDetail = { stateId?: string };
+
 /** Dispatches the compose event; true when a mounted composer took it. */
-export function requestCompose(): boolean {
-  const event = new Event(COMPOSE_EVENT, { cancelable: true });
+export function requestCompose(detail: ComposeDetail = {}): boolean {
+  const event = new CustomEvent<ComposeDetail>(COMPOSE_EVENT, { cancelable: true, detail });
   window.dispatchEvent(event);
   return event.defaultPrevented;
 }

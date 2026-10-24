@@ -29,7 +29,7 @@ import { RowBoardMenu } from '../../row-board-menu';
 
 type Params = { orgSlug: string; workspaceSlug: string; projectKey: string; cycleNumber: string };
 
-const RANGE = new Intl.DateTimeFormat('en-GB', {
+const RANGE = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short',
   timeZone: 'UTC',

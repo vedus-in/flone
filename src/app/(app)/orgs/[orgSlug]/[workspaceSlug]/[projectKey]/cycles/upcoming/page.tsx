@@ -21,7 +21,7 @@ import { RowBoardMenu } from '../../row-board-menu';
 
 type Params = { orgSlug: string; workspaceSlug: string; projectKey: string };
 
-const RANGE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const RANGE = new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
 export default async function UpcomingCyclesPage({ params }: { params: Promise<Params> }) {
   const { orgSlug, workspaceSlug, projectKey } = await params;

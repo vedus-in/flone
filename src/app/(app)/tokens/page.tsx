@@ -24,7 +24,7 @@ import { revokeSession } from './actions';
  * are revoked the same way.
  */
 
-const STAMP = new Intl.DateTimeFormat('en-GB', {
+const STAMP = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short',
   year: 'numeric',

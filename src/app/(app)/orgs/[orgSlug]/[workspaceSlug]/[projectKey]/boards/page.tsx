@@ -40,7 +40,7 @@ const STATUS_TONE: Record<BoardStatus, string> = {
   [BoardStatus.CANCELED]: 'text-tertiary',
 };
 
-const DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const DATE = new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
 export default async function BoardsPage({ params }: { params: Promise<Params> }) {
   const { orgSlug, workspaceSlug, projectKey } = await params;

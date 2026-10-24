@@ -146,7 +146,7 @@ export type IssueGroup = {
 /* markup it hydrates against agree on every machine.                           */
 /* -------------------------------------------------------------------------- */
 
-const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const DAY = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
 export function formatDay(value: Date): string {
   return DAY.format(value);

@@ -28,8 +28,8 @@ export const DEFAULT_STATES = [
   { name: 'Backlog', type: WorkflowStateType.BACKLOG, color: 'gray', position: 0 },
   { name: 'Todo', type: WorkflowStateType.UNSTARTED, color: 'gray', position: 1 },
   { name: 'In Progress', type: WorkflowStateType.STARTED, color: 'warning', position: 2 },
-  { name: 'In Review', type: WorkflowStateType.STARTED, color: 'brand', position: 3 },
-  { name: 'Done', type: WorkflowStateType.COMPLETED, color: 'success', position: 4 },
+  { name: 'In Review', type: WorkflowStateType.STARTED, color: 'success', position: 3 },
+  { name: 'Done', type: WorkflowStateType.COMPLETED, color: 'brand', position: 4 },
   { name: 'Canceled', type: WorkflowStateType.CANCELED, color: 'gray', position: 5 },
 ] as const;
 
@@ -196,13 +196,13 @@ export function isColorToken(value: string): value is ColorToken {
  * would be compiled away to nothing.
  */
 export const COLOR_CLASS: Record<ColorToken, { dot: string; text: string; chip: string }> = {
-  gray: { dot: 'bg-fg-quaternary', text: 'text-tertiary', chip: 'bg-secondary text-tertiary' },
-  brand: { dot: 'bg-brand-solid', text: 'text-brand-secondary', chip: 'bg-brand-primary text-brand-secondary' },
-  success: { dot: 'bg-success-solid', text: 'text-success-primary', chip: 'bg-success-primary text-success-primary' },
-  warning: { dot: 'bg-warning-solid', text: 'text-warning-primary', chip: 'bg-warning-primary text-warning-primary' },
-  error: { dot: 'bg-error-solid', text: 'text-error-primary', chip: 'bg-error-primary text-error-primary' },
-  purple: { dot: 'bg-utility-purple-500', text: 'text-utility-purple-700', chip: 'bg-utility-purple-50 text-utility-purple-700' },
-  pink: { dot: 'bg-utility-pink-500', text: 'text-utility-pink-700', chip: 'bg-utility-pink-50 text-utility-pink-700' },
+  gray: { dot: 'bg-status-gray', text: 'text-status-gray', chip: 'bg-secondary text-tertiary' },
+  brand: { dot: 'bg-status-brand', text: 'text-status-brand', chip: 'bg-brand-primary text-brand-secondary' },
+  success: { dot: 'bg-status-success', text: 'text-status-success', chip: 'bg-success-primary text-success-primary' },
+  warning: { dot: 'bg-status-warning', text: 'text-status-warning', chip: 'bg-warning-primary text-warning-primary' },
+  error: { dot: 'bg-status-error', text: 'text-status-error', chip: 'bg-error-primary text-error-primary' },
+  purple: { dot: 'bg-status-purple', text: 'text-status-purple', chip: 'bg-utility-purple-50 text-utility-purple-700' },
+  pink: { dot: 'bg-status-pink', text: 'text-status-pink', chip: 'bg-utility-pink-50 text-utility-pink-700' },
 };
 
 export function colorClass(token: string): { dot: string; text: string; chip: string } {

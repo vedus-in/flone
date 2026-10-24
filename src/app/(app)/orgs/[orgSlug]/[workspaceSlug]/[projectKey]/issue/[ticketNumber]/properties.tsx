@@ -295,10 +295,10 @@ const TRIGGER =
 
 // The Base UI popup surface and row, as the board's issue menu draws them.
 const POPUP =
-  'z-50 max-h-[min(24rem,70dvh)] min-w-56 origin-[var(--transform-origin)] overflow-y-auto overscroll-contain rounded-xl border border-secondary bg-primary p-1 shadow-2xl outline-none';
+  'z-50 max-h-[min(24rem,70dvh)] min-w-56 origin-[var(--transform-origin)] overflow-y-auto overscroll-contain rounded-lg border border-secondary_alt bg-elevated p-1 shadow-lg outline-none';
 
 const ITEM =
-  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-primary outline-none data-[highlighted]:bg-secondary data-[disabled]:opacity-50 md:py-1.5';
+  'flex cursor-default select-none items-center gap-2.5 rounded-md px-2 py-2 text-sm text-secondary outline-none data-[highlighted]:bg-elevated_hover data-[highlighted]:text-primary data-[disabled]:opacity-50 md:py-1.5';
 
 const I_CHECK = 'M3 8.5 6.5 12 13 4.5';
 const I_CYCLE = 'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 4.5v3.7l2.2 1.6';

@@ -73,11 +73,11 @@ type MenuData = {
 /* -------------------------------------------------------------------------- */
 
 const POPUP =
-  'z-50 max-h-[min(24rem,70dvh)] min-w-56 origin-[var(--transform-origin)] overflow-y-auto overscroll-contain rounded-xl border border-secondary bg-primary p-1 shadow-2xl outline-none';
+  'z-50 max-h-[min(24rem,70dvh)] min-w-56 origin-[var(--transform-origin)] overflow-y-auto overscroll-contain rounded-lg border border-secondary_alt bg-elevated p-1 shadow-lg outline-none';
 
 // `py-2` on touch: 44px-ish rows. `md:py-1.5` tightens it back up for a mouse.
 const ITEM =
-  'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-primary outline-none data-[highlighted]:bg-secondary data-[disabled]:opacity-50 md:py-1.5';
+  'flex cursor-default select-none items-center gap-2.5 rounded-md px-2 py-2 text-sm text-secondary outline-none data-[highlighted]:bg-elevated_hover data-[highlighted]:text-primary data-[disabled]:opacity-50 md:py-1.5';
 
 const DANGER =
   'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-error-primary outline-none data-[highlighted]:bg-error-primary md:py-1.5';
