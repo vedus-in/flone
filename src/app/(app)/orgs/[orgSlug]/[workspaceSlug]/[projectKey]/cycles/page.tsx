@@ -5,6 +5,9 @@ import { ensureCycles, listCycles } from '@/lib/cycles';
 import { prisma } from '@/lib/db';
 import { isDone } from '@/lib/model';
 import { cx } from '@/lib/utils/cx';
+import { projectCrumb } from '@/components/crumbs';
+import { IconCycle } from '@/components/icons';
+import { PageBar } from '@/components/page-bar';
 
 /**
  * Cycles: the current one and what is queued behind it.
@@ -34,16 +37,16 @@ export default async function CyclesPage({ params }: { params: Promise<Params> }
 
   if (!state) {
     return (
-      <div className="flex flex-col gap-4">
-        <h1 className="text-lg font-semibold text-primary">Cycles</h1>
-        <div className="rounded-xl border border-secondary px-4 py-10 text-center text-sm text-tertiary">
+      <>
+        <PageBar crumbs={[projectCrumb(ctx.org, ctx.project), { label: 'Cycles' }]} />
+        <p className="px-4.5 py-10 text-center text-sm text-tertiary">
           Cycles are switched off for {ctx.project.key}.{' '}
-          <Link href={projectSettingsPath(ctx.org, ctx.project)} className="underline">
+          <Link href={projectSettingsPath(ctx.org, ctx.project)} className="text-secondary underline">
             Turn them on in settings
           </Link>
           .
-        </div>
-      </div>
+        </p>
+      </>
     );
   }
 
@@ -54,40 +57,29 @@ export default async function CyclesPage({ params }: { params: Promise<Params> }
   );
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold text-primary">Cycles</h1>
-        <span className="text-sm text-tertiary">
-          {state.cadence.cycleWeeks}-week cycles
-        </span>
-      </header>
+    <>
+      <PageBar
+        crumbs={[projectCrumb(ctx.org, ctx.project), { label: 'Cycles' }]}
+        actions={
+          <span className="px-2 text-xs text-tertiary">{state.cadence.cycleWeeks}-week cycles</span>
+        }
+      />
 
-      <ul className="overflow-hidden rounded-xl border border-secondary">
+      <ul className="flex flex-col py-2">
         {cycles.map((cycle) => {
           const current = cycle.number === state.current;
           const tally = counts.get(cycle.id) ?? { total: 0, done: 0 };
+          const percent = tally.total === 0 ? 0 : Math.round((tally.done / tally.total) * 100);
           return (
-            <li key={cycle.id}>
+            <li key={cycle.id} className="px-2">
               <Link
                 href={cyclePath(ctx.org, ctx.project, cycle.number)}
-                className="flex items-center gap-3 border-b border-secondary px-3 py-2.5 no-underline last:border-b-0 hover:bg-secondary/60"
+                className="flex h-11 items-center gap-3 rounded-md px-2.5 text-sm no-underline transition-colors hover:bg-secondary"
               >
-                <span
-                  className={cx(
-                    'grid size-6 shrink-0 place-items-center rounded-full text-[0.6875rem] font-medium tabular-nums',
-                    current ? 'bg-brand-solid text-white' : 'bg-secondary text-tertiary',
-                  )}
-                >
-                  {cycle.number}
-                </span>
+                <IconCycle className={cx('size-4', current ? 'text-brand-secondary' : 'text-tertiary')} />
 
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[0.8125rem] font-medium text-primary">
-                    {cycle.name ?? `Cycle ${cycle.number}`}
-                  </span>
-                  <span className="block text-[0.6875rem] text-tertiary tabular-nums">
-                    {RANGE.format(cycle.startsAt)} – {RANGE.format(cycle.endsAt)}
-                  </span>
+                <span className="min-w-0 truncate font-medium text-primary">
+                  {cycle.name ?? `Cycle ${cycle.number}`}
                 </span>
 
                 {current ? (
@@ -96,15 +88,23 @@ export default async function CyclesPage({ params }: { params: Promise<Params> }
                   </span>
                 ) : null}
 
-                <span className="shrink-0 text-[0.6875rem] text-tertiary tabular-nums">
+                <span className="ms-auto shrink-0 text-xs text-tertiary tabular-nums">
+                  {RANGE.format(cycle.startsAt)} – {RANGE.format(cycle.endsAt)}
+                </span>
+
+                <span className="hidden w-16 shrink-0 text-right text-xs text-tertiary tabular-nums sm:block">
                   {tally.done}/{tally.total}
+                </span>
+
+                <span className="w-10 shrink-0 text-right text-xs text-tertiary tabular-nums">
+                  {percent}%
                 </span>
               </Link>
             </li>
           );
         })}
       </ul>
-    </div>
+    </>
   );
 }
 

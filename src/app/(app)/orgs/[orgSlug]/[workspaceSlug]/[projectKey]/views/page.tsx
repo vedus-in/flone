@@ -1,5 +1,8 @@
 import Link from 'next/link';
 
+import { projectCrumb } from '@/components/crumbs';
+import { IconPlus, IconViews } from '@/components/icons';
+import { PAGE_BAR_ACTION, PageBar } from '@/components/page-bar';
 import { issuesPath, loadPage, requireProjectByKey, visibleProject } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { ActionForm } from '../../../../../action-form';
@@ -52,31 +55,32 @@ export default async function ViewsPage({ params }: { params: Promise<Params> })
   const canManage = ctx.role === 'ADMIN' || ctx.role === 'OWNER';
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold text-primary">Views</h1>
-        <Link
-          href={base}
-          className="rounded-lg border border-secondary px-2.5 py-1.5 text-[0.8125rem] text-tertiary no-underline transition-colors hover:bg-secondary hover:text-primary"
-        >
-          Build a new one
-        </Link>
-      </header>
+    <>
+      <PageBar
+        crumbs={[projectCrumb(ctx.org, ctx.project), { label: 'Views' }]}
+        actions={
+          <Link href={base} className={PAGE_BAR_ACTION}>
+            <IconPlus className="size-3.5" />
+            New view
+          </Link>
+        }
+      />
 
       {views.length === 0 ? (
-        <div className="rounded-xl border border-secondary px-4 py-10 text-center text-sm text-tertiary">
+        <p className="px-4.5 py-10 text-center text-sm text-tertiary">
           No saved views yet. Filter the issues list, then choose &ldquo;Save as view&rdquo;.
-        </div>
+        </p>
       ) : (
-        <ul className="overflow-hidden rounded-xl border border-secondary">
+        <ul className="flex flex-col py-2">
           {views.map((view) => (
             <li
               key={view.id}
-              className="flex items-center gap-3 border-b border-secondary px-3 py-2 last:border-b-0 hover:bg-secondary/60"
+              className="group mx-2 flex h-11 items-center gap-3 rounded-md px-2.5 transition-colors hover:bg-secondary"
             >
+              <IconViews className="size-4 text-tertiary" />
               <Link
                 href={`${base}${view.query ? `?${view.query}` : ''}`}
-                className="min-w-0 flex-1 truncate text-[0.8125rem] text-primary no-underline hover:underline"
+                className="min-w-0 flex-1 truncate text-sm font-medium text-primary no-underline"
               >
                 {view.name}
               </Link>
@@ -87,7 +91,7 @@ export default async function ViewsPage({ params }: { params: Promise<Params> })
                 </span>
               ) : null}
 
-              <span className="hidden shrink-0 text-[0.6875rem] text-tertiary sm:block">
+              <span className="hidden shrink-0 text-xs text-tertiary sm:block">
                 {view.createdBy.name} &middot; {DATE.format(view.createdAt)}
               </span>
 
@@ -101,7 +105,7 @@ export default async function ViewsPage({ params }: { params: Promise<Params> })
                   <input type="hidden" name="viewId" value={view.id} />
                   <button
                     type="submit"
-                    className="rounded px-1.5 py-0.5 text-[0.6875rem] text-tertiary transition-colors hover:text-error-primary"
+                    className="rounded-md px-1.5 py-0.5 text-xs text-tertiary opacity-0 transition group-hover:opacity-100 hover:text-error-primary focus-visible:opacity-100"
                   >
                     Delete
                   </button>
@@ -111,6 +115,6 @@ export default async function ViewsPage({ params }: { params: Promise<Params> })
           ))}
         </ul>
       )}
-    </div>
+    </>
   );
 }

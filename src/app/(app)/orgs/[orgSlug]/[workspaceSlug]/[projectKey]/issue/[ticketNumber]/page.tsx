@@ -2,13 +2,14 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { projectCrumb } from '@/components/crumbs';
+import { PageBar } from '@/components/page-bar';
 import { Card, Separator } from '@/components/ui';
 import { StateIcon } from '@/components/issue-row';
 import {
   atLeast,
   issuesPath,
   loadPage,
-  projectPath,
   requireTicketInPath,
   ticketPath,
   visibleProject,
@@ -156,162 +157,161 @@ export default async function TicketPage({ params }: { params: Promise<TicketPar
   const doneChildren = children.filter((child) => isDone(child.state.type)).length;
 
   return (
-    <div className="flex flex-col gap-6">
-      <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm text-tertiary">
-        <Link href={projectPath(ctx.org, ctx.project)} className="no-underline hover:text-primary">
-          {ctx.project.name}
-        </Link>
-        <span aria-hidden="true" className="opacity-60">
-          /
-        </span>
-        <Link href={issuesPath(ctx.org, ctx.project)} className="no-underline hover:text-primary">
-          Issues
-        </Link>
-        <span aria-hidden="true" className="opacity-60">
-          /
-        </span>
-        <span aria-current="page" className="font-mono font-medium text-primary">
-          {label}
-        </span>
-      </nav>
+    <>
+      <PageBar
+        crumbHeading={false}
+        crumbs={[
+          projectCrumb(ctx.org, ctx.project),
+          { label: 'Issues', href: issuesPath(ctx.org, ctx.project) },
+          {
+            label: (
+              <>
+                <span className="text-tertiary">{label}</span> {ctx.ticket.title}
+              </>
+            ),
+          },
+        ]}
+      />
+      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-8 sm:px-8 lg:px-12">
 
-      {detail.parent ? (
-        <Link
-          href={ticketPath(ctx.org, ctx.project, detail.parent.number)}
-          className="flex w-fit items-center gap-1.5 rounded-lg border border-secondary px-2 py-1 text-[0.8125rem] text-tertiary no-underline transition-colors hover:bg-secondary hover:text-primary"
-        >
-          <span className="font-mono text-[0.6875rem]">
-            {ctx.project.key}-{detail.parent.number}
-          </span>
-          <span className="max-w-80 truncate">{detail.parent.title}</span>
-        </Link>
-      ) : null}
+        {detail.parent ? (
+          <Link
+            href={ticketPath(ctx.org, ctx.project, detail.parent.number)}
+            className="flex w-fit items-center gap-1.5 rounded-lg border border-secondary px-2 py-1 text-[0.8125rem] text-tertiary no-underline transition-colors hover:bg-secondary hover:text-primary"
+          >
+            <span className="font-mono text-[0.6875rem]">
+              {ctx.project.key}-{detail.parent.number}
+            </span>
+            <span className="max-w-80 truncate">{detail.parent.title}</span>
+          </Link>
+        ) : null}
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="flex min-w-0 flex-col gap-6">
-          <div className="flex flex-col gap-3">
-            <InlineTitle
-              ticketId={ctx.ticket.id}
-              title={ctx.ticket.title}
-              description={ctx.ticket.description ?? ''}
-            />
-            <InlineDescription
-              ticketId={ctx.ticket.id}
-              title={ctx.ticket.title}
-              description={ctx.ticket.description ?? ''}
-            />
-          </div>
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="flex min-w-0 flex-col gap-6">
+            <div className="flex flex-col gap-3">
+              <InlineTitle
+                ticketId={ctx.ticket.id}
+                title={ctx.ticket.title}
+                description={ctx.ticket.description ?? ''}
+              />
+              <InlineDescription
+                ticketId={ctx.ticket.id}
+                title={ctx.ticket.title}
+                description={ctx.ticket.description ?? ''}
+              />
+            </div>
 
-          {children.length > 0 ? (
+            {children.length > 0 ? (
+              <Card>
+                <Card.Header>
+                  <SectionHeading>Sub-issues</SectionHeading>
+                  <Card.Description>
+                    {doneChildren} of {children.length} done
+                  </Card.Description>
+                </Card.Header>
+                <Card.Content className="gap-0">
+                  {children.map((child) => (
+                    <Link
+                      key={child.id}
+                      href={ticketPath(ctx.org, ctx.project, child.number)}
+                      className="flex items-center gap-2 border-b border-secondary py-2 text-[0.8125rem] no-underline last:border-b-0 hover:bg-secondary/60"
+                    >
+                      <StateIcon type={child.state.type} color={child.state.color} />
+                      <span className="w-16 shrink-0 font-mono text-[0.6875rem] text-tertiary tabular-nums">
+                        {ctx.project.key}-{child.number}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-primary">{child.title}</span>
+                    </Link>
+                  ))}
+                </Card.Content>
+              </Card>
+            ) : null}
+
             <Card>
               <Card.Header>
-                <SectionHeading>Sub-issues</SectionHeading>
+                <SectionHeading>Activity</SectionHeading>
                 <Card.Description>
-                  {doneChildren} of {children.length} done
+                  {comments.length === 0
+                    ? 'Nothing here yet'
+                    : `${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}`}
                 </Card.Description>
               </Card.Header>
-              <Card.Content className="gap-0">
-                {children.map((child) => (
-                  <Link
-                    key={child.id}
-                    href={ticketPath(ctx.org, ctx.project, child.number)}
-                    className="flex items-center gap-2 border-b border-secondary py-2 text-[0.8125rem] no-underline last:border-b-0 hover:bg-secondary/60"
-                  >
-                    <StateIcon type={child.state.type} color={child.state.color} />
-                    <span className="w-16 shrink-0 font-mono text-[0.6875rem] text-tertiary tabular-nums">
-                      {ctx.project.key}-{child.number}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-primary">{child.title}</span>
-                  </Link>
-                ))}
+              <Card.Content className="gap-4">
+                <CommentThread
+                  ticketId={ctx.ticket.id}
+                  comments={comments}
+                  // Everyone a comment may @mention. The same list the assignee
+                  // picker uses -- the organization's members, and nobody else.
+                  members={workspace.members}
+                  currentUserName={ctx.user.name}
+                />
               </Card.Content>
             </Card>
-          ) : null}
+          </div>
 
-          <Card>
-            <Card.Header>
-              <SectionHeading>Activity</SectionHeading>
-              <Card.Description>
-                {comments.length === 0
-                  ? 'Nothing here yet'
-                  : `${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}`}
-              </Card.Description>
-            </Card.Header>
-            <Card.Content className="gap-4">
-              <CommentThread
-                ticketId={ctx.ticket.id}
-                comments={comments}
-                // Everyone a comment may @mention. The same list the assignee
-                // picker uses -- the organization's members, and nobody else.
-                members={workspace.members}
-                currentUserName={ctx.user.name}
-              />
-            </Card.Content>
-          </Card>
+          <aside className="flex min-w-0 flex-col gap-5">
+            <PropertiesPanel
+              ticketId={ctx.ticket.id}
+              stateId={detail.state.id}
+              priority={detail.priority}
+              assigneeId={detail.assignee?.id ?? null}
+              boardId={detail.board?.id ?? null}
+              cycleId={detail.cycle?.id ?? null}
+              labelIds={detail.labels.map((item) => item.id)}
+              states={sortStatesForBoard(workspace.states)}
+              members={workspace.members}
+              boards={workspace.boards}
+              cycles={workspace.cycles.map(({ id, number, name }) => ({ id, number, name }))}
+              labels={workspace.labels}
+            />
+
+            <Separator />
+
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 text-sm">
+              <Fact term="Reporter">{detail.createdBy.name}</Fact>
+              <Fact term="Due">
+                {detail.dueDate ? (
+                  <time dateTime={detail.dueDate.toISOString()}>{DATE.format(detail.dueDate)}</time>
+                ) : (
+                  <span className="text-tertiary">No due date</span>
+                )}
+              </Fact>
+              {detail.startedAt ? (
+                <Fact term="Started">
+                  <time dateTime={detail.startedAt.toISOString()}>
+                    {DATE.format(detail.startedAt)}
+                  </time>
+                </Fact>
+              ) : null}
+              {detail.completedAt ? (
+                <Fact term="Completed">
+                  <time dateTime={detail.completedAt.toISOString()}>
+                    {DATE.format(detail.completedAt)}
+                  </time>
+                </Fact>
+              ) : null}
+              <Fact term="Created">
+                <time dateTime={detail.createdAt.toISOString()}>
+                  {formatDateTime(detail.createdAt)}
+                </time>
+              </Fact>
+              <Fact term="Updated">
+                <time dateTime={detail.updatedAt.toISOString()}>
+                  {formatDateTime(detail.updatedAt)}
+                </time>
+              </Fact>
+            </dl>
+
+            {canDeleteTicket ? (
+              <Card>
+                <Card.Content>
+                  <TicketDeleteForm ticketId={ctx.ticket.id} />
+                </Card.Content>
+              </Card>
+            ) : null}
+          </aside>
         </div>
-
-        <aside className="flex min-w-0 flex-col gap-5">
-          <PropertiesPanel
-            ticketId={ctx.ticket.id}
-            stateId={detail.state.id}
-            priority={detail.priority}
-            assigneeId={detail.assignee?.id ?? null}
-            boardId={detail.board?.id ?? null}
-            cycleId={detail.cycle?.id ?? null}
-            labelIds={detail.labels.map((item) => item.id)}
-            states={sortStatesForBoard(workspace.states)}
-            members={workspace.members}
-            boards={workspace.boards}
-            cycles={workspace.cycles.map(({ id, number, name }) => ({ id, number, name }))}
-            labels={workspace.labels}
-          />
-
-          <Separator />
-
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 text-sm">
-            <Fact term="Reporter">{detail.createdBy.name}</Fact>
-            <Fact term="Due">
-              {detail.dueDate ? (
-                <time dateTime={detail.dueDate.toISOString()}>{DATE.format(detail.dueDate)}</time>
-              ) : (
-                <span className="text-tertiary">No due date</span>
-              )}
-            </Fact>
-            {detail.startedAt ? (
-              <Fact term="Started">
-                <time dateTime={detail.startedAt.toISOString()}>
-                  {DATE.format(detail.startedAt)}
-                </time>
-              </Fact>
-            ) : null}
-            {detail.completedAt ? (
-              <Fact term="Completed">
-                <time dateTime={detail.completedAt.toISOString()}>
-                  {DATE.format(detail.completedAt)}
-                </time>
-              </Fact>
-            ) : null}
-            <Fact term="Created">
-              <time dateTime={detail.createdAt.toISOString()}>
-                {formatDateTime(detail.createdAt)}
-              </time>
-            </Fact>
-            <Fact term="Updated">
-              <time dateTime={detail.updatedAt.toISOString()}>
-                {formatDateTime(detail.updatedAt)}
-              </time>
-            </Fact>
-          </dl>
-
-          {canDeleteTicket ? (
-            <Card>
-              <Card.Content>
-                <TicketDeleteForm ticketId={ctx.ticket.id} />
-              </Card.Content>
-            </Card>
-          ) : null}
-        </aside>
       </div>
-    </div>
+    </>
   );
 }

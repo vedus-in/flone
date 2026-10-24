@@ -1,37 +1,65 @@
 'use client';
 
 /**
- * The authenticated chrome: a persistent left sidebar carrying the whole
- * navigation tree, and a slim header carrying context.
+ * The authenticated chrome, laid out the way Linear's is: the sidebar sits on
+ * the window background, and every page renders into one inset, rounded panel
+ * beside it. Each page draws its own 44px header (`PageBar`), so the shell owns
+ * no header of its own.
  *
- * Structure follows the Linear model -- a workspace switcher at the top, then
- * collapsible sections, then the project tree with its boards nested beneath an
- * indent guide, so every board is one click away instead of three. The account
- * lives at the foot of the sidebar behind an avatar menu, not as a bare
- * "Sign out" in the header.
+ * Sidebar, top to bottom: the organization menu (which also holds the account
+ * and sign-out, as Linear's workspace menu does) with search and compose beside
+ * it; the organization-wide destinations; then one collapsible section per
+ * workspace, its projects as team-style rows whose destinations unfold beneath
+ * them.
  *
  * Rows are 28px and 13px type on purpose: this density is the whole point of the
  * look. The active row is a neutral wash rather than an accent tint -- colour in
  * the sidebar competes with colour on the board.
  *
- * A client module for exactly five reasons: the drawer needs open/closed state,
- * the sections and the project tree need expand/collapse state, the active item
- * is derived from `usePathname()`, and dragging a project onto another
- * workspace is a pointer gesture. Everything it renders is data the SERVER
- * resolved; it performs no data access, and the one role check here hides an
- * affordance rather than guarding anything -- `moveProjectToWorkspace` proves
- * membership and ADMIN again on its own. `@/lib/authz` is `server-only`, so
- * hrefs arrive already built.
+ * A client module because the drawer, the sections and the project tree hold
+ * open/closed state, the active item is derived from `usePathname()`, and
+ * dragging a project onto another workspace is a pointer gesture. Everything it
+ * renders is data the SERVER resolved; it performs no data access, and the one
+ * role check here hides an affordance rather than guarding anything --
+ * `moveProjectToWorkspace` proves membership and ADMIN again on its own.
+ * `@/lib/authz` is `server-only`, so hrefs arrive already built.
  */
 
 import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Button as AriaButton } from 'react-aria-components';
+
 import { Dropdown } from '@/components/base/dropdown/dropdown';
+import {
+  IconBell,
+  IconBoard,
+  IconCaret,
+  IconChevronDown,
+  IconCompose,
+  IconCycle,
+  IconDocument,
+  IconHome,
+  IconIssues,
+  IconPlus,
+  IconRepeat,
+  IconSearch,
+  IconTarget,
+  IconViews,
+  IconWorkspaces,
+} from '@/components/icons';
+import { ProjectGlyph } from '@/components/page-bar';
 import type { ActionResult } from '@/lib/result';
+import {
+  COMPOSE_HASH,
+  OPEN_COMMAND_MENU_EVENT,
+  OPEN_NAV_EVENT,
+  requestCompose,
+} from '@/lib/shell-events';
+import { cx } from '@/lib/utils/cx';
 
 import { signOut } from './actions';
+import { CommandMenu } from './command-menu';
 import { reorderWorkspaces } from './orgs/[orgSlug]/actions';
 import { moveProjectToWorkspace } from './orgs/[orgSlug]/[workspaceSlug]/[projectKey]/actions';
 
@@ -87,9 +115,7 @@ type AppShellProps = {
   children: ReactNode;
 };
 
-function cx(...values: Array<string | false | null | undefined>): string {
-  return values.filter(Boolean).join(' ');
-}
+type IconComponent = (props: { className?: string }) => ReactNode;
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -99,89 +125,44 @@ function initials(name: string): string {
   return (first + last).toLocaleUpperCase();
 }
 
-/* -------------------------------------------------------------------------- */
-/* Icons — inline SVG. These predate the design system and are sized to this    */
-/* subpath export, so it cannot be reached from the server tree; these are      */
-/* small enough to carry here.                                                  */
-/* -------------------------------------------------------------------------- */
-
-function Icon({ d, className }: { d: string; className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-      className={cx('size-4 shrink-0', className)}
-    >
-      <path
-        d={d}
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-const I_BOARD = 'M2.5 2.5h11v11h-11zM6 2.5v11M10 2.5v11';
-const I_CUBE = 'M8 1.75 13.75 5v6L8 14.25 2.25 11V5zM2.25 5 8 8.25 13.75 5M8 8.25v6';
-const I_PEOPLE =
-  'M6 7.5a2.25 2.25 0 1 0 0-4.5 2.25 2.25 0 0 0 0 4.5ZM1.75 13.5a4.25 4.25 0 0 1 8.5 0M11 3.2a2.25 2.25 0 0 1 0 4.4M12.2 9.6a4.25 4.25 0 0 1 2.05 3.9';
-const I_PLUS = 'M8 3.5v9M3.5 8h9';
-const I_MENU = 'M2.5 4.5h11M2.5 8h11M2.5 11.5h11';
-const I_CHEVRON = 'M6 3.5 10.5 8 6 12.5';
-const I_CARET = 'm4.5 6.5 3.5 3.5 3.5-3.5';
-const I_SWITCH = 'M4 6.5 8 3l4 3.5M12 9.5 8 13l-4-3.5';
-const I_HOME = 'M2.5 6.75 8 2.5l5.5 4.25v6.25h-11zM6.25 13v-4h3.5v4';
-const I_ISSUES = 'M2.5 4h11M2.5 8h11M2.5 12h7';
-const I_CYCLE = 'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 4.5v3.7l2.2 1.6';
-const I_VIEWS = 'M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8ZM8 9.75a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Z';
-const I_FOLDER =
-  'M2.25 5.25A1.5 1.5 0 0 1 3.75 3.75h2.19c.4 0 .78.16 1.06.44l.81.81h4.44a1.5 1.5 0 0 1 1.5 1.5v5.25a1.5 1.5 0 0 1-1.5 1.5h-8.5a1.5 1.5 0 0 1-1.5-1.5z';
-const I_TARGET =
-  'M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13ZM8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z';
-const I_BELL =
-  'M4 6.5a4 4 0 1 1 8 0c0 3 1.25 4 1.25 4H2.75S4 9.5 4 6.5ZM6.5 13a1.75 1.75 0 0 0 3 0';
-const I_REPEAT =
-  'M11.5 1 14 3.5 11.5 6M2 7.5V6a2.5 2.5 0 0 1 2.5-2.5H14M4.5 15 2 12.5 4.5 10M14 8.5V10a2.5 2.5 0 0 1-2.5 2.5H2';
-/** A page with a folded corner and two lines of writing on it. */
-const I_DOC = 'M4 1.5h5l3 3v10H4zM9 1.5v3h3M6 8h4M6 11h4';
+const ROW =
+  'flex h-7 items-center gap-2 rounded-md pe-2 text-sm font-medium no-underline transition-colors outline-focus-ring focus-visible:outline-2 focus-visible:-outline-offset-2';
+const ROW_IDLE = 'text-tertiary hover:bg-secondary hover:text-primary';
+const ROW_ACTIVE = 'bg-quaternary text-primary';
 
 /* -------------------------------------------------------------------------- */
 
 /**
  * A collapsible sidebar group. The heading is the toggle, so the whole label is
- * the hit target rather than a 12px chevron.
+ * the hit target rather than a 12px caret.
  */
-function Section({
+function SectionHeading({
   title,
+  open,
+  onToggle,
   action,
-  children,
 }: {
   title: string;
+  open: boolean;
+  onToggle: () => void;
   action?: ReactNode;
-  children: ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center gap-0.5 pe-1">
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center gap-1 rounded px-2 py-1 text-start text-xs font-medium text-tertiary transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
-        >
-          <span className="truncate">{title}</span>
-          <Icon
-            d={I_CARET}
-            className={cx('size-3 opacity-70 transition-transform', !open && '-rotate-90')}
-          />
-        </button>
-        {action}
-      </div>
-      {open ? <ul className="flex flex-col gap-px">{children}</ul> : null}
+    <div className="group/heading flex h-7 items-center gap-0.5 pe-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex min-w-0 items-center gap-0.5 rounded-md px-2 py-1 text-start text-xs font-medium text-tertiary transition-colors outline-focus-ring hover:text-primary focus-visible:outline-2"
+      >
+        <span className="truncate">{title}</span>
+        <IconCaret className={cx('size-3.5 opacity-80 transition-transform', !open && '-rotate-90')} />
+      </button>
+      {action ? (
+        <span className="ms-auto flex opacity-0 transition-opacity group-hover/heading:opacity-100 group-focus-within/heading:opacity-100">
+          {action}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -191,15 +172,16 @@ function NavRow({
   children,
   active,
   onNavigate,
-  icon,
-  indented = false,
+  icon: Icon,
+  depth = 0,
 }: {
   href: string;
   children: ReactNode;
   active: boolean;
   onNavigate: () => void;
-  icon?: string;
-  indented?: boolean;
+  icon?: IconComponent;
+  /** 0: top level; 1: under a project; 2: under a project destination. */
+  depth?: 0 | 1 | 2;
 }) {
   return (
     <Link
@@ -207,21 +189,20 @@ function NavRow({
       onClick={onNavigate}
       aria-current={active ? 'page' : undefined}
       className={cx(
-        'flex h-7 items-center gap-2 rounded-md pe-2 text-[0.8125rem] no-underline transition-colors',
-        'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
-        indented ? 'ps-1.5' : 'ps-2',
-        active
-          ? 'bg-secondary font-medium text-primary'
-          : 'text-tertiary hover:bg-secondary hover:text-primary',
+        ROW,
+        depth === 0 && 'ps-2',
+        depth === 1 && 'ps-6',
+        depth === 2 && 'ps-12',
+        active ? ROW_ACTIVE : ROW_IDLE,
       )}
     >
-      {icon ? <Icon d={icon} className="size-3.5 opacity-80" /> : null}
+      {Icon ? <Icon className="size-4" /> : null}
       <span className="min-w-0 truncate">{children}</span>
     </Link>
   );
 }
 
-/** The small square button that sits beside a section heading. */
+/** The small square button that appears beside a section heading on hover. */
 function SectionAction({
   href,
   label,
@@ -237,9 +218,9 @@ function SectionAction({
       onClick={onNavigate}
       aria-label={label}
       title={label}
-      className="grid size-5 shrink-0 place-items-center rounded text-tertiary transition-colors hover:bg-secondary hover:text-primary"
+      className="grid size-6 shrink-0 place-items-center rounded-md text-tertiary transition-colors hover:bg-secondary hover:text-primary"
     >
-      <Icon d={I_PLUS} className="size-3.5" />
+      <IconPlus className="size-3.5" />
     </Link>
   );
 }
@@ -250,6 +231,12 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const closeDrawer = () => setDrawerOpen(false);
+
+  useEffect(() => {
+    const open = () => setDrawerOpen(true);
+    window.addEventListener(OPEN_NAV_EVENT, open);
+    return () => window.removeEventListener(OPEN_NAV_EVENT, open);
+  }, []);
 
   // Active org is derived from the URL, never tracked in state, so back/forward
   // can never leave the highlight stale.
@@ -275,28 +262,34 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
     [activeWorkspace, pathname],
   );
 
-  // One set for both levels. Workspace and project ids are cuids from the same
-  // generator, so they cannot collide, and a single set means one toggle
-  // function rather than two that behave identically.
+  // Projects start collapsed and open as you visit them; workspace sections
+  // start open. Two sets, because the defaults are opposite.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Set<string>>(new Set());
 
-  // Auto-open the workspace and project you are inside, without collapsing
-  // anything you opened by hand.
+  // Auto-open the project you are inside, and its workspace, without
+  // collapsing anything you opened by hand.
   useEffect(() => {
-    const open = [activeWorkspace?.id, activeProject?.id].filter(
-      (id): id is string => typeof id === 'string',
-    );
-    if (open.length === 0) return;
-    setExpanded((current) => {
-      if (open.every((id) => current.has(id))) return current;
-      const next = new Set(current);
-      for (const id of open) next.add(id);
-      return next;
-    });
+    if (activeProject) {
+      setExpanded((current) => {
+        if (current.has(activeProject.id)) return current;
+        const next = new Set(current);
+        next.add(activeProject.id);
+        return next;
+      });
+    }
+    if (activeWorkspace) {
+      setCollapsedWorkspaces((current) => {
+        if (!current.has(activeWorkspace.id)) return current;
+        const next = new Set(current);
+        next.delete(activeWorkspace.id);
+        return next;
+      });
+    }
   }, [activeWorkspace, activeProject]);
 
-  function toggleProject(id: string) {
-    setExpanded((current) => {
+  function toggleIn(setter: typeof setExpanded, id: string) {
+    setter((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -305,9 +298,9 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
   }
 
   /*
-   * Two arrangements, one gesture, and every drop lands on a workspace row:
+   * Two arrangements, one gesture, and every drop lands on a workspace section:
    * a PROJECT dropped there is regrouped into that workspace, a WORKSPACE
-   * dropped there takes that row's place in the order and the rest shift
+   * dropped there takes that section's place in the order and the rest shift
    * around it.
    *
    * Native HTML5 drag rather than the board's dnd-kit setup -- these are rows
@@ -365,487 +358,87 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
     });
   }
 
-  const sidebar = (
-    <div className="flex h-full flex-col">
-      {/* Workspace switcher */}
-      <div className="p-2">
-        {orgs.length === 0 ? (
-          <Link
-            href="/orgs/new"
-            onClick={closeDrawer}
-            className="flex h-8 items-center gap-2 rounded-md px-2 text-[0.8125rem] text-tertiary no-underline hover:bg-secondary hover:text-primary"
+  /**
+   * Compose from the sidebar: a composer on the current page opens itself;
+   * anywhere else, the project you are in (or the first one) opens its own.
+   */
+  function compose() {
+    closeDrawer();
+    if (requestCompose()) return;
+    window.dispatchEvent(new CustomEvent(OPEN_COMMAND_MENU_EVENT, { detail: 'compose' }));
+  }
+
+  const orgMenu =
+    orgs.length === 0 ? (
+      <Link
+        href="/orgs/new"
+        onClick={closeDrawer}
+        className={cx(ROW, ROW_IDLE, 'ps-2')}
+      >
+        <IconPlus className="size-4" />
+        New organization
+      </Link>
+    ) : (
+      <Dropdown.Root>
+        <AriaButton className="flex h-7 min-w-0 items-center gap-2 rounded-md ps-1.5 pe-1.5 text-start transition-colors outline-focus-ring hover:bg-secondary focus-visible:outline-2">
+          <span
+            aria-hidden="true"
+            className="grid size-[18px] shrink-0 place-items-center rounded-[5px] bg-brand-solid text-[0.5625rem] font-semibold text-white"
           >
-            <Icon d={I_PLUS} className="size-3.5" />
-            New organization
-          </Link>
-        ) : (
-          <Dropdown.Root>
-              <AriaButton
-                className="flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-start transition-colors hover:bg-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
-              >
-                <span
-                  aria-hidden="true"
-                  className="grid size-5 shrink-0 place-items-center rounded bg-brand-solid text-[0.625rem] font-semibold text-white"
-                >
-                  {initials(activeOrg?.name ?? 'K')}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium text-primary">
-                  {activeOrg?.name ?? 'Flone'}
-                </span>
-                <Icon d={I_CARET} className="size-3 text-tertiary" />
-              </AriaButton>
-            <Dropdown.Popover placement="bottom start" className="min-w-64">
-              <Dropdown.Menu aria-label="Switch organization">
-                <Dropdown.Section>
-                  {orgs.map((org) => (
-                    <Dropdown.Item
-                      key={org.id}
-                      id={org.id}
-                      href={org.href}
-                      textValue={org.name}
-                    >
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate text-sm">{org.name}</span>
-                        <span className="truncate text-xs text-tertiary">
-                          {org.projectCount} {org.projectCount === 1 ? 'project' : 'projects'}
-                        </span>
-                      </span>
-                    </Dropdown.Item>
-                  ))}
-                </Dropdown.Section>
-                <Dropdown.Item id="new-org" href="/orgs/new" textValue="New organization">
-                  New organization
-                </Dropdown.Item>
-              </Dropdown.Menu>
-            </Dropdown.Popover>
-            </Dropdown.Root>
-        )}
-      </div>
-
-      {/* Sections */}
-      <nav aria-label="Navigation" className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 pb-2">
-        {activeOrg ? (
-          <>
-            {/* "Organization", not "Workspace": a Workspace is now a concrete
-                thing one level down, and one word cannot mean both on one
-                screen. */}
-            <Section title="Organization">
-              <li>
-                <NavRow
-                  href={activeOrg.href}
-                  active={pathname === activeOrg.href}
-                  onNavigate={closeDrawer}
-                  icon={I_FOLDER}
-                >
-                  Workspaces
-                </NavRow>
-              </li>
-              {/* Personal, not shared: this row leads to the viewer's OWN
-                  picks. It sits at organization level because a pick may name an
-                  issue in any project, so there is no one workspace it belongs
-                  under. */}
-              <li>
-                <NavRow
-                  href={activeOrg.challengesHref}
-                  active={pathname === activeOrg.challengesHref}
-                  onNavigate={closeDrawer}
-                  icon={I_TARGET}
-                >
-                  Daily Challenges
-                </NavRow>
-              </li>
-              {/* Shared, unlike the row above: everyone in the organization
-                  sees every scheduled reminder, because anyone may be the one
-                  receiving it. */}
-              <li>
-                <NavRow
-                  href={activeOrg.remindersHref}
-                  active={pathname === activeOrg.remindersHref}
-                  onNavigate={closeDrawer}
-                  icon={I_BELL}
-                >
-                  Reminders
-                </NavRow>
-              </li>
-              <li>
-                <NavRow
-                  href={activeOrg.settingsHref}
-                  active={pathname === activeOrg.settingsHref}
-                  onNavigate={closeDrawer}
-                  icon={I_PEOPLE}
-                >
-                  Members &amp; settings
-                </NavRow>
-              </li>
-            </Section>
-
-            {/* Workspaces are the grouping this whole section exists for, so
-                they get the section, and the projects nest one level in. A
-                workspace with no projects still renders: an empty group is the
-                only affordance telling you where to put the next one. */}
-            <Section
-              title="Workspaces"
-              action={
-                <SectionAction
-                  href={activeOrg.newWorkspaceHref}
-                  label="New workspace"
-                  onNavigate={closeDrawer}
-                />
-              }
-            >
-              {/* A refused move -- the row snaps back on its own when the
-                  layout revalidates, so this only has to say why. */}
-              {moveError ? (
-                <li className="px-2 py-1 text-[0.6875rem] text-error-primary">{moveError}</li>
-              ) : null}
-              {activeOrg.workspaces.length === 0 ? (
-                <li className="px-2 py-1 text-[0.8125rem] text-tertiary">No workspaces yet</li>
-              ) : (
-                activeOrg.workspaces.map((workspace) => {
-                  const wsOpen = expanded.has(workspace.id);
-                  const wsActive = pathname === workspace.href;
-                  // The whole group is the target, not just its header row, so
-                  // a drop anywhere in an expanded workspace lands. A drop that
-                  // would change nothing -- a project onto the workspace it is
-                  // already in, a workspace onto itself -- is refused here
-                  // rather than sent and answered with a no-op.
-                  const dragged =
-                    dragging?.kind === 'project'
-                      ? !workspace.projects.some((project) => project.id === dragging.id)
-                      : dragging?.id !== workspace.id;
-                  const canDrop = dragging !== null && dragged;
-                  return (
-                    <li
-                      key={workspace.id}
-                      // Without preventDefault the browser refuses the drop, so
-                      // this is also what makes a pointless target inert.
-                      onDragOver={(event) => {
-                        if (!canDrop) return;
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = 'move';
-                        setDropTarget(workspace.id);
-                      }}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        dropOnWorkspace(workspace);
-                      }}
-                      className={cx(
-                        'rounded-md',
-                        dropTarget === workspace.id &&
-                          'outline-2 outline-offset-[-2px] outline-focus-ring',
-                      )}
-                    >
-                      <div
-                        draggable={canArrange}
-                        onDragStart={(event) => {
-                          // Firefox will not start a drag with an empty payload.
-                          event.dataTransfer.setData('text/plain', workspace.name);
-                          event.dataTransfer.effectAllowed = 'move';
-                          setDragging({ kind: 'workspace', id: workspace.id });
-                        }}
-                        onDragEnd={() => {
-                          setDragging(null);
-                          setDropTarget(null);
-                        }}
-                        title={canArrange ? 'Drag onto another workspace to reorder' : undefined}
-                        className={cx(
-                          'flex h-7 items-center gap-0.5 rounded-md pe-2 ps-0.5 transition-colors',
-                          wsActive ? 'bg-secondary' : 'hover:bg-secondary',
-                          dragging?.kind === 'workspace' &&
-                            dragging.id === workspace.id &&
-                            'opacity-50',
-                        )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => toggleProject(workspace.id)}
-                          aria-expanded={wsOpen}
-                          aria-label={`${wsOpen ? 'Collapse' : 'Expand'} ${workspace.name}`}
-                          className="grid size-5 shrink-0 place-items-center rounded text-tertiary transition-colors hover:text-primary"
-                        >
-                          <Icon
-                            d={I_CHEVRON}
-                            className={cx('size-3 transition-transform', wsOpen && 'rotate-90')}
-                          />
-                        </button>
-                        <Link
-                          href={workspace.href}
-                          onClick={closeDrawer}
-                          aria-current={wsActive ? 'page' : undefined}
-                          // Otherwise the anchor drags its own URL instead of
-                          // the row.
-                          draggable={false}
-                          className={cx(
-                            'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
-                            wsActive ? 'font-medium text-primary' : 'text-tertiary',
-                          )}
-                        >
-                          <Icon d={I_FOLDER} className="size-3.5 opacity-80" />
-                          <span className="truncate">{workspace.name}</span>
-                        </Link>
-                        <span className="shrink-0 text-[0.625rem] text-tertiary tabular-nums">
-                          {workspace.projects.length}
-                        </span>
-                      </div>
-
-                      {wsOpen ? (
-                        <ul className="ms-3.5 flex flex-col gap-px border-s border-secondary ps-1">
-                          {workspace.projects.length === 0 ? (
-                            <li className="px-2 py-1 text-[0.8125rem] text-tertiary">
-                              No projects
-                            </li>
-                          ) : null}
-                          {workspace.projects.map((project) => {
-                  const isOpen = expanded.has(project.id);
-                  const isActive = pathname === project.href;
-                  return (
-                    <li key={project.id}>
-                      <div
-                        draggable={canArrange}
-                        onDragStart={(event) => {
-                          // Firefox will not start a drag with an empty payload.
-                          event.dataTransfer.setData('text/plain', project.key);
-                          event.dataTransfer.effectAllowed = 'move';
-                          setDragging({ kind: 'project', id: project.id });
-                        }}
-                        onDragEnd={() => {
-                          setDragging(null);
-                          setDropTarget(null);
-                        }}
-                        title={canArrange ? 'Drag onto a workspace to move it' : undefined}
-                        className={cx(
-                          'flex h-7 items-center gap-0.5 rounded-md pe-2 ps-0.5 transition-colors',
-                          isActive ? 'bg-secondary' : 'hover:bg-secondary',
-                          dragging?.kind === 'project' && dragging.id === project.id && 'opacity-50',
-                        )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => toggleProject(project.id)}
-                          aria-expanded={isOpen}
-                          aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${project.name}`}
-                          className="grid size-5 shrink-0 place-items-center rounded text-tertiary transition-colors hover:text-primary"
-                        >
-                          <Icon
-                            d={I_CHEVRON}
-                            className={cx('size-3 transition-transform', isOpen && 'rotate-90')}
-                          />
-                        </button>
-                        <Link
-                          href={project.href}
-                          onClick={closeDrawer}
-                          aria-current={isActive ? 'page' : undefined}
-                          // Otherwise the anchor drags its own URL instead of
-                          // the row.
-                          draggable={false}
-                          className={cx(
-                            'flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] no-underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
-                            isActive ? 'font-medium text-primary' : 'text-tertiary',
-                          )}
-                        >
-                          <Icon d={I_CUBE} className="size-3.5 opacity-80" />
-                          <span className="truncate">{project.name}</span>
-                        </Link>
-                        <span className="shrink-0 font-mono text-[0.625rem] text-tertiary">
-                          {project.key}
-                        </span>
-                      </div>
-
-                      {/* The rule is the indent guide: it ties a destination
-                          back to the project it hangs off, which plain padding
-                          does not.
-
-                          A fixed list, not the project's boards. Every project
-                          has exactly these five places, and a board list here
-                          meant a query on every render to build a tree nobody
-                          navigated by -- Boards is one of the five. */}
-                      {isOpen ? (
-                        <ul className="ms-3.5 flex flex-col gap-px border-s border-secondary ps-1">
-                          <li>
-                            <NavRow
-                              href={project.href}
-                              active={pathname === project.href}
-                              onNavigate={closeDrawer}
-                              icon={I_HOME}
-                              indented
-                            >
-                              Home
-                            </NavRow>
-                          </li>
-                          <li>
-                            <NavRow
-                              href={project.issuesHref}
-                              active={pathname === project.issuesHref}
-                              onNavigate={closeDrawer}
-                              icon={I_ISSUES}
-                              indented
-                            >
-                              Issues
-                            </NavRow>
-                          </li>
-                          <li>
-                            <NavRow
-                              href={project.cyclesHref}
-                              // The cycle DETAIL pages live under this path too,
-                              // so the row stays lit while you are inside one.
-                              active={
-                                pathname === project.cyclesHref ||
-                                pathname.startsWith(`${project.cyclesHref}/`)
-                              }
-                              onNavigate={closeDrawer}
-                              icon={I_CYCLE}
-                              indented
-                            >
-                              Cycles
-                            </NavRow>
-                          </li>
-                          <li>
-                            <ul className="ms-4 flex flex-col gap-px">
-                              <li>
-                                <NavRow
-                                  href={project.currentCycleHref}
-                                  active={pathname === project.currentCycleHref}
-                                  onNavigate={closeDrawer}
-                                  indented
-                                >
-                                  Current
-                                </NavRow>
-                              </li>
-                              <li>
-                                <NavRow
-                                  href={project.upcomingCyclesHref}
-                                  active={pathname === project.upcomingCyclesHref}
-                                  onNavigate={closeDrawer}
-                                  indented
-                                >
-                                  Upcoming
-                                </NavRow>
-                              </li>
-                            </ul>
-                          </li>
-                          <li>
-                            <NavRow
-                              href={project.boardsHref}
-                              active={
-                                pathname === project.boardsHref ||
-                                pathname.startsWith(`${project.boardsHref}/`)
-                              }
-                              onNavigate={closeDrawer}
-                              icon={I_BOARD}
-                              indented
-                            >
-                              Boards
-                            </NavRow>
-                          </li>
-                          {/* Recurring ticket templates. The href is appended
-                              here rather than carried on `ShellProject` like
-                              its siblings: `project.href` is already built and
-                              already encoded by the layout, and `recurring` is
-                              a fixed segment, so there is no slug for this
-                              module to construct -- which is the rule the note
-                              on `ShellProject` is actually protecting. */}
-                          <li>
-                            <NavRow
-                              href={`${project.href}/recurring`}
-                              active={pathname === `${project.href}/recurring`}
-                              onNavigate={closeDrawer}
-                              icon={I_REPEAT}
-                              indented
-                            >
-                              Recurring
-                            </NavRow>
-                          </li>
-                          <li>
-                            <NavRow
-                              href={project.viewsHref}
-                              active={pathname === project.viewsHref}
-                              onNavigate={closeDrawer}
-                              icon={I_VIEWS}
-                              indented
-                            >
-                              Views
-                            </NavRow>
-                          </li>
-                          {/* Documents. The href is appended here for the same
-                              reason `recurring` is: a fixed segment under an
-                              already-encoded project path, with no slug for this
-                              module to construct. The row stays lit inside a
-                              document, which is where most of the reading
-                              happens. */}
-                          <li>
-                            <NavRow
-                              href={`${project.href}/docs`}
-                              active={
-                                pathname === `${project.href}/docs` ||
-                                pathname.startsWith(`${project.href}/docs/`)
-                              }
-                              onNavigate={closeDrawer}
-                              icon={I_DOC}
-                              indented
-                            >
-                              Documents
-                            </NavRow>
-                          </li>
-                        </ul>
-                      ) : null}
-                    </li>
-                  );
-                          })}
-                          <li>
-                            <NavRow
-                              href={workspace.newProjectHref}
-                              active={false}
-                              onNavigate={closeDrawer}
-                              icon={I_PLUS}
-                              indented
-                            >
-                              New project
-                            </NavRow>
-                          </li>
-                        </ul>
-                      ) : null}
-                    </li>
-                  );
-                })
-              )}
-            </Section>
-          </>
-        ) : null}
-      </nav>
-
-      {/* Account */}
-      <div className="p-2">
-        <Dropdown.Root>
-          <AriaButton className="flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-start transition-colors hover:bg-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring">
-              <span
-                aria-hidden="true"
-                className="grid size-5 shrink-0 place-items-center rounded-full bg-secondary text-[0.625rem] font-medium text-primary"
-              >
-                {initials(userName)}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-tertiary">
-                {userName}
-              </span>
-              <Icon d={I_SWITCH} className="size-3 text-tertiary" />
-          </AriaButton>
-          <Dropdown.Popover placement="top start" className="min-w-56">
-            <Dropdown.Menu aria-label="Account">
+            {initials(activeOrg?.name ?? 'F')}
+          </span>
+          <span className="min-w-0 truncate text-sm font-semibold text-primary">
+            {activeOrg?.name ?? 'Flone'}
+          </span>
+          <IconChevronDown className="size-3 text-tertiary" />
+        </AriaButton>
+        <Dropdown.Popover placement="bottom start" className="w-64">
+          <Dropdown.Menu aria-label="Organization">
+            {activeOrg ? (
               <Dropdown.Section>
-                {/*
-                 * `id` is the React Aria COLLECTION KEY, not a DOM id, and it
-                 * must be unique across the whole menu. Two items sharing one
-                 * key makes the collection builder render the entire menu
-                 * twice -- every entry duplicated, not just the clashing pair.
-                 * This one is the identity header, hence `identity`; the link
-                 * to /account below is what deserves `account`.
-                 */}
-                <Dropdown.Item id="identity" textValue={userEmail} isDisabled>
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate text-sm">{userName}</span>
-                    <span className="truncate text-xs text-tertiary">{userEmail}</span>
-                  </span>
+                <Dropdown.Item id="settings" href={activeOrg.settingsHref} textValue="Settings" addon="G then S">
+                  Settings
+                </Dropdown.Item>
+                <Dropdown.Item id="workspaces" href={activeOrg.href} textValue="Workspaces">
+                  Workspaces
                 </Dropdown.Item>
               </Dropdown.Section>
+            ) : null}
+            <Dropdown.Separator />
+            <Dropdown.Section>
+              <Dropdown.SectionHeader className="px-3.5 pt-1.5 pb-1 text-xs font-medium text-tertiary">
+                Switch organization
+              </Dropdown.SectionHeader>
+              {orgs.map((org) => (
+                <Dropdown.Item key={org.id} id={`org-${org.id}`} href={org.href} textValue={org.name}>
+                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                    <span
+                      aria-hidden="true"
+                      className="grid size-4 shrink-0 place-items-center rounded-[4px] bg-brand-solid text-[0.5rem] font-semibold text-white"
+                    >
+                      {initials(org.name)}
+                    </span>
+                    <span className="truncate">{org.name}</span>
+                  </span>
+                </Dropdown.Item>
+              ))}
+              <Dropdown.Item id="new-org" href="/orgs/new" textValue="New organization">
+                New organization
+              </Dropdown.Item>
+            </Dropdown.Section>
+            <Dropdown.Separator />
+            <Dropdown.Section>
+              {/*
+               * `id` is the React Aria COLLECTION KEY, not a DOM id, and it
+               * must be unique across the whole menu. Two items sharing one key
+               * makes the collection builder render the entire menu twice.
+               */}
+              <Dropdown.Item id="identity" textValue={userEmail} isDisabled>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate text-sm text-primary">{userName}</span>
+                  <span className="truncate text-xs text-tertiary">{userEmail}</span>
+                </span>
+              </Dropdown.Item>
               <Dropdown.Item id="account" href="/account" textValue="Account">
                 Account
               </Dropdown.Item>
@@ -859,8 +452,7 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
               ) : null}
               <Dropdown.Item
                 id="sign-out"
-                textValue="Sign out"
-                className="text-error-primary"
+                textValue="Log out"
                 onAction={() => {
                   // Server Actions are invoked over POST however they are
                   // called, so sign-out keeps its POST-only semantics here: the
@@ -870,20 +462,224 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
                   void signOut(null, new FormData());
                 }}
               >
-                Sign out
+                Log out
               </Dropdown.Item>
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown.Root>
+            </Dropdown.Section>
+          </Dropdown.Menu>
+        </Dropdown.Popover>
+      </Dropdown.Root>
+    );
+
+  const sidebar = (
+    <div className="flex h-full flex-col">
+      {/* Same 44px as a page header, offset by the panel's 8px inset so the
+          two rows line up across the gap. */}
+      <div className="flex h-11 shrink-0 items-center gap-1 px-3 lg:mt-2">
+        <div className="flex min-w-0 flex-1">{orgMenu}</div>
+        <button
+          type="button"
+          onClick={() => {
+            closeDrawer();
+            window.dispatchEvent(new Event(OPEN_COMMAND_MENU_EVENT));
+          }}
+          aria-label="Search"
+          title="Search (⌘K)"
+          className="grid size-7 shrink-0 place-items-center rounded-md text-tertiary transition-colors hover:bg-secondary hover:text-primary"
+        >
+          <IconSearch className="size-[15px]" />
+        </button>
+        {activeOrg && activeOrg.projectCount > 0 ? (
+          <button
+            type="button"
+            onClick={compose}
+            aria-label="New issue"
+            title="New issue (C)"
+            className="grid size-7 shrink-0 place-items-center rounded-full border border-secondary_alt bg-tertiary text-secondary transition-colors hover:bg-quaternary hover:text-primary"
+          >
+            <IconCompose className="size-[15px]" />
+          </button>
+        ) : null}
       </div>
+
+      <nav aria-label="Navigation" className="flex flex-1 flex-col gap-5 overflow-y-auto px-3 pt-2 pb-3">
+        {activeOrg ? (
+          <>
+            <ul className="flex flex-col gap-px">
+              <li>
+                <NavRow
+                  href={activeOrg.href}
+                  active={pathname === activeOrg.href}
+                  onNavigate={closeDrawer}
+                  icon={IconWorkspaces}
+                >
+                  Workspaces
+                </NavRow>
+              </li>
+              {/* Personal, not shared: this row leads to the viewer's OWN
+                  picks. It sits at organization level because a pick may name
+                  an issue in any project. */}
+              <li>
+                <NavRow
+                  href={activeOrg.challengesHref}
+                  active={pathname === activeOrg.challengesHref}
+                  onNavigate={closeDrawer}
+                  icon={IconTarget}
+                >
+                  Daily Challenges
+                </NavRow>
+              </li>
+              {/* Shared, unlike the row above: everyone in the organization
+                  sees every scheduled reminder. */}
+              <li>
+                <NavRow
+                  href={activeOrg.remindersHref}
+                  active={pathname === activeOrg.remindersHref}
+                  onNavigate={closeDrawer}
+                  icon={IconBell}
+                >
+                  Reminders
+                </NavRow>
+              </li>
+            </ul>
+
+            {/* A refused move -- the row snaps back on its own when the layout
+                revalidates, so this only has to say why. */}
+            {moveError ? (
+              <p role="alert" className="px-2 text-xs text-error-primary">
+                {moveError}
+              </p>
+            ) : null}
+
+            {/* One section per workspace, projects as team-style rows. A
+                workspace with no projects still renders: an empty group is the
+                only affordance telling you where to put the next one. */}
+            {activeOrg.workspaces.map((workspace) => {
+              const wsOpen = !collapsedWorkspaces.has(workspace.id);
+              // The whole section is the target, not just its heading, so a
+              // drop anywhere in an expanded workspace lands. A drop that would
+              // change nothing -- a project onto the workspace it is already
+              // in, a workspace onto itself -- is refused here rather than sent
+              // and answered with a no-op.
+              const dragged =
+                dragging?.kind === 'project'
+                  ? !workspace.projects.some((project) => project.id === dragging.id)
+                  : dragging?.id !== workspace.id;
+              const canDrop = dragging !== null && dragged;
+              return (
+                <section
+                  key={workspace.id}
+                  aria-label={workspace.name}
+                  // Without preventDefault the browser refuses the drop, so
+                  // this is also what makes a pointless target inert.
+                  onDragOver={(event) => {
+                    if (!canDrop) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                    setDropTarget(workspace.id);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      setDropTarget((current) => (current === workspace.id ? null : current));
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    dropOnWorkspace(workspace);
+                  }}
+                  className={cx(
+                    'flex flex-col rounded-md',
+                    dropTarget === workspace.id && 'outline-2 outline-offset-2 outline-focus-ring',
+                  )}
+                >
+                  <div
+                    draggable={canArrange}
+                    onDragStart={(event) => {
+                      // Firefox will not start a drag with an empty payload.
+                      event.dataTransfer.setData('text/plain', workspace.name);
+                      event.dataTransfer.effectAllowed = 'move';
+                      setDragging({ kind: 'workspace', id: workspace.id });
+                    }}
+                    onDragEnd={() => {
+                      setDragging(null);
+                      setDropTarget(null);
+                    }}
+                    title={canArrange ? 'Drag onto another workspace to reorder' : undefined}
+                    className={cx(
+                      dragging?.kind === 'workspace' && dragging.id === workspace.id && 'opacity-50',
+                    )}
+                  >
+                    <SectionHeading
+                      title={workspace.name}
+                      open={wsOpen}
+                      onToggle={() => toggleIn(setCollapsedWorkspaces, workspace.id)}
+                      action={
+                        <SectionAction
+                          href={workspace.newProjectHref}
+                          label={`New project in ${workspace.name}`}
+                          onNavigate={closeDrawer}
+                        />
+                      }
+                    />
+                  </div>
+
+                  {wsOpen ? (
+                    <ul className="flex flex-col gap-px">
+                      {workspace.projects.length === 0 ? (
+                        <li>
+                          <NavRow
+                            href={workspace.newProjectHref}
+                            active={false}
+                            onNavigate={closeDrawer}
+                            icon={IconPlus}
+                          >
+                            New project
+                          </NavRow>
+                        </li>
+                      ) : null}
+                      {workspace.projects.map((project) => (
+                        <ProjectTree
+                          key={project.id}
+                          project={project}
+                          pathname={pathname}
+                          open={expanded.has(project.id)}
+                          onToggle={() => toggleIn(setExpanded, project.id)}
+                          onNavigate={closeDrawer}
+                          draggable={canArrange}
+                          dimmed={dragging?.kind === 'project' && dragging.id === project.id}
+                          onDragStart={() => setDragging({ kind: 'project', id: project.id })}
+                          onDragEnd={() => {
+                            setDragging(null);
+                            setDropTarget(null);
+                          }}
+                        />
+                      ))}
+                    </ul>
+                  ) : null}
+                </section>
+              );
+            })}
+
+            <ul className="flex flex-col gap-px">
+              <li>
+                <NavRow
+                  href={activeOrg.newWorkspaceHref}
+                  active={false}
+                  onNavigate={closeDrawer}
+                  icon={IconPlus}
+                >
+                  New workspace
+                </NavRow>
+              </li>
+            </ul>
+          </>
+        ) : null}
+      </nav>
     </div>
   );
 
   return (
-    <div className="flex min-h-dvh">
-      <aside className="hidden w-56 shrink-0 border-e border-secondary bg-primary lg:block">
-        <div className="sticky top-0 h-dvh">{sidebar}</div>
-      </aside>
+    <div className="flex h-dvh overflow-hidden bg-app">
+      <aside className="hidden w-[244px] shrink-0 lg:block">{sidebar}</aside>
 
       {drawerOpen ? (
         <div className="fixed inset-0 z-50 lg:hidden">
@@ -891,52 +687,159 @@ export function AppShell({ orgs, userEmail, userName, isAdmin, children }: AppSh
             type="button"
             aria-label="Close navigation"
             onClick={closeDrawer}
-            className="absolute inset-0 size-full bg-black/60"
+            className="absolute inset-0 size-full bg-overlay"
           />
-          <div className="absolute inset-y-0 start-0 w-64 border-e border-secondary bg-primary shadow-2xl">
+          <div className="absolute inset-y-0 start-0 w-[280px] border-e border-secondary bg-app shadow-2xl">
             {sidebar}
           </div>
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-secondary bg-primary/80 px-4 backdrop-blur-md sm:px-6">
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Open navigation"
-            className="-ms-1 grid size-8 place-items-center rounded-md text-tertiary transition-colors hover:bg-secondary hover:text-primary lg:hidden"
-          >
-            <Icon d={I_MENU} />
-          </button>
+      {/* The inset panel. It is the scroll container, so each page's sticky
+          `PageBar` pins to its top edge and the rounded corners clip the
+          content scrolling under it. */}
+      <main className="relative min-w-0 flex-1 overflow-y-auto bg-primary lg:my-2 lg:me-2 lg:rounded-lg lg:border lg:border-panel lg:shadow-xs">
+        {children}
+      </main>
 
-          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
-            {activeOrg ? (
-              <Link
-                href={activeOrg.href}
-                className="truncate text-tertiary no-underline hover:text-primary"
-              >
-                {activeOrg.name}
-              </Link>
-            ) : null}
-            {activeProject ? (
-              <>
-                <Icon d={I_CHEVRON} className="size-3 text-tertiary opacity-60" />
-                <Link
-                  href={activeProject.href}
-                  className="truncate font-medium text-primary no-underline hover:underline"
-                >
-                  {activeProject.name}
-                </Link>
-              </>
-            ) : null}
-          </nav>
-        </header>
-
-        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:py-8">
-          {children}
-        </main>
-      </div>
+      <CommandMenu
+        orgs={orgs}
+        activeOrg={activeOrg ?? null}
+        activeProject={activeProject}
+        isAdmin={isAdmin}
+        composeHash={COMPOSE_HASH}
+      />
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A project as a team row: clicking it unfolds its destinations, as a team row
+ * does in Linear, rather than navigating -- Home is the first destination.
+ */
+function ProjectTree({
+  project,
+  pathname,
+  open,
+  onToggle,
+  onNavigate,
+  draggable,
+  dimmed,
+  onDragStart,
+  onDragEnd,
+}: {
+  project: ShellProject;
+  pathname: string;
+  open: boolean;
+  onToggle: () => void;
+  onNavigate: () => void;
+  draggable: boolean;
+  dimmed: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
+  const under = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        draggable={draggable}
+        onDragStart={(event) => {
+          // Firefox will not start a drag with an empty payload.
+          event.dataTransfer.setData('text/plain', project.key);
+          event.dataTransfer.effectAllowed = 'move';
+          onDragStart();
+        }}
+        onDragEnd={onDragEnd}
+        title={draggable ? 'Drag onto a workspace to move it' : undefined}
+        className={cx(ROW, ROW_IDLE, 'w-full ps-2 text-start', dimmed && 'opacity-50')}
+      >
+        <span className="grid size-4 shrink-0 place-items-center">
+          <ProjectGlyph projectKey={project.key} />
+        </span>
+        <span className="min-w-0 truncate">{project.name}</span>
+        <IconCaret className={cx('size-3.5 shrink-0 opacity-80 transition-transform', !open && '-rotate-90')} />
+      </button>
+
+      {/* A fixed list, not the project's boards. Every project has exactly
+          these places, and a board list here meant a query on every render to
+          build a tree nobody navigated by -- Boards is one of them. The
+          `recurring` and `docs` hrefs are appended here: `project.href` is
+          already built and encoded by the layout and each is a fixed segment,
+          so there is no slug for this module to construct. */}
+      {open ? (
+        <ul className="flex flex-col gap-px pt-px">
+          <li>
+            <NavRow href={project.href} active={pathname === project.href} onNavigate={onNavigate} icon={IconHome} depth={1}>
+              Home
+            </NavRow>
+          </li>
+          <li>
+            <NavRow href={project.issuesHref} active={pathname === project.issuesHref} onNavigate={onNavigate} icon={IconIssues} depth={1}>
+              Issues
+            </NavRow>
+          </li>
+          <li>
+            <NavRow
+              href={project.cyclesHref}
+              // The cycle DETAIL pages live under this path too, so the row
+              // stays lit while you are inside one -- unless a sub-row is lit.
+              active={
+                pathname === project.cyclesHref ||
+                (under(project.cyclesHref) &&
+                  pathname !== project.currentCycleHref &&
+                  pathname !== project.upcomingCyclesHref)
+              }
+              onNavigate={onNavigate}
+              icon={IconCycle}
+              depth={1}
+            >
+              Cycles
+            </NavRow>
+          </li>
+          <li>
+            <NavRow href={project.currentCycleHref} active={pathname === project.currentCycleHref} onNavigate={onNavigate} depth={2}>
+              Current
+            </NavRow>
+          </li>
+          <li>
+            <NavRow href={project.upcomingCyclesHref} active={pathname === project.upcomingCyclesHref} onNavigate={onNavigate} depth={2}>
+              Upcoming
+            </NavRow>
+          </li>
+          <li>
+            <NavRow href={project.boardsHref} active={under(project.boardsHref)} onNavigate={onNavigate} icon={IconBoard} depth={1}>
+              Boards
+            </NavRow>
+          </li>
+          <li>
+            <NavRow
+              href={`${project.href}/recurring`}
+              active={pathname === `${project.href}/recurring`}
+              onNavigate={onNavigate}
+              icon={IconRepeat}
+              depth={1}
+            >
+              Recurring
+            </NavRow>
+          </li>
+          <li>
+            <NavRow href={project.viewsHref} active={pathname === project.viewsHref} onNavigate={onNavigate} icon={IconViews} depth={1}>
+              Views
+            </NavRow>
+          </li>
+          <li>
+            <NavRow href={`${project.href}/docs`} active={under(`${project.href}/docs`)} onNavigate={onNavigate} icon={IconDocument} depth={1}>
+              Documents
+            </NavRow>
+          </li>
+        </ul>
+      ) : null}
+    </li>
   );
 }

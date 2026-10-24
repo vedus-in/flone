@@ -1,8 +1,10 @@
 'use client';
 
-import type { PropsWithChildren } from 'react';
+import { useEffect, type PropsWithChildren } from 'react';
 import { useRouter } from 'next/navigation';
 import { RouterProvider } from 'react-aria-components';
+
+import { applyThemePreference, readThemePreference } from '@/lib/theme';
 
 /**
  * Teaches React Aria how to navigate.
@@ -25,6 +27,16 @@ declare module 'react-aria-components' {
 
 export function RouteProvider({ children }: PropsWithChildren) {
   const router = useRouter();
+
+  // A "system" theme follows the OS while the app is open, not just at load.
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const follow = () => {
+      if (readThemePreference() === 'system') applyThemePreference('system');
+    };
+    media.addEventListener('change', follow);
+    return () => media.removeEventListener('change', follow);
+  }, []);
 
   return <RouterProvider navigate={router.push}>{children}</RouterProvider>;
 }

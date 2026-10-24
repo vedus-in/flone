@@ -6,7 +6,8 @@ import { columnForStateType } from '@/lib/challenges';
 import { prisma } from '@/lib/db';
 import { formatDay } from '@/lib/issues';
 import { ISSUE_TABS, TAB_LABEL, TAB_STATE_TYPES, type IssueTab } from '@/lib/model';
-import { PageHeader } from '@/components/ui';
+import { IconTarget } from '@/components/icons';
+import { PageBar } from '@/components/page-bar';
 import { PriorityIcon } from '@/components/issue-row';
 
 import { AddChallengeButton } from './add-button';
@@ -222,82 +223,88 @@ export default async function ChallengesPage({
   const searching = filters.q.length > 0;
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Daily Challenges"
-        description="Issues you have picked to work on today, from any project in this organization. Moving a card changes the issue's real status everywhere; the Completed column only clears it from here."
+    <>
+      <PageBar
+        crumbs={[{ label: 'Daily Challenges', icon: <IconTarget className="size-3.5 text-tertiary" /> }]}
         actions={<BoardProjectFilter projects={projects} />}
       />
+      <div className="flex flex-col gap-6 px-4.5 py-4">
+        <p className="max-w-prose text-xs text-pretty text-tertiary">
+          Issues you have picked to work on today, from any project in this organization. Moving a
+          card changes the issue&apos;s real status everywhere; the Completed column only clears it
+          from here.
+        </p>
 
-      <ChallengeBoard data={board} />
+        <ChallengeBoard data={board} />
 
-      <section aria-labelledby="add-challenge-heading" className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="add-challenge-heading" className="text-sm font-medium text-primary">
-            {searching ? 'Matching issues' : 'Pick something up'}
-          </h2>
-          {searching ? null : (
-            <p className="text-xs text-tertiary">Highest priority first</p>
-          )}
-        </div>
+        <section aria-labelledby="add-challenge-heading" className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 id="add-challenge-heading" className="text-sm font-medium text-primary">
+              {searching ? 'Matching issues' : 'Pick something up'}
+            </h2>
+            {searching ? null : (
+              <p className="text-xs text-tertiary">Highest priority first</p>
+            )}
+          </div>
 
-        <ChallengePicker
-          basePath={challengesPath(ctx.org)}
-          value={filters}
-          projects={projects}
-          tabs={ISSUE_TABS.map((tab) => ({ id: tab, label: TAB_LABEL[tab] }))}
-        />
+          <ChallengePicker
+            basePath={challengesPath(ctx.org)}
+            value={filters}
+            projects={projects}
+            tabs={ISSUE_TABS.map((tab) => ({ id: tab, label: TAB_LABEL[tab] }))}
+          />
 
-        {/* The status filter defaults to Active, so an empty result is far more
-            often "it is filtered out" than "it does not exist". Saying "nothing
-            matched" there sends people looking for a typo that isn't. */}
-        {results.length === 0 ? (
-          <p className="text-sm text-tertiary">
-            {filters.tab === 'all'
-              ? searching
-                ? 'Nothing matched, or everything that did is already on your board.'
-                : 'Nothing left to pick up under these filters.'
-              : `No ${TAB_LABEL[filters.tab as IssueTab].toLowerCase()} issues${searching ? ' matched' : ' left to pick up'}. Set the status filter to All issues to look wider.`}
-          </p>
-        ) : (
-          <ul className="flex flex-col">
-            {results.map((ticket) => {
-              const project = {
-                id: ticket.project.id,
-                name: ticket.project.name,
-                key: ticket.project.key,
-                description: null,
-                workspaceSlug: ticket.project.workspace.slug,
-              };
-              const label = `${ticket.project.key}-${ticket.number}`;
-              return (
-                <li
-                  key={ticket.id}
-                  className="flex items-center gap-3 border-b border-secondary/60 py-2.5 text-sm"
-                >
-                  {/* The list is sorted by priority, so it has to be visible --
-                      otherwise the order looks arbitrary. */}
-                  <PriorityIcon priority={ticket.priority} className="size-3.5 shrink-0" />
-                  <span className="min-w-0 flex-1">
-                    <Link
-                      href={ticketPath(ctx.org, project, ticket.number)}
-                      className="truncate font-medium text-primary no-underline hover:underline"
-                    >
-                      {ticket.title}
-                    </Link>
-                    <span className="block truncate text-xs text-tertiary">
-                      <span className="font-mono">{label}</span> &middot; {ticket.project.name}{' '}
-                      &middot; {ticket.state.name}
-                      {ticket.assignee ? <> &middot; {ticket.assignee.name}</> : null}
+          {/* The status filter defaults to Active, so an empty result is far more
+              often "it is filtered out" than "it does not exist". Saying "nothing
+              matched" there sends people looking for a typo that isn't. */}
+          {results.length === 0 ? (
+            <p className="text-sm text-tertiary">
+              {filters.tab === 'all'
+                ? searching
+                  ? 'Nothing matched, or everything that did is already on your board.'
+                  : 'Nothing left to pick up under these filters.'
+                : `No ${TAB_LABEL[filters.tab as IssueTab].toLowerCase()} issues${searching ? ' matched' : ' left to pick up'}. Set the status filter to All issues to look wider.`}
+            </p>
+          ) : (
+            <ul className="flex flex-col">
+              {results.map((ticket) => {
+                const project = {
+                  id: ticket.project.id,
+                  name: ticket.project.name,
+                  key: ticket.project.key,
+                  description: null,
+                  workspaceSlug: ticket.project.workspace.slug,
+                };
+                const label = `${ticket.project.key}-${ticket.number}`;
+                return (
+                  <li
+                    key={ticket.id}
+                    className="flex items-center gap-3 border-b border-secondary/60 py-2.5 text-sm"
+                  >
+                    {/* The list is sorted by priority, so it has to be visible --
+                        otherwise the order looks arbitrary. */}
+                    <PriorityIcon priority={ticket.priority} className="size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1">
+                      <Link
+                        href={ticketPath(ctx.org, project, ticket.number)}
+                        className="truncate font-medium text-primary no-underline hover:underline"
+                      >
+                        {ticket.title}
+                      </Link>
+                      <span className="block truncate text-xs text-tertiary">
+                        <span className="font-mono">{label}</span> &middot; {ticket.project.name}{' '}
+                        &middot; {ticket.state.name}
+                        {ticket.assignee ? <> &middot; {ticket.assignee.name}</> : null}
+                      </span>
                     </span>
-                  </span>
-                  <AddChallengeButton ticketId={ticket.id} label={label} />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+                    <AddChallengeButton ticketId={ticket.id} label={label} />
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
     </div>
+    </>
   );
 }

@@ -1,7 +1,9 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { Burndown } from '@/components/burndown';
+import { projectCrumb } from '@/components/crumbs';
+import { IconCycle } from '@/components/icons';
+import { PageBar } from '@/components/page-bar';
 import { Assignee, IssueListView } from '@/components/issue-row';
 import { cyclesPath, loadPage, requireCycleInPath, requireProjectByKey, visibleProject } from '@/lib/authz';
 import { ensureCycles } from '@/lib/cycles';
@@ -81,53 +83,44 @@ export default async function CyclePage({
   const remaining = Math.max(0, progress.scope - progress.completed);
 
   return (
-    <div className="flex flex-col gap-4">
-      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[0.8125rem]">
-        <Link
-          href={cyclesPath(ctx.org, ctx.project)}
-          className="text-tertiary no-underline hover:text-primary"
-        >
-          Cycles
-        </Link>
-        <span aria-hidden="true" className="text-tertiary opacity-60">
-          /
-        </span>
-        <span aria-current="page" className="font-medium text-primary">
-          Cycle {ctx.cycle.number}
-        </span>
-      </nav>
-
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-primary">
-            {ctx.cycle.name ?? `Cycle ${ctx.cycle.number}`}
-          </h1>
-          {isCurrent ? (
-            <span className="rounded-full bg-brand-primary px-2 py-px text-[0.6875rem] font-medium text-brand-secondary">
-              Current
-            </span>
-          ) : null}
-          <span className="text-[0.8125rem] text-tertiary tabular-nums">
-            {RANGE.format(ctx.cycle.startsAt)} – {RANGE.format(ctx.cycle.endsAt)}
+    <>
+      <PageBar
+        crumbs={[
+          projectCrumb(ctx.org, ctx.project),
+          { label: 'Cycles', href: cyclesPath(ctx.org, ctx.project) },
+          {
+            label: ctx.cycle.name ?? `Cycle ${ctx.cycle.number}`,
+            icon: <IconCycle className="size-3.5 text-tertiary" />,
+          },
+        ]}
+        actions={
+          composeState ? (
+            <IssueComposer
+              projectId={ctx.project.id}
+              projectKey={ctx.project.key}
+              states={workspace.states}
+              boards={workspace.boards}
+              cycles={workspace.cycles}
+              labels={workspace.labels}
+              members={workspace.members}
+              defaultStateId={composeState.id}
+              defaultCycleId={ctx.cycle.id}
+            />
+          ) : null
+        }
+      >
+        {isCurrent ? (
+          <span className="rounded-full bg-brand-primary px-2 py-px text-[0.6875rem] font-medium text-brand-secondary">
+            Current
           </span>
-        </div>
-        {composeState ? (
-          <IssueComposer
-            projectId={ctx.project.id}
-            projectKey={ctx.project.key}
-            states={workspace.states}
-            boards={workspace.boards}
-            cycles={workspace.cycles}
-            labels={workspace.labels}
-            members={workspace.members}
-            defaultStateId={composeState.id}
-            defaultCycleId={ctx.cycle.id}
-          />
         ) : null}
-      </header>
+        <span className="hidden px-1 text-xs text-tertiary tabular-nums sm:block">
+          {RANGE.format(ctx.cycle.startsAt)} – {RANGE.format(ctx.cycle.endsAt)}
+        </span>
+      </PageBar>
 
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
-        <div className="min-w-0">
+      <div className="flex items-start">
+        <div className="min-w-0 flex-1 py-2">
           <IssueListView
             groups={loaded.groups}
             renderAction={(row) => (
@@ -142,10 +135,12 @@ export default async function CyclePage({
           />
         </div>
 
-        <aside className="flex flex-col gap-4 rounded-xl border border-secondary p-4">
-          <h2 className="text-[0.8125rem] font-medium text-primary">Progress</h2>
+        {/* Linear's cycle side panel: a raised card inset in the page, pinned
+            under the header while the list scrolls past it. */}
+        <aside className="sticky top-13 m-2 hidden w-[300px] shrink-0 flex-col gap-5 rounded-lg border border-secondary_alt bg-secondary p-4 lg:flex">
+          <h2 className="text-sm font-medium text-primary">Progress</h2>
 
-          <dl className="grid grid-cols-3 gap-2 text-center">
+          <dl className="grid grid-cols-3 gap-2">
             <Stat term="Scope" value={progress.scope} />
             <Stat term="Done" value={progress.completed} />
             <Stat term="Left" value={remaining} />
@@ -159,19 +154,17 @@ export default async function CyclePage({
             now={now}
           />
 
-          <div className="flex flex-col gap-2">
-            <h3 className="text-[0.6875rem] font-medium tracking-wide text-tertiary uppercase">
-              Assignees
-            </h3>
+          <div className="flex flex-col gap-1">
+            <h3 className="pb-1 text-xs font-medium text-tertiary">Assignees</h3>
             {assignees.length === 0 ? (
-              <p className="text-[0.8125rem] text-tertiary">Nobody assigned yet.</p>
+              <p className="text-sm text-tertiary">Nobody assigned yet.</p>
             ) : (
-              <ul className="flex flex-col gap-1.5">
+              <ul className="flex flex-col">
                 {assignees.map(({ assignee }) =>
                   assignee ? (
-                    <li key={assignee.id} className="flex items-center gap-2">
+                    <li key={assignee.id} className="flex h-8 items-center gap-2">
                       <Assignee name={assignee.name} />
-                      <span className="min-w-0 truncate text-[0.8125rem] text-tertiary">
+                      <span className="min-w-0 truncate text-sm text-secondary">
                         {assignee.name}
                       </span>
                     </li>
@@ -182,15 +175,15 @@ export default async function CyclePage({
           </div>
         </aside>
       </div>
-    </div>
+    </>
   );
 }
 
 function Stat({ term, value }: { term: string; value: number }) {
   return (
-    <div className="rounded-lg bg-secondary/60 py-2">
-      <dt className="text-[0.625rem] tracking-wide text-tertiary uppercase">{term}</dt>
-      <dd className="text-base font-semibold text-primary tabular-nums">{value}</dd>
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-xs text-tertiary">{term}</dt>
+      <dd className="text-lg font-medium text-primary tabular-nums">{value}</dd>
     </div>
   );
 }

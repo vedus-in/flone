@@ -10,6 +10,7 @@ import {
 } from '@/components/table';
 import { loadPage, requireUser } from '@/lib/authz';
 import { prisma } from '@/lib/db';
+import { PageBar, PageBody } from '@/components/page-bar';
 import { Badge, PageHeader, SubmitButton } from '@/components/ui';
 import { ActionForm } from '../action-form';
 import { McpSetup } from './mcp-setup';
@@ -51,73 +52,76 @@ export default async function TokensPage() {
   const endpoint = `${proto}://${host}/api/mcp`;
 
   return (
-    <div className="flex flex-col gap-8">
-      <PageHeader
-        title="MCP access"
-        description="Let an AI assistant read and update your boards through the Model Context Protocol."
-      />
+    <>
+      <PageBar crumbs={[{ label: 'MCP access' }]} />
+      <PageBody width="wide" className="flex flex-col gap-8">
+        <PageHeader
+          title="MCP access"
+          description="Let an AI assistant read and update your boards through the Model Context Protocol."
+        />
 
-      <McpSetup endpoint={endpoint} />
+        <McpSetup endpoint={endpoint} />
 
-      <section className="flex flex-col gap-4" aria-labelledby="sessions-heading">
-        <h2 id="sessions-heading" className="text-sm font-medium text-primary">
-          Active sessions and tokens
-        </h2>
+        <section className="flex flex-col gap-4" aria-labelledby="sessions-heading">
+          <h2 id="sessions-heading" className="text-sm font-medium text-primary">
+            Active sessions and tokens
+          </h2>
 
-        <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
-          <TableRoot size="sm" aria-label="Your active sessions and tokens">
-            <TableHeader>
-              <TableHead isRowHeader className="w-full">
-                Created
-              </TableHead>
-              <TableHead className="whitespace-nowrap">Expires</TableHead>
-              <TableHead className="whitespace-nowrap text-end">Revoke</TableHead>
-            </TableHeader>
+          <div className="w-full overflow-x-auto rounded-xl ring-1 ring-secondary">
+            <TableRoot size="sm" aria-label="Your active sessions and tokens">
+              <TableHeader>
+                <TableHead isRowHeader className="w-full">
+                  Created
+                </TableHead>
+                <TableHead className="whitespace-nowrap">Expires</TableHead>
+                <TableHead className="whitespace-nowrap text-end">Revoke</TableHead>
+              </TableHeader>
 
-            <TableBody>
-              {sessions.map((session) => {
-                const isCurrent = session.id === user.sessionId;
-                return (
-                  <TableRow key={session.id} id={session.id}>
-                    <TableCell>
-                      <div className="flex flex-wrap items-center gap-2 py-1">
-                        <span className="text-primary tabular-nums">
-                          {STAMP.format(session.createdAt)}
-                        </span>
-                        {isCurrent ? <Badge tone="accent">This browser</Badge> : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap align-middle text-tertiary tabular-nums">
-                      {STAMP.format(session.expiresAt)}
-                    </TableCell>
-                    <TableCell className="align-middle">
-                      <ActionForm
-                        action={revokeSession}
-                        className="flex justify-end"
-                        aria-label={`Revoke the session created ${STAMP.format(session.createdAt)}`}
-                      >
-                        <input type="hidden" name="sessionId" value={session.id} />
-                        <SubmitButton
-                          color="secondary-destructive"
-                          size="sm"
-                          pendingLabel="Revoking..."
+              <TableBody>
+                {sessions.map((session) => {
+                  const isCurrent = session.id === user.sessionId;
+                  return (
+                    <TableRow key={session.id} id={session.id}>
+                      <TableCell>
+                        <div className="flex flex-wrap items-center gap-2 py-1">
+                          <span className="text-primary tabular-nums">
+                            {STAMP.format(session.createdAt)}
+                          </span>
+                          {isCurrent ? <Badge tone="accent">This browser</Badge> : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap align-middle text-tertiary tabular-nums">
+                        {STAMP.format(session.expiresAt)}
+                      </TableCell>
+                      <TableCell className="align-middle">
+                        <ActionForm
+                          action={revokeSession}
+                          className="flex justify-end"
+                          aria-label={`Revoke the session created ${STAMP.format(session.createdAt)}`}
                         >
-                          {isCurrent ? 'Sign out' : 'Revoke'}
-                        </SubmitButton>
-                      </ActionForm>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </TableRoot>
-        </div>
+                          <input type="hidden" name="sessionId" value={session.id} />
+                          <SubmitButton
+                            color="secondary-destructive"
+                            size="sm"
+                            pendingLabel="Revoking..."
+                          >
+                            {isCurrent ? 'Sign out' : 'Revoke'}
+                          </SubmitButton>
+                        </ActionForm>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </TableRoot>
+          </div>
 
-        <p className="max-w-prose text-xs text-tertiary">
-          A token is indistinguishable from a browser sign-in here, so revoke anything you do not
-          recognise — the newest row is the one you just created.
-        </p>
-      </section>
-    </div>
+          <p className="max-w-prose text-xs text-tertiary">
+            A token is indistinguishable from a browser sign-in here, so revoke anything you do not
+            recognise — the newest row is the one you just created.
+          </p>
+        </section>
+      </PageBody>
+    </>
   );
 }

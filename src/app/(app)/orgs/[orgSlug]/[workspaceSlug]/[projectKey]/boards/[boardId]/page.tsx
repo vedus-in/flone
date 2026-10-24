@@ -1,6 +1,8 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { projectCrumb } from '@/components/crumbs';
+import { IconBoard } from '@/components/icons';
+import { PageBar, PageToolbar } from '@/components/page-bar';
 import { boardsPath, loadPage, requireBoardInPath, ticketPath, visibleProject } from '@/lib/authz';
 import { prisma } from '@/lib/db';
 import { sortStatesForBoard } from '@/lib/model';
@@ -121,30 +123,35 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
   const composeState = defaultComposeState(workspace.states);
 
   return (
-    <div className="flex flex-col gap-4">
-      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[0.8125rem]">
-        <Link
-          href={boardsPath(ctx.org, ctx.project)}
-          className="text-tertiary no-underline hover:text-primary"
-        >
-          Boards
-        </Link>
-        <span aria-hidden="true" className="text-tertiary opacity-60">
-          /
-        </span>
-        <span aria-current="page" className="font-medium text-primary">
-          {ctx.board.name}
-        </span>
-      </nav>
+    <>
+      <PageBar
+        crumbs={[
+          projectCrumb(ctx.org, ctx.project),
+          { label: 'Boards', href: boardsPath(ctx.org, ctx.project) },
+          { label: ctx.board.name, icon: <IconBoard className="size-3.5 text-tertiary" /> },
+        ]}
+        actions={
+          composeState ? (
+            <IssueComposer
+              projectId={ctx.project.id}
+              projectKey={ctx.project.key}
+              states={workspace.states}
+              boards={workspace.boards}
+              cycles={workspace.cycles}
+              labels={workspace.labels}
+              members={workspace.members}
+              defaultStateId={composeState.id}
+              defaultBoardId={ctx.board.id}
+            />
+          ) : null
+        }
+      />
 
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-primary">{ctx.board.name}</h1>
-          <span className="text-sm text-tertiary tabular-nums">
-            {issues.length} {issues.length === 1 ? 'issue' : 'issues'}
-          </span>
-        </div>
-      </header>
+      <PageToolbar>
+        <span className="px-2 text-xs text-tertiary tabular-nums">
+          {issues.length} {issues.length === 1 ? 'issue' : 'issues'}
+        </span>
+      </PageToolbar>
 
       <BoardView
         projectKey={ctx.project.key}
@@ -154,24 +161,7 @@ export default async function BoardPage({ params }: { params: Promise<BoardParam
         labels={workspace.labels}
         cycles={workspace.cycles}
         boardId={ctx.board.id}
-        compose={
-          composeState ? (
-            <div className="flex">
-              <IssueComposer
-                projectId={ctx.project.id}
-                projectKey={ctx.project.key}
-                states={workspace.states}
-                boards={workspace.boards}
-                cycles={workspace.cycles}
-                labels={workspace.labels}
-                members={workspace.members}
-                defaultStateId={composeState.id}
-                defaultBoardId={ctx.board.id}
-              />
-            </div>
-          ) : null
-        }
       />
-    </div>
+    </>
   );
 }
