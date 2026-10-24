@@ -9,7 +9,7 @@ import {
   type RefObject,
 } from 'react';
 
-import { Button } from '@/components/base/buttons/button';
+import { IconAttach } from '@/components/icons';
 import { FormError, Textarea } from '@/components/ui';
 // The SAME rules the upload route validates with. Not a copy -- see that module's
 // header for why it is one of the two lib modules without `server-only`.
@@ -320,20 +320,20 @@ export function AttachImageButton({
           event.target.value = '';
         }}
       />
-      {/* The `title` sits on a wrapper because Untitled UI's `Button` takes a
-          closed prop list and forwards no `title`. It says what is allowed before
-          anyone finds out by being refused; the message from a refusal is still
-          the real answer. */}
-      <span title="PNG, JPEG, GIF or WebP, up to 10 MB">
-        <Button
-          size="sm"
-          color="link-gray"
-          isDisabled={attach.uploading}
-          onPress={() => inputRef.current?.click()}
-        >
-          {attach.uploading ? 'Uploading...' : label}
-        </Button>
-      </span>
+      {/* A paperclip, as Linear draws it; the title says what is allowed before
+          anyone finds out by being refused. While a file is going up the
+          button says so in words, so the wait is not a mystery. */}
+      <button
+        type="button"
+        disabled={attach.uploading}
+        onClick={() => inputRef.current?.click()}
+        aria-label={label}
+        title={`${label} — PNG, JPEG, GIF or WebP, up to 10 MB`}
+        className="flex h-7 min-w-7 items-center justify-center gap-1.5 rounded-md px-1.5 text-xs text-tertiary transition-colors outline-focus-ring hover:bg-tertiary hover:text-primary focus-visible:outline-2 disabled:opacity-60"
+      >
+        <IconAttach className="size-4" />
+        {attach.uploading ? <span>Uploading...</span> : null}
+      </button>
     </>
   );
 }
